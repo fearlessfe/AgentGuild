@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
@@ -60,8 +61,6 @@ type HeartbeatInput struct {
 	RequestID       string `json:"request_id" jsonschema:"unique mutation request id"`
 	ExecutionID     string `json:"execution_id" jsonschema:"execution identifier"`
 	LeaseGeneration int64  `json:"lease_generation" jsonschema:"current lease generation"`
-	Stage           string `json:"stage,omitempty" jsonschema:"current execution stage"`
-	Progress        int    `json:"progress,omitempty" jsonschema:"integer from 0 through 100"`
 }
 
 // GetExecutionInput 是 execution_get 工具的输入。
@@ -192,5 +191,31 @@ func registerTools(server *mcp.Server, svc applicationService, principal auth.Pr
 			return mapDomainError(err, principal), nil, nil
 		}
 		return successResult(result), nil, nil
+	})
+	wrapSchemaValidationErrors(server)
+}
+
+// wrapSchemaValidationErrors 为 mcp.Server 增加接收中间件，把 SDK 在参数 schema 校验阶段
+// 产生的原始文本错误转换为稳定的 INVALID_ARGUMENT JSON 错误内容。
+func wrapSchemaValidationErrors(server *mcp.Server) {
+	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			if method != "tools/call" || err != nil {
+				return res, err
+			}
+			result, ok := res.(*mcp.CallToolResult)
+			if !ok || result == nil || !result.IsError || len(result.Content) == 0 {
+				return res, err
+			}
+			text, ok := result.Content[0].(*mcp.TextContent)
+			if !ok || !strings.HasPrefix(text.Text, `validating "arguments":`) {
+				return res, err
+			}
+			return errorResult(MCPError{
+				Code:    "INVALID_ARGUMENT",
+				Message: text.Text,
+			}), nil
+		}
 	})
 }

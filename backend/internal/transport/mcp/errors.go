@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"agentguild.dev/agentguild/backend/internal/auth"
@@ -12,9 +14,9 @@ import (
 
 // MCPError 是工具错误响应中暴露的稳定结构；仅包含 code、message 与可选的 retry_after_seconds。
 type MCPError struct {
-	Code             string `json:"code"`
-	Message          string `json:"message"`
-	RetryAfterSeconds int   `json:"retry_after_seconds,omitempty"`
+	Code              string `json:"code"`
+	Message           string `json:"message"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
 }
 
 // isAdministrator 判断主体是否可查看真实权限/存在性差异。
@@ -57,6 +59,10 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 		errContent = MCPError{Code: "DEADLINE_EXCEEDED", Message: err.Error()}
 	case "rate_limited":
 		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error()}
+	default:
+		if errors.Is(err, context.DeadlineExceeded) {
+			errContent = MCPError{Code: "TEMPORARILY_UNAVAILABLE", Message: "request timed out"}
+		}
 	}
 	return errorResult(errContent)
 }

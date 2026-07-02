@@ -302,17 +302,27 @@ func TestOversizedRequestBodyIsRejected(t *testing.T) {
 }
 
 func TestMutationToolsRequireRequestID(t *testing.T) {
-	schema := toolSchema(t, newMCPServer(t), "task_claim")
-	required, ok := schema["required"].([]any)
-	require.True(t, ok, "schema required should be an array")
-	var found bool
-	for _, r := range required {
-		if r == "request_id" {
-			found = true
-			break
-		}
+	for _, name := range []string{
+		"task_publish",
+		"task_claim",
+		"task_cancel",
+		"execution_start",
+		"execution_heartbeat",
+	} {
+		t.Run(name, func(t *testing.T) {
+			schema := toolSchema(t, newMCPServer(t), name)
+			required, ok := schema["required"].([]any)
+			require.True(t, ok, "schema required should be an array")
+			var found bool
+			for _, r := range required {
+				if r == "request_id" {
+					found = true
+					break
+				}
+			}
+			require.True(t, found, "%s schema should require request_id", name)
+		})
 	}
-	require.True(t, found, "task_claim schema should require request_id")
 }
 
 func TestHeartbeatSchemaHasNoLeaseToken(t *testing.T) {
@@ -320,4 +330,87 @@ func TestHeartbeatSchemaHasNoLeaseToken(t *testing.T) {
 	properties, ok := schema["properties"].(map[string]any)
 	require.True(t, ok, "schema properties should be a map")
 	require.NotContains(t, properties, "lease_token", "execution_heartbeat schema should not expose lease_token")
+	require.NotContains(t, properties, "stage", "execution_heartbeat schema should not expose stage")
+	require.NotContains(t, properties, "progress", "execution_heartbeat schema should not expose progress")
+}
+
+func TestSchemaValidationReturnsInvalidArgument(t *testing.T) {
+	server := newMCPServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "execution_heartbeat",
+		Arguments: map[string]any{"execution_id": "exe-1", "lease_generation": 1},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	require.Len(t, res.Content, 1)
+	text, ok := res.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+
+	var mcpErr MCPError
+	require.NoError(t, json.Unmarshal([]byte(text.Text), &mcpErr))
+	require.Equal(t, "INVALID_ARGUMENT", mcpErr.Code)
+	require.Contains(t, mcpErr.Message, "request_id")
+}
+
+func TestDeadlineExceededReturnsTemporarilyUnavailable(t *testing.T) {
+	app := &fakeApplication{heartbeatErr: context.DeadlineExceeded}
+	server := newMCPServerWithApp(t, app)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "execution_heartbeat",
+		Arguments: map[string]any{"request_id": "req-1", "execution_id": "exe-1", "lease_generation": 1},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	require.Len(t, res.Content, 1)
+	text, ok := res.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+
+	var mcpErr MCPError
+	require.NoError(t, json.Unmarshal([]byte(text.Text), &mcpErr))
+	require.Equal(t, "TEMPORARILY_UNAVAILABLE", mcpErr.Code)
+	require.Contains(t, mcpErr.Message, "timed out")
+}
+
+func TestMCPRateLimiterReturns429WhenLimited(t *testing.T) {
+	app := &fakeApplication{}
+	verifier := &fakeVerifier{principal: testPrincipal("tasks:read")}
+	limiter := &fakeRateLimiter{allowed: false, retryAfter: 30}
+	s := NewServer(app, verifier, WithRateLimiter(limiter))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer token-agent-1")
+	s.Handler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, "30", rec.Header().Get("Retry-After"))
+}
+
+type fakeRateLimiter struct {
+	allowed    bool
+	retryAfter int
+}
+
+func (f *fakeRateLimiter) Allow(ctx context.Context, key string) (bool, int) {
+	return f.allowed, f.retryAfter
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"agentguild.dev/agentguild/backend/internal/application"
@@ -23,15 +24,41 @@ type applicationService interface {
 	GetExecution(ctx context.Context, principal auth.Principal, query application.GetExecution) (application.Envelope[application.ExecutionView], error)
 }
 
+// RateLimiter 决定请求是否被限流；若不允许，返回建议等待秒数。
+type RateLimiter interface {
+	Allow(ctx context.Context, key string) (allowed bool, retryAfter int)
+}
+
+type noopRateLimiter struct{}
+
+func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true, 0 }
+
 // Server 暴露任务生命周期的 MCP 工具。
 type Server struct {
 	svc      applicationService
 	verifier auth.TokenVerifier
+	limiter  RateLimiter
+}
+
+// Option 配置 Server。
+type Option func(*Server)
+
+// WithRateLimiter 替换默认的无限流实现。
+func WithRateLimiter(l RateLimiter) Option {
+	return func(s *Server) { s.limiter = l }
 }
 
 // NewServer 创建 MCP server；svc 通常是 *application.Service。
-func NewServer(svc applicationService, verifier auth.TokenVerifier) *Server {
-	return &Server{svc: svc, verifier: verifier}
+func NewServer(svc applicationService, verifier auth.TokenVerifier, opts ...Option) *Server {
+	s := &Server{
+		svc:      svc,
+		verifier: verifier,
+		limiter:  noopRateLimiter{},
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Handler 返回无状态 Streamable HTTP MCP handler，路径通常为 /mcp。
@@ -39,7 +66,7 @@ func (s *Server) Handler() http.Handler {
 	base := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return s.mcpServer(r)
 	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	return s.authenticate(limitRequestBody(base, 1<<20))
+	return s.authenticate(s.rateLimit(limitRequestBody(base, 1<<20)))
 }
 
 // limitRequestBody 限制请求体大小，Content-Length 超过上限直接返回 413；
@@ -82,5 +109,28 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
+	})
+}
+
+// rateLimit 在认证之后根据 Principal 与 HTTP 方法+路径进行限流。
+// 若未设置 limiter 或允许通过，则继续；否则返回 429。
+func (s *Server) rateLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFrom(r.Context())
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		key := r.Method + "|" + r.URL.Path
+		if principal.TenantID != "" {
+			key = principal.TenantID + "|" + key
+		}
+		allowed, retryAfter := s.limiter.Allow(r.Context(), key)
+		if !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+			writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
