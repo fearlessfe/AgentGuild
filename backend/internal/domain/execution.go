@@ -34,7 +34,14 @@ type Execution struct {
 	TenantID string
 	AgentID  string
 	Status   ExecutionStatus
+	Stage    string
+	Progress float64
 	Lease    Lease
+	ClaimedAt       time.Time
+	StartedAt       time.Time
+	SubmittedAt     time.Time
+	ExpiredAt       time.Time
+	LastHeartbeatAt time.Time
 }
 
 func RenewLease(now time.Time, current int64) Lease {

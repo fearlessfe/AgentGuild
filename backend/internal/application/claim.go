@@ -64,7 +64,7 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 		if err := tx.InsertExecution(ctx, execution, hash[:]); err != nil {
 			return err
 		}
-		result = executionEnvelope(execution, now, 0)
+		result = executionEnvelope(execution, now, 0, nil, TaskEventSummary{})
 		if err := appendExecutionEvents(ctx, tx, principal, execution, "claim", string(taskRecord.Status), string(task.Status), now); err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 				return conflict("task changed concurrently")
 			}
 		}
-		result = executionEnvelope(execution, now, version+1)
+		result = executionEnvelope(execution, now, version+1, nil, TaskEventSummary{})
 		if err := appendExecutionEvents(ctx, tx, principal, execution, intent, string(from), string(execution.Status), now); err != nil {
 			return err
 		}
@@ -181,35 +181,54 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 
 func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, query GetExecution) (Envelope[ExecutionView], error) {
 	var result Envelope[ExecutionView]
-	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
+	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
-	err := s.store.WithTx(ctx, func(tx Tx) error {
-		now, err := tx.Now(ctx)
-		if err != nil {
-			return err
-		}
-		execution, version, err := tx.GetExecution(ctx, principal.TenantID, query.ExecutionID)
-		if err != nil {
-			if domain.CodeOf(err) == "not_found" {
-				return notFound()
+		err := s.store.WithTx(ctx, func(tx Tx) error {
+			now, err := tx.Now(ctx)
+			if err != nil {
+				return err
 			}
-			return err
-		}
-		if execution.AgentID != principal.AgentVersionID {
-			return notFound()
-		}
-		result = executionEnvelope(execution, now, version)
-		return nil
-	})
+			execution, version, err := tx.GetExecution(ctx, principal.TenantID, query.ExecutionID)
+			if err != nil {
+				if domain.CodeOf(err) == "not_found" {
+					return notFound()
+				}
+				return err
+			}
+			usage, _ := tx.GetExecutionUsage(ctx, principal.TenantID, query.ExecutionID)
+			latestEvent, _ := tx.GetLatestExecutionEvent(ctx, principal.TenantID, query.ExecutionID)
+			result = executionEnvelope(execution, now, version, usage, latestEvent)
+			return nil
+		})
 	return result, err
 }
 
-func executionEnvelope(execution *domain.Execution, now time.Time, version int64) Envelope[ExecutionView] {
-	return Envelope[ExecutionView]{Data: ExecutionView{ID: execution.ID, TaskID: execution.TaskID, TenantID: execution.TenantID, AgentVersionID: execution.AgentID, Status: execution.Status, LeaseGeneration: execution.Lease.Generation, LeaseSoftExpiresAt: execution.Lease.SoftExpiry, LeaseHardExpiresAt: execution.Lease.HardExpiry}, Meta: Meta{ServerTime: now, ResourceVersion: version}}
+func executionEnvelope(execution *domain.Execution, now time.Time, version int64, usage *UsageView, latestEvent TaskEventSummary) Envelope[ExecutionView] {
+	view := ExecutionView{
+		ID: execution.ID, TaskID: execution.TaskID, TenantID: execution.TenantID, AgentVersionID: execution.AgentID,
+		Status: execution.Status, Stage: execution.Stage, Progress: execution.Progress,
+		LeaseGeneration: execution.Lease.Generation, LeaseSoftExpiresAt: execution.Lease.SoftExpiry, LeaseHardExpiresAt: execution.Lease.HardExpiry,
+		ClaimedAt: execution.ClaimedAt, StartedAt: execution.StartedAt, SubmittedAt: execution.SubmittedAt,
+		ExpiredAt: execution.ExpiredAt, LastHeartbeatAt: execution.LastHeartbeatAt,
+	}
+	if usage != nil {
+		cost := CostView{Coverage: usage.Coverage, Provider: usage.Provider, ObservedAt: usage.ObservedAt}
+		if usage.ObservedCost != nil {
+			cost.ObservedCost = usage.ObservedCost.String()
+		}
+		if usage.SelfReportedCost != nil {
+			cost.SelfReportedCost = usage.SelfReportedCost.String()
+		}
+		view.Cost = &cost
+	}
+	if latestEvent.ID != 0 {
+		view.AuditSummary = latestEvent.ActorType + " " + latestEvent.ActorID + " · " + latestEvent.Intent + " · " + string(latestEvent.ToState)
+	}
+	return Envelope[ExecutionView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: version, PollAfterSeconds: defaultPollAfterSeconds}}
 }
 
 func appendExecutionEvents(ctx context.Context, tx Tx, principal auth.Principal, execution *domain.Execution, intent, from, to string, now time.Time) error {

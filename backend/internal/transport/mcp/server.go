@@ -15,7 +15,7 @@ import (
 // applicationService 是 MCP 层消费的应用服务边界；*application.Service 天然满足此接口。
 type applicationService interface {
 	PublishTask(ctx context.Context, principal auth.Principal, command application.PublishTask) (application.Envelope[application.TaskView], error)
-	ListTasks(ctx context.Context, principal auth.Principal, query application.ListTasks) (application.Envelope[[]application.TaskView], error)
+	ListTasks(ctx context.Context, principal auth.Principal, query application.ListTasks) (application.Envelope[application.TaskPage], error)
 	GetTask(ctx context.Context, principal auth.Principal, query application.GetTask) (application.Envelope[application.TaskView], error)
 	CancelTask(ctx context.Context, principal auth.Principal, command application.CancelTask) (application.Envelope[application.TaskView], error)
 	ClaimTask(ctx context.Context, principal auth.Principal, command application.ClaimTask) (application.Envelope[application.ExecutionView], error)

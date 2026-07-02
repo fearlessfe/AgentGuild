@@ -24,7 +24,7 @@ type fakeApplication struct {
 
 	publish         application.Envelope[application.TaskView]
 	publishErr      error
-	list            application.Envelope[[]application.TaskView]
+	list            application.Envelope[application.TaskPage]
 	listErr         error
 	getTask         application.Envelope[application.TaskView]
 	getTaskErr      error
@@ -51,7 +51,7 @@ func (f *fakeApplication) PublishTask(ctx context.Context, p auth.Principal, cmd
 	return f.publish, f.publishErr
 }
 
-func (f *fakeApplication) ListTasks(ctx context.Context, p auth.Principal, q application.ListTasks) (application.Envelope[[]application.TaskView], error) {
+func (f *fakeApplication) ListTasks(ctx context.Context, p auth.Principal, q application.ListTasks) (application.Envelope[application.TaskPage], error) {
 	f.calls = append(f.calls, call{method: "ListTasks", principal: p, payload: q})
 	return f.list, f.listErr
 }

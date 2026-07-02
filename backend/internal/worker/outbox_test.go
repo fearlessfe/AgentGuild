@@ -16,6 +16,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDisabledProviderDrainsEventWithoutRetry(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+
+	w := worker.NewOutbox(db, disabledProvider{})
+	processed, err := w.RunBatch(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+
+	var published bool
+	require.NoError(t, db.QueryRow(ctx, `SELECT published_at IS NOT NULL FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&published))
+	require.True(t, published)
+
+	usage := loadUsage(t, db, "tenant-1", "exe-1")
+	require.Equal(t, "unavailable", usage.Coverage)
+	require.Equal(t, "disabled", usage.Provider)
+}
+
+type disabledProvider struct{}
+
+func (disabledProvider) Observe(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+	return telemetry.CostObservation{Coverage: telemetry.CoverageUnavailable, Provider: "disabled", Disabled: true}, nil
+}
+
 func TestOutboxProcessesExecutionEventAndRecordsUsage(t *testing.T) {
 	ctx := context.Background()
 	db := testdb.StartPostgres(t)

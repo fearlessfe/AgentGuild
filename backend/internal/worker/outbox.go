@@ -211,7 +211,7 @@ func (o *Outbox) handle(ctx context.Context, e event) error {
 	); err != nil {
 		return err
 	}
-	if providerErr == nil && obs.Coverage == telemetry.CoverageComplete {
+	if (providerErr == nil && obs.Coverage == telemetry.CoverageComplete) || obs.Disabled {
 		result, err := pgxTx.Exec(ctx, `
 			UPDATE outbox_events SET published_at=$1, claimed_until=NULL
 			WHERE tenant_id=$2 AND id=$3 AND published_at IS NULL AND claimed_until=$4`, now, e.tenantID, e.id, e.claimUntil)
@@ -224,6 +224,9 @@ func (o *Outbox) handle(ctx context.Context, e event) error {
 	}
 	if err := pgxTx.Commit(ctx); err != nil {
 		return err
+	}
+	if obs.Disabled {
+		return nil
 	}
 	if providerErr != nil {
 		return providerErr

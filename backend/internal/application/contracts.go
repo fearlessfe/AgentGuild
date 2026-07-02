@@ -27,6 +27,7 @@ type PublishTask struct {
 
 type ListTasks struct {
 	Statuses                []domain.TaskStatus
+	Type                    string
 	PublisherAgentVersionID string
 	Limit                   int
 	Cursor                  string
@@ -65,9 +66,30 @@ type ExecutionView struct {
 	TenantID           string                 `json:"tenant_id"`
 	AgentVersionID     string                 `json:"agent_version_id"`
 	Status             domain.ExecutionStatus `json:"status"`
+	Stage              string                 `json:"stage,omitempty"`
+	Progress           float64                `json:"progress,omitempty"`
 	LeaseGeneration    int64                  `json:"lease_generation"`
 	LeaseSoftExpiresAt time.Time              `json:"lease_soft_expires_at"`
 	LeaseHardExpiresAt time.Time              `json:"lease_hard_expires_at"`
+	LastHeartbeatAt    time.Time              `json:"last_heartbeat_at,omitempty"`
+	ClaimedAt          time.Time              `json:"claimed_at,omitempty"`
+	StartedAt          time.Time              `json:"started_at,omitempty"`
+	SubmittedAt        time.Time              `json:"submitted_at,omitempty"`
+	ExpiredAt          time.Time              `json:"expired_at,omitempty"`
+	Cost               *CostView              `json:"cost,omitempty"`
+	AuditSummary       string                 `json:"audit_summary,omitempty"`
+}
+
+type CostView struct {
+	ObservedCost     string    `json:"observed_cost,omitempty"`
+	SelfReportedCost string    `json:"self_reported_cost,omitempty"`
+	Coverage         string    `json:"coverage"`
+	Provider         string    `json:"provider"`
+	ObservedAt       time.Time `json:"observed_at,omitempty"`
+}
+
+type TaskPage struct {
+	Items []TaskView `json:"items"`
 }
 
 type TaskView struct {

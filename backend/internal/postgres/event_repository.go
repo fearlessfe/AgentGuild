@@ -29,6 +29,27 @@ func (tx *Tx) AppendOutboxEvent(ctx context.Context, event application.OutboxEve
 	return err
 }
 
+func (tx *Tx) GetLatestExecutionEvent(ctx context.Context, tenantID, executionID string) (application.TaskEventSummary, error) {
+	var e application.TaskEventSummary
+	var executionIDPtr *string
+	err := tx.tx.QueryRow(ctx, `
+		SELECT id, tenant_id, task_id, execution_id, actor_type, actor_id, intent,
+		       from_state, to_state, created_at
+		FROM task_events
+		WHERE tenant_id=$1 AND execution_id=$2
+		ORDER BY id DESC
+		LIMIT 1`,
+		tenantID, executionID,
+	).Scan(
+		&e.ID, &e.TenantID, &e.TaskID, &executionIDPtr,
+		&e.ActorType, &e.ActorID, &e.Intent,
+		&e.FromState, &e.ToState, &e.CreatedAt,
+	)
+	if executionIDPtr != nil {
+		e.ExecutionID = *executionIDPtr
+	}
+	return e, err
+}
 func (tx *Tx) ListTaskEvents(ctx context.Context, tenantID, taskID string, afterID int64, limit int) ([]application.TaskEventSummary, error) {
 	rows, err := tx.tx.Query(ctx, `
 		SELECT id, tenant_id, task_id, execution_id, actor_type, actor_id, intent,

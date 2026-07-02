@@ -12,6 +12,7 @@
 - Task 4 round-1 review APPROVED by fresh re-reviewer; fixes `169ccb5`.
 - Task 5 round-2 review APPROVED; implementation `638c7b8` + fixes `3a7e329`.
 - Task 6 round-2 review APPROVED; implementation `607ed78` + fixes `f2b90cf`.
+- Task 7 round-2 review APPROVED; implementation `21bf114` + fixes `b0eedbc`, `42db957`; coordinator focused 6-package verification PASS.
 
 ## Deferred to FINAL review
 
@@ -23,25 +24,23 @@
 
 ## Current Task
 
-- Plan task: `Completion gate: Task 7 operations and telemetry`
-- OpenSpec mapping: `3.2 Lease reaper scheduler, Langfuse TraceCostProvider, cost coverage metrics, rate limiting and audit queries`
-- Phase: `done`
+- Plan task: `Completion gate: Task 8 runnable observer app`
+- OpenSpec mapping: `3.1 React task list, filters and read-only detail`
+- Phase: `scope-decision`（Task 8 review round 1）
 - Implementer status: `DONE_WITH_CONCERNS`
-- Recovery implementer: `/root/task7_recovery_impl`
-- Implementation base/head: `67bd829..b0eedbc`
-- Implementation commits: `21bf114`, `b0eedbc`
-- Report: `.superpowers/sdd/task-7-report.md`
-- RED/GREEN: 本轮修复证据完整；原提交 `21bf114` 的历史 RED 不可恢复
-- Verification: focused、backend full、focused race、go vet、git diff --check 均通过
-- Review round 1: `Needs fixes`（1 Critical、6 Important、4 Minor）
-- Review report: `.superpowers/sdd/task-7-review-1.md`
-- Open findings: empty-cursor recovery、claim fencing、fresh DB time、poison event、coverage completeness、MCP retry body、audit reason sanitization
-- Fix commit: `42db957`
-- Fix evidence: focused PASS；application/ratelimit race、go vet、git diff --check PASS；最新 worker/telemetry 与 backend full 因额度限制未重跑
-- Review round 2: `Approved`（0 Critical、0 Important、3 non-blocking Minor）
-- Review report: `.superpowers/sdd/task-7-review-2.md`
-- Coordinator focused verification: current HEAD 6 packages PASS（telemetry/worker/ratelimit/application/REST/MCP）
-- Confirmed technical baseline: `Go 1.26.4; PostgreSQL 18.4; pgx v5; decimal for costs; local in-process token-bucket for MVP`
-- Files (planned): `internal/telemetry/{cost,langfuse}.go`, `internal/worker/outbox.go`, `internal/ratelimit/limiter.go`, `internal/application/audit_queries.go` and their tests
-- Review mode: `thorough` — batch/final review to run after implementer reports DONE
-- Review/fix round: `2/2`
+- Implementation base/head: `63c64c8..79021ab`
+- Implementation commit: `79021ab`
+- Brief: `.superpowers/sdd/task-8-brief.md`
+- Report: `.superpowers/sdd/task-8-report.md`
+- RED/GREEN: backend config/main、frontend TaskList/TaskDetail 证据完整
+- Verification: backend full + build + vet PASS；frontend tests + build PASS；Playwright desktop/mobile 2/2 PASS；diff-check PASS
+- Visual: `93/100 pass`，无 blocker；截图 `/private/tmp/agentguild-task8/{desktop-1512x1064,mobile-390x844}.png`
+- Concern: in-app Browser unavailable，已降级为 Playwright + headless Chrome
+- Review round 1: `Needs fixes`（0 Critical、10 Important、2 Minor；desktop 1 major、mobile 2 major）
+- Review report: `.superpowers/sdd/task-8-review-1.md`
+- Scope expansion: 需要扩展正式 read DTO/query、REST filters/polling、usage/audit read model、runtime serving/auth、worker shutdown/disabled Langfuse semantics
+- Decision status: `CONTINUE_IN_CHANGE`（范围扩展留在当前 change 内完成；由 fix subagent 处理 Task 8 review round-1 的 10 Important + 2 Minor findings）
+- Confirmed technical baseline: `React 19; TypeScript; Vite; TanStack Query; Vitest; Playwright; Go 1.26.4`
+- Visual reference: `docs/assets/agentguild-tasks.png` at desktop `1512x1064`; mobile `390x844`
+- Review mode: `thorough` — UI/backend assembly is a cross-module high-risk boundary
+- Review/fix round: `1/2`

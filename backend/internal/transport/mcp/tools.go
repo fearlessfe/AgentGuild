@@ -27,6 +27,7 @@ type PublishTaskInput struct {
 type ListTasksInput struct {
 	Cursor                  string   `json:"cursor,omitempty" jsonschema:"opaque pagination cursor"`
 	Statuses                []string `json:"statuses,omitempty" jsonschema:"filter by task statuses"`
+	Type                    string   `json:"type,omitempty" jsonschema:"filter by task type"`
 	PublisherAgentVersionID string   `json:"publisher_agent_version_id,omitempty" jsonschema:"filter by publisher agent version id"`
 	Limit                   int      `json:"limit,omitempty" jsonschema:"page size, default 20, max 100"`
 }
@@ -97,6 +98,7 @@ func registerTools(server *mcp.Server, svc applicationService, principal auth.Pr
 		query := application.ListTasks{
 			Cursor:                  input.Cursor,
 			PublisherAgentVersionID: input.PublisherAgentVersionID,
+			Type:                    input.Type,
 			Limit:                   input.Limit,
 		}
 		if len(input.Statuses) > 0 {

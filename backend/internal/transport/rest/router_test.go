@@ -24,7 +24,7 @@ type fakeApplication struct {
 
 	publish         application.Envelope[application.TaskView]
 	publishErr      error
-	list            application.Envelope[[]application.TaskView]
+	list            application.Envelope[application.TaskPage]
 	listErr         error
 	getTask         application.Envelope[application.TaskView]
 	getTaskErr      error
@@ -51,7 +51,7 @@ func (f *fakeApplication) PublishTask(ctx context.Context, p auth.Principal, cmd
 	return f.publish, f.publishErr
 }
 
-func (f *fakeApplication) ListTasks(ctx context.Context, p auth.Principal, q application.ListTasks) (application.Envelope[[]application.TaskView], error) {
+func (f *fakeApplication) ListTasks(ctx context.Context, p auth.Principal, q application.ListTasks) (application.Envelope[application.TaskPage], error) {
 	f.calls = append(f.calls, call{method: "ListTasks", principal: p, payload: q})
 	return f.list, f.listErr
 }
@@ -180,11 +180,12 @@ func TestPublishMapsHeaderToRequestID(t *testing.T) {
 func TestListUsesQueryParams(t *testing.T) {
 	app := &fakeApplication{}
 	server := newTestServer(app)
-	res := get(t, server, "/v1/tasks?status=open&limit=10&cursor=abc", "token-publisher")
+	res := get(t, server, "/v1/tasks?status=open&type=code&limit=10&cursor=abc", "token-publisher")
 	require.Equal(t, http.StatusOK, res.Code)
 	require.Len(t, app.calls, 1)
 	q := app.calls[0].payload.(application.ListTasks)
 	require.Equal(t, []domain.TaskStatus{domain.TaskOpen}, q.Statuses)
+	require.Equal(t, "code", q.Type)
 	require.Equal(t, 10, q.Limit)
 	require.Equal(t, "abc", q.Cursor)
 }
@@ -331,7 +332,7 @@ func TestApplicationRateLimitReturnsRetryAfterSeconds(t *testing.T) {
 func TestExecutionEndpointsMapToService(t *testing.T) {
 	app := &fakeApplication{}
 	server := newTestServer(app)
-	res := get(t, server, "/v1/executions/exe-1", "token-agent-1")
+	res := get(t, server, "/v1/executions/exe-1", "token-publisher")
 	require.Equal(t, http.StatusOK, res.Code)
 	require.Equal(t, "exe-1", app.calls[0].payload.(application.GetExecution).ExecutionID)
 

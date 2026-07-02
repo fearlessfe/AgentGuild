@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/domain"
+	"github.com/shopspring/decimal"
 )
 
 type Store interface {
@@ -48,6 +49,7 @@ type TaskRepository interface {
 type TaskListQuery struct {
 	TenantID                string
 	Statuses                []domain.TaskStatus
+	Type                    string
 	PublisherAgentVersionID string
 	AfterCreatedAt          time.Time
 	AfterID                 string
@@ -61,11 +63,20 @@ type ExecutionRepository interface {
 	ListActiveExecutions(context.Context, string, string) ([]ExecutionRecord, error)
 	UpdateExecution(context.Context, *domain.Execution, int64) (bool, error)
 	UpdateOwnedExecution(context.Context, *domain.Execution, int64, string, int64) (bool, error)
+	GetExecutionUsage(context.Context, string, string) (*UsageView, error)
 }
 
 type ExecutionRecord struct {
 	Execution    *domain.Execution
 	StateVersion int64
+}
+
+type UsageView struct {
+	ObservedCost     *decimal.Decimal
+	SelfReportedCost *decimal.Decimal
+	Coverage         string
+	Provider         string
+	ObservedAt       time.Time
 }
 
 type IdempotencyKey struct {
@@ -119,4 +130,5 @@ type EventRepository interface {
 	AppendTaskEvent(context.Context, TaskEvent) error
 	AppendOutboxEvent(context.Context, OutboxEvent) error
 	ListTaskEvents(context.Context, string, string, int64, int) ([]TaskEventSummary, error)
+	GetLatestExecutionEvent(context.Context, string, string) (TaskEventSummary, error)
 }

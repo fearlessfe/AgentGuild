@@ -142,11 +142,16 @@ func TestHeartbeatAtTaskDeadlineIsRejected(t *testing.T) {
 	assertDomainError(t, err, "lease_expired", "")
 }
 
-func TestGetExecutionIsTenantAndOwnerScoped(t *testing.T) {
+func TestGetExecutionIsTenantScoped(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1}}
-	for _, p := range []struct{ tenant, owner string }{{"other", "worker"}, {"tenant", "other"}} {
-		_, err := svc.GetExecution(context.Background(), principal(p.tenant, p.owner, "tasks:execute"), application.GetExecution{ExecutionID: "execution"})
-		assertDomainError(t, err, "not_found", "")
+	_, err := svc.GetExecution(context.Background(), principal("other", "worker", "tasks:read"), application.GetExecution{ExecutionID: "execution"})
+	assertDomainError(t, err, "not_found", "")
+	got, err := svc.GetExecution(context.Background(), principal("tenant", "other", "tasks:read"), application.GetExecution{ExecutionID: "execution"})
+	if err != nil {
+		t.Fatalf("GetExecution()=%v", err)
+	}
+	if got.Data.ID != "execution" {
+		t.Fatalf("got execution id=%s", got.Data.ID)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"agentguild.dev/agentguild/backend/internal/config"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
@@ -30,4 +32,19 @@ func TestDisabledLangfuseKeepsOutboxProviderAvailable(t *testing.T) {
 	observation, err := provider.Observe(context.Background(), telemetry.ExecutionRef{ExecutionID: "execution-1"})
 	require.NoError(t, err)
 	require.Equal(t, telemetry.CoverageUnavailable, observation.Coverage)
+	require.True(t, observation.Disabled)
+}
+
+func TestShutdownJoinsWorkersBeforePoolClose(t *testing.T) {
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	workerRan := false
+	runWorker(ctx, &wg, time.Millisecond, "test", func(ctx context.Context) error {
+		workerRan = true
+		return nil
+	})
+	time.Sleep(5 * time.Millisecond)
+	require.True(t, workerRan, "worker should have run")
+	cancel()
+	wg.Wait()
 }

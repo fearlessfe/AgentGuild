@@ -26,6 +26,8 @@ type cursorPayload struct {
 	ExpiresAt time.Time `json:"e"`
 }
 
+const defaultPollAfterSeconds = 30
+
 func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query GetTask) (Envelope[TaskView], error) {
 	var result Envelope[TaskView]
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
@@ -47,14 +49,14 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 		if err != nil {
 			return err
 		}
-		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion}}
+		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion, PollAfterSeconds: defaultPollAfterSeconds}}
 		return nil
 	})
 	return result, err
 }
 
-func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query ListTasks) (Envelope[[]TaskView], error) {
-	var result Envelope[[]TaskView]
+func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query ListTasks) (Envelope[TaskPage], error) {
+	var result Envelope[TaskPage]
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
@@ -74,7 +76,7 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 			return err
 		}
 		filter := filterDigest(query)
-		listQuery := TaskListQuery{TenantID: principal.TenantID, Statuses: query.Statuses, PublisherAgentVersionID: query.PublisherAgentVersionID, Limit: limit + 1}
+		listQuery := TaskListQuery{TenantID: principal.TenantID, Statuses: query.Statuses, Type: query.Type, PublisherAgentVersionID: query.PublisherAgentVersionID, Limit: limit + 1}
 		if query.Cursor != "" {
 			cursor, err := s.decodeCursor(query.Cursor, principal.TenantID, filter, now)
 			if err != nil {
@@ -98,7 +100,7 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 				return err
 			}
 		}
-		result = Envelope[[]TaskView]{Data: views, Meta: Meta{ServerTime: now}}
+		result = Envelope[TaskPage]{Data: TaskPage{Items: views}, Meta: Meta{ServerTime: now, PollAfterSeconds: defaultPollAfterSeconds}}
 		if hasMore {
 			last := records[len(records)-1]
 			result.Meta.NextCursor = s.encodeCursor(cursorPayload{Version: cursorSortVersion, TenantID: principal.TenantID, Filter: filter, CreatedAt: last.CreatedAt, ID: last.ID, ExpiresAt: now.Add(s.cursorTTL)})
@@ -126,7 +128,7 @@ func filterDigest(query ListTasks) string {
 	for i := range statuses {
 		parts[i] = string(statuses[i])
 	}
-	sum := sha256.Sum256([]byte(strings.Join(parts, ",") + "\x00" + query.PublisherAgentVersionID))
+	sum := sha256.Sum256([]byte(strings.Join(parts, ",") + "\x00" + query.Type + "\x00" + query.PublisherAgentVersionID))
 	return hex.EncodeToString(sum[:])
 }
 func (s *Service) encodeCursor(payload cursorPayload) string {

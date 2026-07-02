@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -52,11 +53,13 @@ func run() error {
 	mcpHandler := mcptransport.NewServer(service, verifier).Handler()
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: adapterHandler(cfg.WebEnabled, cfg.MCPEnabled, restHandler, mcpHandler), ReadHeaderTimeout: 5 * time.Second}
 
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	var wg sync.WaitGroup
 	reaper := postgres.NewReaper(pool)
-	go repeat(ctx, cfg.ReaperInterval, "reaper", func(ctx context.Context) error { _, err := reaper.RunBatch(ctx, 100); return err })
+	runWorker(workerCtx, &wg, cfg.ReaperInterval, "reaper", func(ctx context.Context) error { _, err := reaper.RunBatch(ctx, 100); return err })
 	provider := costProvider(cfg.LangfuseEnabled, cfg)
 	outbox := worker.NewOutbox(pool, provider)
-	go repeat(ctx, cfg.OutboxInterval, "outbox", outbox.RunOnce)
+	runWorker(workerCtx, &wg, cfg.OutboxInterval, "outbox", outbox.RunOnce)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -65,10 +68,16 @@ func run() error {
 	}()
 	select {
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
+		shutdown, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer shutdownCancel()
+		slog.Info("shutting down workers")
+		cancelWorkers()
+		wg.Wait()
+		slog.Info("workers stopped, shutting down server")
 		return server.Shutdown(shutdown)
 	case err := <-errCh:
+		cancelWorkers()
+		wg.Wait()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -86,7 +95,7 @@ func costProvider(enabled bool, cfg config.Config) telemetry.TraceCostProvider {
 type disabledCostProvider struct{}
 
 func (disabledCostProvider) Observe(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
-	return telemetry.CostObservation{Coverage: telemetry.CoverageUnavailable, Provider: "disabled"}, nil
+	return telemetry.CostObservation{Coverage: telemetry.CoverageUnavailable, Provider: "disabled", Disabled: true}, nil
 }
 
 func adapterHandler(webEnabled, mcpEnabled bool, web, mcp http.Handler) http.Handler {
@@ -100,6 +109,14 @@ func adapterHandler(webEnabled, mcpEnabled bool, web, mcp http.Handler) http.Han
 		mux.Handle("/", web)
 	}
 	return mux
+}
+
+func runWorker(ctx context.Context, wg *sync.WaitGroup, interval time.Duration, name string, fn func(context.Context) error) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		repeat(ctx, interval, name, fn)
+	}()
 }
 
 func repeat(ctx context.Context, interval time.Duration, name string, fn func(context.Context) error) {

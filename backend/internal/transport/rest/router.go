@@ -20,7 +20,7 @@ import (
 // applicationService 是 REST 层消费的应用服务边界；*application.Service 天然满足此接口。
 type applicationService interface {
 	PublishTask(ctx context.Context, principal auth.Principal, command application.PublishTask) (application.Envelope[application.TaskView], error)
-	ListTasks(ctx context.Context, principal auth.Principal, query application.ListTasks) (application.Envelope[[]application.TaskView], error)
+	ListTasks(ctx context.Context, principal auth.Principal, query application.ListTasks) (application.Envelope[application.TaskPage], error)
 	GetTask(ctx context.Context, principal auth.Principal, query application.GetTask) (application.Envelope[application.TaskView], error)
 	CancelTask(ctx context.Context, principal auth.Principal, command application.CancelTask) (application.Envelope[application.TaskView], error)
 	ClaimTask(ctx context.Context, principal auth.Principal, command application.ClaimTask) (application.Envelope[application.ExecutionView], error)
@@ -167,6 +167,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		Limit:                   limit,
 		Cursor:                  r.URL.Query().Get("cursor"),
 		PublisherAgentVersionID: r.URL.Query().Get("publisher_agent_version_id"),
+		Type:                    r.URL.Query().Get("type"),
 	}
 	if statuses := r.URL.Query()["status"]; len(statuses) > 0 {
 		query.Statuses = make([]domain.TaskStatus, 0, len(statuses))

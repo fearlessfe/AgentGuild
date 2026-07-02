@@ -107,11 +107,11 @@ func TestListCursorIsSignedAndBoundToTenantAndFilter(t *testing.T) {
 	tx.seed(application.TaskRecord{ID: "task-1", TenantID: "tenant-1", PublisherAgentVersionID: "publisher-1", Status: domain.TaskCancelled, CreatedAt: fixtureNow.Add(time.Minute)})
 
 	page, err := svc.ListTasks(context.Background(), principal("tenant-1", "agent-1", "tasks:read"), application.ListTasks{Statuses: []domain.TaskStatus{domain.TaskOpen}, Limit: 1})
-	if err != nil || len(page.Data) != 1 || page.Data[0].ID != "task-3" || page.Meta.NextCursor == "" {
+	if err != nil || len(page.Data.Items) != 1 || page.Data.Items[0].ID != "task-3" || page.Meta.NextCursor == "" {
 		t.Fatalf("first page=%#v err=%v", page, err)
 	}
 	next, err := svc.ListTasks(context.Background(), principal("tenant-1", "agent-1", "tasks:read"), application.ListTasks{Statuses: []domain.TaskStatus{domain.TaskOpen}, Limit: 1, Cursor: page.Meta.NextCursor})
-	if err != nil || len(next.Data) != 1 || next.Data[0].ID != "task-2" {
+	if err != nil || len(next.Data.Items) != 1 || next.Data.Items[0].ID != "task-2" {
 		t.Fatalf("next page=%#v err=%v", next, err)
 	}
 	_, err = svc.ListTasks(context.Background(), principal("tenant-2", "agent-1", "tasks:read"), application.ListTasks{Statuses: []domain.TaskStatus{domain.TaskOpen}, Cursor: page.Meta.NextCursor})
@@ -168,7 +168,7 @@ func TestListPaginatesEveryTaskWithSameTimestamp(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, task := range page.Data {
+		for _, task := range page.Data.Items {
 			ids = append(ids, task.ID)
 		}
 		cursor = page.Meta.NextCursor
@@ -214,6 +214,44 @@ func TestGetIsTenantScopedAndCancelAtomicallyCancelsActiveExecution(t *testing.T
 	}
 	if tx.outbox[0].EventType != "task.cancelled" {
 		t.Fatalf("cancel outbox type = %q, want task.cancelled", tx.outbox[0].EventType)
+	}
+}
+
+func TestListTasksFiltersByTypeAndReturnsPollAfterSeconds(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "code-task", TenantID: "tenant-1", Type: "code", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+	tx.seed(application.TaskRecord{ID: "doc-task", TenantID: "tenant-1", Type: "doc", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+
+	page, err := svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Type: "code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Data.Items) != 1 || page.Data.Items[0].ID != "code-task" {
+		t.Fatalf("filter by type returned %#v", page.Data.Items)
+	}
+	if page.Meta.PollAfterSeconds == 0 {
+		t.Fatalf("poll_after_seconds not set")
+	}
+}
+
+func TestGetExecutionIncludesUsageAndAuditSummary(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Stage: "running tests", Progress: 0.65, Lease: domain.Lease{Generation: 1}}
+	tx.events = append(tx.events, application.TaskEvent{TenantID: "tenant", TaskID: "task", ExecutionID: "execution", ActorType: "agent", ActorID: "worker", Intent: "heartbeat", FromState: "running", ToState: "running", CreatedAt: fixtureNow})
+
+	got, err := svc.GetExecution(context.Background(), principal("tenant", "observer", "tasks:read"), application.GetExecution{ExecutionID: "execution"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.Stage != "running tests" || got.Data.Progress != 0.65 {
+		t.Fatalf("stage/progress missing: %#v", got.Data)
+	}
+	if got.Meta.PollAfterSeconds == 0 {
+		t.Fatalf("poll_after_seconds not set")
+	}
+	if got.Data.AuditSummary == "" {
+		t.Fatalf("audit summary missing")
 	}
 }
 
@@ -398,6 +436,9 @@ func (tx *fakeTx) ListTaskRecords(_ context.Context, q application.TaskListQuery
 		if r.TenantID != q.TenantID || !statusAllowed(r.Status, q.Statuses) {
 			continue
 		}
+		if q.Type != "" && r.Type != q.Type {
+			continue
+		}
 		if !q.AfterCreatedAt.IsZero() && !(r.CreatedAt.Before(q.AfterCreatedAt) || (r.CreatedAt.Equal(q.AfterCreatedAt) && r.ID < q.AfterID)) {
 			continue
 		}
@@ -438,6 +479,7 @@ func (tx *fakeTx) GetExecution(_ context.Context, tenant, id string) (*domain.Ex
 	copy := *e
 	return &copy, 0, nil
 }
+func (tx *fakeTx) GetExecutionUsage(_ context.Context, _, _ string) (*application.UsageView, error) { return nil, nil }
 func (tx *fakeTx) GetExecutionForUpdate(ctx context.Context, tenant, id string) (*domain.Execution, int64, error) {
 	return tx.GetExecution(ctx, tenant, id)
 }
@@ -532,4 +574,12 @@ func (tx *fakeTx) AppendOutboxEvent(_ context.Context, e application.OutboxEvent
 	}
 	tx.outbox = append(tx.outbox, e)
 	return nil
+}
+func (tx *fakeTx) GetLatestExecutionEvent(_ context.Context, _, executionID string) (application.TaskEventSummary, error) {
+	for i := len(tx.events) - 1; i >= 0; i-- {
+		if tx.events[i].ExecutionID == executionID {
+			return application.TaskEventSummary{ID: tx.events[i].CreatedAt.UnixNano(), TenantID: tx.events[i].TenantID, TaskID: tx.events[i].TaskID, ExecutionID: tx.events[i].ExecutionID, ActorType: tx.events[i].ActorType, ActorID: tx.events[i].ActorID, Intent: tx.events[i].Intent, FromState: tx.events[i].FromState, ToState: tx.events[i].ToState, CreatedAt: tx.events[i].CreatedAt}, nil
+		}
+	}
+	return application.TaskEventSummary{}, nil
 }

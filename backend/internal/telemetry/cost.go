@@ -31,6 +31,7 @@ type CostObservation struct {
 	Coverage         Coverage
 	Provider         string
 	Cursor           string
+	Disabled         bool // Provider 被显式禁用，不应重试
 }
 
 // TraceCostProvider 是成本观测提供者的可替换接口。
