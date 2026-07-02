@@ -50,9 +50,18 @@ type Task struct {
 	ClaimedBy   string
 }
 
-func NewTask(id, tenantID, publisherID string, deadline time.Time) *Task {
-	if id == "" || tenantID == "" || publisherID == "" || deadline.IsZero() {
-		return nil
+func NewTask(id, tenantID, publisherID string, deadline time.Time) (*Task, error) {
+	if id == "" {
+		return nil, invalidArgument("id")
+	}
+	if tenantID == "" {
+		return nil, invalidArgument("tenant_id")
+	}
+	if publisherID == "" {
+		return nil, invalidArgument("publisher_id")
+	}
+	if deadline.IsZero() {
+		return nil, invalidArgument("deadline")
 	}
 	return &Task{
 		ID:          id,
@@ -60,12 +69,12 @@ func NewTask(id, tenantID, publisherID string, deadline time.Time) *Task {
 		PublisherID: publisherID,
 		Deadline:    deadline,
 		Status:      TaskOpen,
-	}
+	}, nil
 }
 
 func NewDraftTask(id, tenantID, publisherID string, deadline time.Time) *Task {
-	task := NewTask(id, tenantID, publisherID, deadline)
-	if task == nil {
+	task, err := NewTask(id, tenantID, publisherID, deadline)
+	if err != nil {
 		return nil
 	}
 	task.Status = TaskDraft
@@ -81,7 +90,7 @@ func (t *Task) Apply(intent Intent, actor Actor, now time.Time) error {
 		return ErrForbidden
 	}
 	switch intent {
-	case IntentPublish, IntentClaim, IntentStart, IntentComplete:
+	case IntentPublish, IntentClaim, IntentStart, IntentComplete, IntentCancel:
 		if !now.Before(t.Deadline) {
 			return ErrStateConflict
 		}

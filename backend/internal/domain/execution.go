@@ -44,9 +44,21 @@ func NewLeasedExecution(
 	id, taskID, tenantID, agentID string,
 	now time.Time,
 	generation int64,
-) *Execution {
-	if id == "" || taskID == "" || tenantID == "" || agentID == "" || generation < 0 {
-		return nil
+) (*Execution, error) {
+	if id == "" {
+		return nil, invalidArgument("id")
+	}
+	if taskID == "" {
+		return nil, invalidArgument("task_id")
+	}
+	if tenantID == "" {
+		return nil, invalidArgument("tenant_id")
+	}
+	if agentID == "" {
+		return nil, invalidArgument("agent_id")
+	}
+	if generation < 0 {
+		return nil, invalidArgument("generation")
 	}
 	return &Execution{
 		ID:       id,
@@ -59,7 +71,7 @@ func NewLeasedExecution(
 			SoftExpiry: now.Add(LeaseDuration),
 			HardExpiry: now.Add(LeaseDuration + LeaseGrace),
 		},
-	}
+	}, nil
 }
 
 func (e *Execution) Start(now time.Time, generation int64) error {

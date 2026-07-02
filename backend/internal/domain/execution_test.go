@@ -10,7 +10,7 @@ import (
 
 func TestHeartbeatRejectsStaleGeneration(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
-	execution := domain.NewLeasedExecution(
+	execution := mustNewExecution(t,
 		"exe-1",
 		"task-1",
 		"tenant-1",
@@ -44,7 +44,7 @@ func TestRenewLeaseUsesConfiguredWindows(t *testing.T) {
 
 func TestExecutionStartsWithCurrentLease(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
-	execution := domain.NewLeasedExecution(
+	execution := mustNewExecution(t,
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
@@ -59,7 +59,7 @@ func TestExecutionStartsWithCurrentLease(t *testing.T) {
 func TestHeartbeatRenewsCurrentLease(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
 	heartbeatAt := now.Add(time.Minute)
-	execution := domain.NewLeasedExecution(
+	execution := mustNewExecution(t,
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
@@ -78,7 +78,7 @@ func TestHeartbeatRenewsCurrentLease(t *testing.T) {
 
 func TestExecutionRejectsOperationsAfterHardExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
-	execution := domain.NewLeasedExecution(
+	execution := mustNewExecution(t,
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 	afterHardExpiry := execution.Lease.HardExpiry
@@ -96,7 +96,7 @@ func TestExecutionRejectsOperationsAfterHardExpiry(t *testing.T) {
 
 func TestExecutionExpiresOnlyAfterHardExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
-	execution := domain.NewLeasedExecution(
+	execution := mustNewExecution(t,
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
@@ -111,7 +111,7 @@ func TestExecutionExpiresOnlyAfterHardExpiry(t *testing.T) {
 func TestExecutionAcceptRequiresRunningStateAndReviewer(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
 	reviewer := domain.Actor{Type: domain.ActorReviewer, ID: "reviewer-1"}
-	execution := domain.NewLeasedExecution(
+	execution := mustNewExecution(t,
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
@@ -139,109 +139,90 @@ func TestExecutionAcceptRequiresRunningStateAndReviewer(t *testing.T) {
 	}
 }
 
-func TestExecutionLegalTransitionMatrix(t *testing.T) {
+func TestExecutionExplicitOperationMatrix(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
 	reviewer := domain.Actor{Type: domain.ActorReviewer, ID: "reviewer-1"}
 
-	tests := []struct {
+	operations := []struct {
 		name       string
-		prepare    func(*domain.Execution)
 		transition func(*domain.Execution) error
-		wantStatus domain.ExecutionStatus
+		allowed    map[domain.ExecutionStatus]domain.ExecutionStatus
 	}{
 		{
-			name: "leased starts",
+			name: "start",
 			transition: func(execution *domain.Execution) error {
 				return execution.Start(now.Add(time.Minute), 3)
 			},
-			wantStatus: domain.ExecutionRunning,
+			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
+				domain.ExecutionLeased: domain.ExecutionRunning,
+			},
 		},
 		{
-			name: "running heartbeats",
-			prepare: func(execution *domain.Execution) {
-				if err := execution.Start(now.Add(time.Minute), 3); err != nil {
-					t.Fatalf("Start() fixture error = %v", err)
-				}
-			},
+			name: "heartbeat",
 			transition: func(execution *domain.Execution) error {
-				_, err := execution.Heartbeat(now.Add(2*time.Minute), 3)
+				_, err := execution.Heartbeat(now.Add(time.Minute), 3)
 				return err
 			},
-			wantStatus: domain.ExecutionRunning,
+			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
+				domain.ExecutionLeased:  domain.ExecutionLeased,
+				domain.ExecutionRunning: domain.ExecutionRunning,
+			},
 		},
 		{
-			name: "running is accepted by reviewer",
-			prepare: func(execution *domain.Execution) {
-				if err := execution.Start(now.Add(time.Minute), 3); err != nil {
-					t.Fatalf("Start() fixture error = %v", err)
-				}
-			},
+			name: "accept",
 			transition: func(execution *domain.Execution) error {
-				return execution.Apply(domain.IntentAccept, reviewer, now.Add(2*time.Minute))
+				return execution.Accept(reviewer, now.Add(time.Minute))
 			},
-			wantStatus: domain.ExecutionAccepted,
+			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
+				domain.ExecutionRunning: domain.ExecutionAccepted,
+			},
 		},
 		{
-			name: "leased expires at hard expiry",
+			name: "expire",
 			transition: func(execution *domain.Execution) error {
 				return execution.Expire(execution.Lease.HardExpiry)
 			},
-			wantStatus: domain.ExecutionExpired,
+			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
+				domain.ExecutionLeased:  domain.ExecutionExpired,
+				domain.ExecutionRunning: domain.ExecutionExpired,
+			},
 		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			execution := domain.NewLeasedExecution(
-				"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
-			)
-			if tt.prepare != nil {
-				tt.prepare(execution)
-			}
-
-			if err := tt.transition(execution); err != nil {
-				t.Fatalf("transition error = %v", err)
-			}
-			if execution.Status != tt.wantStatus {
-				t.Fatalf("status = %q, want %q", execution.Status, tt.wantStatus)
-			}
-		})
-	}
-}
-
-func TestExecutionTransitionMatrixDoesNotMutateOnFailure(t *testing.T) {
-	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
-	reviewer := domain.Actor{Type: domain.ActorReviewer, ID: "reviewer-1"}
-
-	tests := []struct {
-		name   string
-		status domain.ExecutionStatus
-		intent domain.Intent
-		actor  domain.Actor
-	}{
-		{name: "leased cannot be accepted", status: domain.ExecutionLeased, intent: domain.IntentAccept, actor: reviewer},
-		{name: "accepted cannot be accepted again", status: domain.ExecutionAccepted, intent: domain.IntentAccept, actor: reviewer},
-		{name: "expired cannot be accepted", status: domain.ExecutionExpired, intent: domain.IntentAccept, actor: reviewer},
-		{name: "running rejects unknown intent", status: domain.ExecutionRunning, intent: domain.IntentPublish, actor: reviewer},
+	statuses := []domain.ExecutionStatus{
+		domain.ExecutionLeased,
+		domain.ExecutionRunning,
+		domain.ExecutionAccepted,
+		domain.ExecutionExpired,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			execution := domain.NewLeasedExecution(
-				"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
-			)
-			execution.Status = tt.status
-			before := *execution
+	for _, operation := range operations {
+		for _, status := range statuses {
+			t.Run(operation.name+"/"+string(status), func(t *testing.T) {
+				execution := mustNewExecution(
+					t, "exe-1", "task-1", "tenant-1", "agent-1", now, 3,
+				)
+				execution.Status = status
+				before := *execution
 
-			err := execution.Apply(tt.intent, tt.actor, now.Add(time.Minute))
-
-			if !errors.Is(err, domain.ErrStateConflict) {
-				t.Fatalf("Apply() error = %v, want %v", err, domain.ErrStateConflict)
-			}
-			if *execution != before {
-				t.Fatalf("execution mutated: got %+v, want %+v", *execution, before)
-			}
-		})
+				err := operation.transition(execution)
+				wantStatus, allowed := operation.allowed[status]
+				if !allowed {
+					if !errors.Is(err, domain.ErrStateConflict) {
+						t.Fatalf("operation error = %v, want %v", err, domain.ErrStateConflict)
+					}
+					if *execution != before {
+						t.Fatalf("execution mutated: got %+v, want %+v", *execution, before)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("operation error = %v", err)
+				}
+				if execution.Status != wantStatus {
+					t.Fatalf("status = %q, want %q", execution.Status, wantStatus)
+				}
+			})
+		}
 	}
 }
 
@@ -254,22 +235,24 @@ func TestExecutionConstructorRejectsInvalidIdentityAndGeneration(t *testing.T) {
 		tenantID   string
 		agentID    string
 		generation int64
+		field      string
 	}{
-		{name: "empty execution ID", taskID: "task-1", tenantID: "tenant-1", agentID: "agent-1", generation: 1},
-		{name: "empty task ID", id: "exe-1", tenantID: "tenant-1", agentID: "agent-1", generation: 1},
-		{name: "empty tenant ID", id: "exe-1", taskID: "task-1", agentID: "agent-1", generation: 1},
-		{name: "empty agent ID", id: "exe-1", taskID: "task-1", tenantID: "tenant-1", generation: 1},
-		{name: "negative generation", id: "exe-1", taskID: "task-1", tenantID: "tenant-1", agentID: "agent-1", generation: -1},
+		{name: "empty execution ID", taskID: "task-1", tenantID: "tenant-1", agentID: "agent-1", generation: 1, field: "id"},
+		{name: "empty task ID", id: "exe-1", tenantID: "tenant-1", agentID: "agent-1", generation: 1, field: "task_id"},
+		{name: "empty tenant ID", id: "exe-1", taskID: "task-1", agentID: "agent-1", generation: 1, field: "tenant_id"},
+		{name: "empty agent ID", id: "exe-1", taskID: "task-1", tenantID: "tenant-1", generation: 1, field: "agent_id"},
+		{name: "negative generation", id: "exe-1", taskID: "task-1", tenantID: "tenant-1", agentID: "agent-1", generation: -1, field: "generation"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			execution := domain.NewLeasedExecution(
+			execution, err := domain.NewLeasedExecution(
 				tt.id, tt.taskID, tt.tenantID, tt.agentID, now, tt.generation,
 			)
 			if execution != nil {
 				t.Fatalf("NewLeasedExecution() = %+v, want nil", execution)
 			}
+			assertInvalidArgument(t, err, tt.field)
 		})
 	}
 }
@@ -280,7 +263,7 @@ func FuzzExecutionNeverReturnsFromTerminal(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, sequence uint8) {
 		now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
-		execution := domain.NewLeasedExecution(
+		execution := mustNewExecution(t,
 			"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 		)
 		reviewer := domain.Actor{Type: domain.ActorReviewer, ID: "reviewer-1"}
@@ -312,4 +295,18 @@ func FuzzExecutionNeverReturnsFromTerminal(f *testing.F) {
 			}
 		}
 	})
+}
+
+func mustNewExecution(
+	t *testing.T,
+	id, taskID, tenantID, agentID string,
+	now time.Time,
+	generation int64,
+) *domain.Execution {
+	t.Helper()
+	execution, err := domain.NewLeasedExecution(id, taskID, tenantID, agentID, now, generation)
+	if err != nil {
+		t.Fatalf("NewLeasedExecution() error = %v", err)
+	}
+	return execution
 }

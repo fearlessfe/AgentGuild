@@ -26,3 +26,11 @@ var (
 	ErrLeaseExpired  = &Error{Code: "lease_expired", Message: "lease is expired or stale"}
 	ErrForbidden     = &Error{Code: "forbidden", Message: "actor is not allowed to perform this transition"}
 )
+
+func invalidArgument(field string) error {
+	return &Error{
+		Code:    "invalid_argument",
+		Message: field + " is invalid",
+		Field:   field,
+	}
+}
