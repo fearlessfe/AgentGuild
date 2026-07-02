@@ -1,0 +1,15 @@
+{
+  "change": "agent-task-lifecycle",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "cc2abe81bbde73843d43fc4efcd34bdf3e77a5a7dffe12e756f8dfa8bd64c912",
+  "files": [
+    { "path": "openspec/changes/agent-task-lifecycle/proposal.md", "sha256": "11d9823db69f734ab813bf7eb926fffa7d0ae4e36e660756073fa819ef3e8677" },
+    { "path": "openspec/changes/agent-task-lifecycle/design.md", "sha256": "bbed8fa492a0317056756c5acf6339b2bb466f35bf9dd2653c4ea8f28c7faffe" },
+    { "path": "openspec/changes/agent-task-lifecycle/tasks.md", "sha256": "7e20a15091ddb76aa6d962a7bf0015e561b7d90bfd8cd1c011b296d59b28c765" },
+    { "path": "openspec/changes/agent-task-lifecycle/specs/task-lifecycle/spec.md", "sha256": "d4a19513bf84ac622e4949467581043b941eb9ceffa367a8a6ccf219c1f68329" },
+    { "path": "openspec/changes/agent-task-lifecycle/specs/task-mcp-access/spec.md", "sha256": "177bcc54f99584724954e43d9b7475538a07953b9c365f5fff6bcf26efc269ed" }
+  ]
+}
