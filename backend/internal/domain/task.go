@@ -72,13 +72,13 @@ func NewTask(id, tenantID, publisherID string, deadline time.Time) (*Task, error
 	}, nil
 }
 
-func NewDraftTask(id, tenantID, publisherID string, deadline time.Time) *Task {
+func NewDraftTask(id, tenantID, publisherID string, deadline time.Time) (*Task, error) {
 	task, err := NewTask(id, tenantID, publisherID, deadline)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	task.Status = TaskDraft
-	return task
+	return task, nil
 }
 
 func SystemActor() Actor {

@@ -60,6 +60,33 @@ func TestTaskConstructorRejectsEmptyIdentity(t *testing.T) {
 	}
 }
 
+func TestDraftTaskConstructorReturnsStructuredErrors(t *testing.T) {
+	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		id          string
+		tenantID    string
+		publisherID string
+		deadline    time.Time
+		field       string
+	}{
+		{name: "empty task ID", tenantID: "tenant-1", publisherID: "publisher-1", deadline: deadline, field: "id"},
+		{name: "empty tenant ID", id: "task-1", publisherID: "publisher-1", deadline: deadline, field: "tenant_id"},
+		{name: "empty publisher ID", id: "task-1", tenantID: "tenant-1", deadline: deadline, field: "publisher_id"},
+		{name: "missing deadline", id: "task-1", tenantID: "tenant-1", publisherID: "publisher-1", field: "deadline"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task, err := domain.NewDraftTask(tt.id, tt.tenantID, tt.publisherID, tt.deadline)
+			if task != nil {
+				t.Fatalf("NewDraftTask() = %+v, want nil", task)
+			}
+			assertInvalidArgument(t, err, tt.field)
+		})
+	}
+}
+
 func TestTaskRejectsClaimAtOrAfterDeadlineWithoutMutation(t *testing.T) {
 	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
 	agent := domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}
@@ -106,7 +133,7 @@ func TestTaskRejectsProgressAtDeadlineWithoutMutation(t *testing.T) {
 	}{
 		{
 			name:   "publish",
-			task:   domain.NewDraftTask("task-1", "tenant-1", "publisher-1", deadline),
+			task:   mustNewDraftTask(t, "task-1", "tenant-1", "publisher-1", deadline),
 			intent: domain.IntentPublish,
 			actor:  publisher,
 		},
@@ -175,7 +202,7 @@ func TestTaskLegalTransitions(t *testing.T) {
 	}{
 		{
 			name:       "publisher publishes draft",
-			task:       domain.NewDraftTask("task-1", "tenant-1", "publisher-1", now.Add(time.Hour)),
+			task:       mustNewDraftTask(t, "task-1", "tenant-1", "publisher-1", now.Add(time.Hour)),
 			intent:     domain.IntentPublish,
 			actor:      publisher,
 			wantStatus: domain.TaskOpen,
@@ -492,6 +519,15 @@ func mustNewTask(t *testing.T, id, tenantID, publisherID string, deadline time.T
 	task, err := domain.NewTask(id, tenantID, publisherID, deadline)
 	if err != nil {
 		t.Fatalf("NewTask() error = %v", err)
+	}
+	return task
+}
+
+func mustNewDraftTask(t *testing.T, id, tenantID, publisherID string, deadline time.Time) *domain.Task {
+	t.Helper()
+	task, err := domain.NewDraftTask(id, tenantID, publisherID, deadline)
+	if err != nil {
+		t.Fatalf("NewDraftTask() error = %v", err)
 	}
 	return task
 }
