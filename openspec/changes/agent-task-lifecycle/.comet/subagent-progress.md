@@ -8,16 +8,16 @@
 ## Current Task
 
 - Plan task: `Completion gate: Task 1 domain lifecycle`
-- OpenSpec mapping: `1.1 实现 Task、Execution、Lease、IdempotencyRecord 和审计数据模型`
-- Phase: `spec-review`
+- OpenSpec mapping: `1.1 partial: Task/Execution/Lease complete; IdempotencyRecord/audit persistence deferred to Task 2`
+- Phase: `done`
 - Implementer status: `DONE`
 - Confirmed technical baseline: `Go 1.26.4; PostgreSQL 18.4; configurable Langfuse provider`
-- Implementation commit: `98d9996..819852d`
+- Implementation commit: `98d9996..e294270`
 - Files changed: `Makefile; backend/go.mod; backend/internal/domain/*; docker-compose.yml`
 - RED evidence: `domain API missing; lease/state transitions missing; completion actor and domain.Error semantics failed before implementation`
 - GREEN evidence: `structured constructors; complete Task/Execution matrices; focused boundaries; 2s real-sequence fuzz; race; vet; Compose all passed with Go 1.26.4`
-- Batch review: `Task 1 final review still needs fixes after 2/2 rounds`
+- Batch review: `approved on clean branch; no Critical/Important/Minor findings`
 - Review/fix round: `2/2`
 - User override: `authorized one extra targeted fix for NewDraftTask`
 - User decision: `constructors return (*Task,error) / (*Execution,error)`
-- Unresolved feedback: `targeted fix is correct; isolating unrelated commits 5a6ce5f and 5b748ee on a preservation branch before final task review`
+- Unresolved feedback: `none`

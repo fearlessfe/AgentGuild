@@ -78,7 +78,7 @@ Makefile                                  统一 build/test/verify 命令
 
 ### Task 1: 建立项目骨架与领域状态机
 
-- [ ] **Completion gate: Task 1 domain lifecycle**
+- [x] **Completion gate: Task 1 domain lifecycle**
 
 **Files:**
 - Create: `backend/go.mod`
@@ -98,7 +98,7 @@ Makefile                                  统一 build/test/verify 命令
 - Produces: `domain.Execution.Heartbeat(now time.Time, generation int64) (Lease, error)`
 - Produces: `domain.Error{Code, Message, Field}`
 
-- [ ] **Step 1: 写状态迁移失败测试**
+- [x] **Step 1: 写状态迁移失败测试**
 
 ```go
 func TestTaskRejectsProgressBeforeClaim(t *testing.T) {
@@ -117,13 +117,13 @@ func TestHeartbeatRejectsStaleGeneration(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行领域测试并确认失败**
+- [x] **Step 2: 运行领域测试并确认失败**
 
 Run: `cd backend && go test ./internal/domain -run 'TestTaskRejects|TestHeartbeatRejects' -count=1`
 
 Expected: FAIL，原因是 `domain` 类型尚未定义。
 
-- [ ] **Step 3: 实现明确意图状态机和 Lease 常量**
+- [x] **Step 3: 实现明确意图状态机和 Lease 常量**
 
 `backend/go.mod` 固定运行时：
 
@@ -157,26 +157,28 @@ func RenewLease(now time.Time, current int64) Lease {
 
 Task 和 Execution 仅暴露 `Publish`、`Claim`、`Cancel`、`Start`、`Heartbeat`、`Expire` 等意图方法；不创建 `SetStatus`。
 
-- [ ] **Step 4: 添加表驱动合法/非法迁移和随机序列不变量测试**
+- [x] **Step 4: 添加表驱动合法/非法迁移和随机序列不变量测试**
 
 ```go
 func FuzzExecutionNeverReturnsFromTerminal(f *testing.F) {
     f.Add(uint8(0))
     f.Fuzz(func(t *testing.T, sequence uint8) {
-        e := domain.AcceptedExecutionFixture()
-        _ = e.Apply(domain.Intent(sequence), domain.SystemActor(), time.Now())
-        require.Equal(t, domain.ExecutionAccepted, e.Status)
+        e, err := domain.NewLeasedExecution("exe-1", "task-1", "tenant-1", "agent-1", time.Now(), 1)
+        require.NoError(t, err)
+        // 随机执行 Start、Heartbeat、Accept、Expire；
+        // 一旦进入 Accepted 或 Expired，后续明确意图不得改变终态。
+        runRandomExplicitIntents(t, e, sequence)
     })
 }
 ```
 
-- [ ] **Step 5: 运行领域测试和格式检查**
+- [x] **Step 5: 运行领域测试和格式检查**
 
 Run: `cd backend && gofmt -w internal/domain && go test ./internal/domain -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交领域骨架**
+- [x] **Step 6: 提交领域骨架**
 
 ```bash
 git add backend/go.mod backend/internal/domain Makefile docker-compose.yml
