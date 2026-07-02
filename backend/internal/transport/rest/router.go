@@ -118,7 +118,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "token verification failed")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), principal)))
+		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	})
 }
 
@@ -344,17 +344,6 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 }
 
 func mustPrincipal(r *http.Request) auth.Principal {
-	p, _ := principalFrom(r.Context())
+	p, _ := auth.PrincipalFrom(r.Context())
 	return p
-}
-
-type principalKey struct{}
-
-func withPrincipal(ctx context.Context, p auth.Principal) context.Context {
-	return context.WithValue(ctx, principalKey{}, p)
-}
-
-func principalFrom(ctx context.Context) (auth.Principal, bool) {
-	p, ok := ctx.Value(principalKey{}).(auth.Principal)
-	return p, ok
 }
