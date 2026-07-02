@@ -2,6 +2,13 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
-  use: { baseURL: "http://127.0.0.1:4173", colorScheme: "dark", channel: "chrome" },
+  use: { baseURL: "http://127.0.0.1:5173", colorScheme: "dark", channel: "chrome" },
   reporter: "line",
+  webServer: {
+    command: "npm run dev",
+    url: "http://127.0.0.1:5173",
+    timeout: 120000,
+    reuseExistingServer: !process.env.CI,
+    env: { VITE_DEMO_MODE: "true" },
+  },
 });

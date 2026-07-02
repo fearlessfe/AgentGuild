@@ -1,41 +1,187 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { listTasks, pollInterval, type TaskStatus, type TaskView } from "../../api/client";
 
-const groups: { status: TaskStatus; label: string }[] = [
-  { status: "open", label: "待领取" }, { status: "in_progress", label: "进行中" }, { status: "claimed", label: "待审核" }, { status: "completed", label: "已完成" },
+const statusLabel: Record<TaskStatus, string> = {
+  draft: "草稿",
+  open: "待领取",
+  claimed: "待审核",
+  in_progress: "进行中",
+  completed: "已完成",
+  cancelled: "已取消",
+  expired: "已过期",
+};
+
+const statusDotLabel: Record<TaskStatus, string> = {
+  draft: "草稿",
+  open: "待领取",
+  claimed: "待审核",
+  in_progress: "运行中",
+  completed: "完成",
+  cancelled: "取消",
+  expired: "过期",
+};
+
+const tabs: { status?: TaskStatus; label: string }[] = [
+  { label: "全部" },
+  { status: "open", label: "待领取" },
+  { status: "in_progress", label: "进行中" },
+  { status: "claimed", label: "待审核" },
+  { status: "completed", label: "已完成" },
+  { status: "cancelled", label: "已取消" },
+  { status: "expired", label: "已过期" },
+  { status: "draft", label: "草稿" },
 ];
-const statusLabel: Record<string, string> = { open: "待领取", in_progress: "运行中", claimed: "待审核", completed: "完成", cancelled: "取消", expired: "过期" };
+
+const typeOptions = ["", "Go", "TypeScript", "Python", "Rust", "SQL", "YAML"];
+
+function formatDeadline(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
 
 export function TaskList() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const statusParam = searchParams.get("status");
+  const statuses = statusParam ? [statusParam] : undefined;
+  const type = searchParams.get("type") ?? undefined;
+  const publisher = searchParams.get("publisher_agent_version_id") ?? undefined;
+
   const query = useInfiniteQuery({
-    queryKey: ["tasks"], initialPageParam: "",
-    queryFn: ({ pageParam }) => listTasks({ cursor: pageParam || undefined }),
+    queryKey: ["tasks", { statuses, type, publisher }],
+    initialPageParam: "",
+    queryFn: ({ pageParam }) =>
+      listTasks({
+        statuses,
+        type,
+        publisherAgentVersionId: publisher,
+        cursor: pageParam || undefined,
+      }),
     getNextPageParam: (last) => last.meta.next_cursor || undefined,
     refetchInterval: (state) => pollInterval(state.state.data?.pages.at(-1)?.meta.poll_after_seconds),
   });
+
+  function updateSearchParam(key: string, value: string | undefined) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  function setStatusFilter(status?: TaskStatus) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (status) next.set("status", status);
+      else next.delete("status");
+      return next;
+    });
+  }
+
   if (query.isPending) return <div className="loading">正在同步任务…</div>;
   if (query.isError) return <div className="error">无法读取任务：{query.error.message}</div>;
+
   const tasks = query.data.pages.flatMap((page) => page.data.items);
-  return <div className="task-table" aria-label="任务列表">
-    {groups.map((group) => {
-      const items = tasks.filter((task) => task.status === group.status);
-      return <section className={`task-group group-${group.status}`} key={group.status}>
-        <header className="group-header"><span>⌄</span><strong>{group.label} · {items.length}</strong><span className="group-meta">{group.status === "in_progress" ? "Agent　　进度　　　　耗时　　 当前活动　　 消耗 (USD)" : "仓库　　　　　　语言　　　 截止时间"}</span></header>
-        {items.map((task, index) => <TaskRow task={task} index={index} key={task.id} />)}
-      </section>;
-    })}
-    {query.hasNextPage && <button className="load-more" onClick={() => query.fetchNextPage()} disabled={query.isFetchingNextPage}>加载更多</button>}
-  </div>;
+  const groups = tabs.filter((t) => t.status).map((t) => ({
+    status: t.status!,
+    label: statusLabel[t.status!],
+    items: tasks.filter((task) => task.status === t.status),
+  }));
+
+  return (
+    <>
+      <nav className="tabs" role="tablist" aria-label="任务状态筛选">
+        {tabs.map((tab) => {
+          const active = tab.status ? statusParam === tab.status : !statusParam;
+          return (
+            <button
+              key={tab.status ?? "all"}
+              role="tab"
+              aria-selected={active}
+              className={active ? "active" : undefined}
+              onClick={() => setStatusFilter(tab.status)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="filters">
+        <label htmlFor="type-filter">
+          类型
+          <select
+            id="type-filter"
+            value={type ?? ""}
+            onChange={(e) => updateSearchParam("type", e.target.value || undefined)}
+          >
+            {typeOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt || "全部"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label htmlFor="publisher-filter">
+          发布 Agent
+          <input
+            id="publisher-filter"
+            type="text"
+            value={publisher ?? ""}
+            placeholder="publisher_agent_version_id"
+            onChange={(e) => updateSearchParam("publisher_agent_version_id", e.target.value || undefined)}
+          />
+        </label>
+      </div>
+      <div className="task-table" aria-label="任务列表">
+        {groups.map((group) => (
+          <section className={`task-group group-${group.status}`} key={group.status}>
+            <header className="group-header">
+              <span>⌄</span>
+              <strong>{group.label} · {group.items.length}</strong>
+              <span className="group-meta">仓库　　　　　　类型　　　 截止时间</span>
+            </header>
+            {group.items.map((task) => (
+              <TaskRow task={task} key={task.id} />
+            ))}
+          </section>
+        ))}
+        {query.hasNextPage && (
+          <button
+            className="load-more"
+            onClick={() => query.fetchNextPage()}
+            disabled={query.isFetchingNextPage}
+          >
+            加载更多
+          </button>
+        )}
+      </div>
+    </>
+  );
 }
 
-function TaskRow({ task, index }: { task: TaskView; index: number }) {
-  const progress = task.status === "in_progress" ? [65, 30, 80, 55, 20, 0, 90][index % 7] : undefined;
-  return <Link className="task-row" to={`/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
-    <span className="checkbox" aria-hidden="true" />
-    <span className="task-id">{task.id}</span><span className={`status-dot ${task.status}`} aria-label={statusLabel[task.status]} />
-    <span className="task-title">{task.title}</span>
-    {progress !== undefined ? <><span className="agent">▣　{task.claimed_by ?? "Atlas v12"}</span><span className="progress"><i style={{ width: `${progress}%` }} /></span><span className="percent">{progress ? `${progress}%` : "等待响应"}</span><span className="elapsed">{progress ? `${16 + index * 9}m` : "—"}</span><span className="stage">{progress ? ["运行测试", "修改代码", "静态分析"][index % 3] : "等待 Agent"}</span><span className="cost">${progress ? (progress * .00103).toFixed(3) : "0.000"}</span></> : <><span className="repo">{task.publisher_agent_version_id}</span><span className="language">{task.type}</span><span className="deadline">今天 18:00</span></>}
-    <span className="more">•••</span>
-  </Link>;
+function TaskRow({ task }: { task: TaskView }) {
+  return (
+    <Link
+      className="task-row"
+      to={`/tasks/${task.id}`}
+      aria-label={`查看 ${task.id}`}
+    >
+      <span className="checkbox" aria-hidden="true" />
+      <span className="task-id">{task.id}</span>
+      <span
+        className={`status-dot ${task.status}`}
+        aria-label={statusDotLabel[task.status]}
+      />
+      <span className="task-title" title={task.title}>{task.title}</span>
+      <span className="repo" title={task.publisher_agent_version_id}>
+        {task.publisher_agent_version_id}
+      </span>
+      <span className="language" title={task.type}>{task.type}</span>
+      <span className="deadline">{formatDeadline(task.deadline)}</span>
+      <span className="more">•••</span>
+    </Link>
+  );
 }
