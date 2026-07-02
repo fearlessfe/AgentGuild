@@ -12,7 +12,7 @@ base-ref: c46a757df241db383a3a9aec386efa11d7f4472e
 
 **Architecture:** 采用 Go 模块化单体：领域对象只维护状态机不变量，Application Service 统一编排授权、幂等、事务、审计和 outbox，REST 与 MCP 仅做协议适配。PostgreSQL 是状态与时间事实源；React 只提供观察页面；Langfuse 通过可替换 `TraceCostProvider` 异步接入。
 
-**Tech Stack:** Go 1.24、PostgreSQL 16、pgx v5、chi、官方 MCP Go SDK v1.6.1、OpenTelemetry OTLP/HTTP、React 19、TypeScript、Vite、TanStack Query、Vitest、Playwright。
+**Tech Stack:** Go 1.26.4、PostgreSQL 18.4、pgx v5、chi、官方 MCP Go SDK v1.6.1、OpenTelemetry OTLP/HTTP、React 19、TypeScript、Vite、TanStack Query、Vitest、Playwright。
 
 ## Global Constraints
 
@@ -26,6 +26,9 @@ base-ref: c46a757df241db383a3a9aec386efa11d7f4472e
 - MCP Execution 写工具只接受 OAuth 主体、`execution_id` 和 `lease_generation`，不得接受 Lease Token。
 - Langfuse 不可用不得回滚或阻塞任务生命周期事务。
 - 首版不依据成本自动终止 Execution。
+- `go.mod` 使用 `go 1.26.0` 和 `toolchain go1.26.4`；PostgreSQL 容器固定 `postgres:18.4`。
+- Langfuse Cloud 使用 Metrics API v2；自托管部署使用配置指定的兼容读取模式，领域层不得依赖具体 API 版本。
+- OAuth 通过可替换 `TokenVerifier` 解析 `Principal`；限流通过可替换 `RateLimiter` 接入，本地实现不声明为跨实例全局限流。
 - React 任务页以 `docs/assets/agentguild-tasks.png` 为主要视觉事实源；保留深色高密度工作台、左侧导航、顶部上下文栏、分组任务表和右侧详情栏。
 - `docs/assets/agentguild-code-review.png` 与 `docs/assets/agentguild-review-command-center.png` 仅用于复用全局导航、间距、状态色和面板语言；本 change 不实现代码评审界面。
 - 设计稿中的发布、领取、分配和审核按钮超出当前只读 React 范围，不得仅为视觉还原而绕过本 change 的权限与范围约束。
@@ -88,6 +91,8 @@ Makefile                                  统一 build/test/verify 命令
 - Create: `docker-compose.yml`
 
 **Interfaces:**
+- Produces: `domain.NewTask(...) (*Task, error)`
+- Produces: `domain.NewLeasedExecution(...) (*Execution, error)`
 - Produces: `domain.Task.Apply(intent Intent, actor Actor, now time.Time) error`
 - Produces: `domain.Execution.Start(now time.Time, generation int64) error`
 - Produces: `domain.Execution.Heartbeat(now time.Time, generation int64) (Lease, error)`
@@ -97,15 +102,17 @@ Makefile                                  统一 build/test/verify 命令
 
 ```go
 func TestTaskRejectsProgressBeforeClaim(t *testing.T) {
-    task := domain.NewTask("task-1", "tenant-1", "publisher-1", time.Now().Add(time.Hour))
-    err := task.Apply(domain.IntentStart, domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, time.Now())
+    task, err := domain.NewTask("task-1", "tenant-1", "publisher-1", time.Now().Add(time.Hour))
+    require.NoError(t, err)
+    err = task.Apply(domain.IntentStart, domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, time.Now())
     require.ErrorIs(t, err, domain.ErrStateConflict)
     require.Equal(t, domain.TaskOpen, task.Status)
 }
 
 func TestHeartbeatRejectsStaleGeneration(t *testing.T) {
-    execution := domain.NewLeasedExecution("exe-1", "task-1", "tenant-1", "agent-1", time.Now(), 3)
-    _, err := execution.Heartbeat(time.Now().Add(time.Minute), 2)
+    execution, err := domain.NewLeasedExecution("exe-1", "task-1", "tenant-1", "agent-1", time.Now(), 3)
+    require.NoError(t, err)
+    _, err = execution.Heartbeat(time.Now().Add(time.Minute), 2)
     require.ErrorIs(t, err, domain.ErrLeaseExpired)
 }
 ```
@@ -117,6 +124,18 @@ Run: `cd backend && go test ./internal/domain -run 'TestTaskRejects|TestHeartbea
 Expected: FAIL，原因是 `domain` 类型尚未定义。
 
 - [ ] **Step 3: 实现明确意图状态机和 Lease 常量**
+
+`backend/go.mod` 固定运行时：
+
+```go
+module agentguild.dev/agentguild/backend
+
+go 1.26.0
+
+toolchain go1.26.4
+```
+
+`docker-compose.yml` 固定 `postgres:18.4`，不得使用浮动标签。
 
 ```go
 const (
@@ -272,7 +291,7 @@ git commit -m "feat: persist task lifecycle atomically"
 
 **Interfaces:**
 - Produces: `application.Service.PublishTask`、`ListTasks`、`GetTask`、`CancelTask`
-- Produces: `auth.Principal{TenantID, AgentID, AgentVersionID, Scopes}`
+- Produces: `auth.TokenVerifier` 和 `auth.Principal{TenantID, AgentID, AgentVersionID, Scopes}`
 - Produces: stable `application.Envelope[T]{Data, Meta}`
 
 - [ ] **Step 1: 写权限、deadline 和原子取消测试**
@@ -459,9 +478,9 @@ Run: `cd backend && go test ./internal/transport/rest ./internal/auth -count=1`
 
 Expected: FAIL，路由和 OAuth verifier 不存在。
 
-- [ ] **Step 3: 实现 OAuth JWT/JWKS 验证和 Principal 注入**
+- [ ] **Step 3: 实现可替换 TokenVerifier、OAuth JWT/JWKS 验证和 Principal 注入**
 
-验证 issuer、audience、expiry、tenant、agent/version claims 和 scopes；HTTP middleware 只把验证后的 `auth.Principal` 放入 context。
+`TokenVerifier.Verify(ctx, rawToken) (Principal, error)` 是 transport 依赖的边界；首个 JWT/JWKS 实现验证 issuer、audience、expiry、tenant、agent/version claims 和 scopes。HTTP middleware 只把验证后的 `auth.Principal` 放入 context，后续 Agent identity change 可替换验证实现而不修改生命周期服务。
 
 - [ ] **Step 4: 实现 REST 适配与稳定映射**
 
@@ -589,6 +608,7 @@ git commit -m "feat: expose task lifecycle over MCP"
 - Produces: `telemetry.TraceCostProvider.Observe(ctx, ExecutionRef) (CostObservation, error)`
 - Produces: `CostObservation{ObservedCost, SelfReportedCost, Coverage, Provider, Cursor}`
 - Produces: `worker.Outbox.RunBatch(ctx, limit int) (int, error)`
+- Produces: `ratelimit.RateLimiter.Allow(ctx, Key) (Decision, error)`
 
 - [ ] **Step 1: 写 Provider 故障不影响领域提交测试**
 
@@ -608,7 +628,7 @@ Run: `cd backend && go test ./internal/telemetry ./internal/worker -count=1`
 
 Expected: FAIL，Provider 和 worker 尚未定义。
 
-- [ ] **Step 3: 实现 TraceCostProvider 与 Langfuse Metrics API v2 适配**
+- [ ] **Step 3: 实现 TraceCostProvider 与可配置 Langfuse 读取模式**
 
 ```go
 type TraceCostProvider interface {
@@ -624,15 +644,15 @@ type CostObservation struct {
 }
 ```
 
-Langfuse 使用 Basic Auth 调用 `/api/public/v2/metrics`，按 execution、tenant、task、agent version 标签聚合 `totalCost`；没有外部工具 trace 时标记 `partial`，HTTP/解析故障标记 `unavailable`。
+Langfuse Cloud 模式使用 Basic Auth 调用 `/api/public/v2/metrics`，按 execution、tenant、task、agent version 标签聚合 `totalCost`。自托管模式从配置读取兼容 API 路径和能力，若实例不支持成本读取则返回 `unavailable`；没有外部工具 trace 时标记 `partial`，HTTP/解析故障标记 `unavailable`。
 
 - [ ] **Step 4: 实现 outbox 锁定、指数退避和幂等消费**
 
 worker 使用 `FOR UPDATE SKIP LOCKED` 领取事件，通过 `attempts`、`claimed_until`、`published_at` 防止并发重复；同一 source cursor 更新 `execution_usage` 必须幂等。
 
-- [ ] **Step 5: 实现 tenant+Agent 令牌桶限流与审计查询**
+- [ ] **Step 5: 实现可替换 RateLimiter、tenant+Agent 本地令牌桶与审计查询**
 
-限流错误统一返回 `RATE_LIMITED` 和 `retry_after_seconds`；审计查询只返回调用者可见 Task 的脱敏事件摘要。
+Application Service 依赖 `RateLimiter` 接口；MVP 提供 tenant+Agent 进程内令牌桶，并明确其不提供跨实例全局配额。生产部署可由 Redis 或 API Gateway 实现同一接口。限流错误统一返回 `RATE_LIMITED` 和 `retry_after_seconds`；审计查询只返回调用者可见 Task 的脱敏事件摘要。
 
 - [ ] **Step 6: 运行故障、重放和限流测试**
 

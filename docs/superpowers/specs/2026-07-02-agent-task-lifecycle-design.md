@@ -27,6 +27,8 @@ Agent Client ─ MCP Adapter ┘    ├─ Authorization / Policy
 
 Go 模块化单体划分：
 
+运行时基线为 Go 1.26.4 和 PostgreSQL 18.4。Go `toolchain` 指令固定补丁版本，CI 与本地开发使用同一工具链；PostgreSQL 镜像固定到 18.4，不使用浮动 `latest` 标签。
+
 | 模块 | 职责 |
 |---|---|
 | `task` | Task 聚合、发布、发现、取消、deadline 和 Task 状态 |
@@ -84,6 +86,8 @@ Submitted → Validating → Reviewing
 | 人类审核人 | revision requested、accept、reject |
 
 任何接口都不得接受通用 `set_status`。Application Service 根据当前状态、Actor、Scope 和领域不变量决定迁移。
+
+领域构造器使用 `(*Aggregate, error)` 返回形式。缺少 tenant、实体 ID、Actor ID、deadline 或非法 generation 时返回带稳定 code 与 field 的结构化领域错误，不得以裸 `nil` 表示构造失败。
 
 ## 4. Claim 与 Lease
 
@@ -184,6 +188,8 @@ execution_usage:
 ```
 
 TraceCostProvider 是接口，Langfuse 是首个实现。Trace 使用 tenant、task、execution 和 agent version 标签。优先采用模型响应中的实际 usage/cost，其次采用 Provider 的模型价格推算。
+
+Langfuse 适配器按部署能力配置读取模式：Cloud 使用 Metrics API v2，自托管实例使用其版本支持的兼容 API；不支持成本读取或 Provider 故障时返回 `unavailable`。领域层不得依赖具体 Langfuse API 版本。
 
 未覆盖的外部工具成本必须使 coverage 为 partial；Provider 故障时为 unavailable。Agent 自报用量只用于对账。MVP 不因成本自动终止 Execution。
 
@@ -367,5 +373,6 @@ MCP、React 和 Langfuse 均通过功能开关启用。关闭这些适配层不�
 - Lease 重分配与迟到写入：使用 hard expiry、generation fencing 和条件更新。
 - REST/MCP 漂移：共享 Application Service、DTO 和等价契约测试。
 - Langfuse 覆盖不完整：显式 coverage，不把 partial 当作完整成本。
+- Langfuse Cloud 与自托管 API 能力不同：由 Provider 配置选择读取模式，不在 Application Service 中硬编码 API 版本。
 - 无累计运行上限：强制 deadline、Lease 失联恢复和发布方取消。
 - 单体模块耦合：Transport 不访问 Repository，跨模块只调用公开 Application Service。
