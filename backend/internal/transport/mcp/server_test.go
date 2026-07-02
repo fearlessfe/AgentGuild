@@ -404,6 +404,12 @@ func TestMCPRateLimiterReturns429WhenLimited(t *testing.T) {
 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.Equal(t, "30", rec.Header().Get("Retry-After"))
+	var body struct {
+		Error MCPError `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "RATE_LIMITED", body.Error.Code)
+	require.Equal(t, 30, body.Error.RetryAfterSeconds)
 }
 
 func TestMCPApplicationRateLimitIncludesRetryAfterSeconds(t *testing.T) {

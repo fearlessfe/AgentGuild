@@ -518,7 +518,7 @@ func (tx *fakeTx) ListTaskEvents(_ context.Context, tenantID, taskID string, aft
 		if id <= afterID {
 			continue
 		}
-		out = append(out, application.TaskEventSummary{TenantID: e.TenantID, TaskID: e.TaskID, ExecutionID: e.ExecutionID, ActorType: e.ActorType, ActorID: e.ActorID, Intent: e.Intent, FromState: e.FromState, ToState: e.ToState, Reason: e.Reason, CreatedAt: e.CreatedAt})
+		out = append(out, application.TaskEventSummary{ID: id, TenantID: e.TenantID, TaskID: e.TaskID, ExecutionID: e.ExecutionID, ActorType: e.ActorType, ActorID: e.ActorID, Intent: e.Intent, FromState: e.FromState, ToState: e.ToState, CreatedAt: e.CreatedAt})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	if len(out) > limit {

@@ -36,7 +36,7 @@ func TestOutboxProcessesExecutionEventAndRecordsUsage(t *testing.T) {
 	usage := loadUsage(t, db, "tenant-1", "exe-1")
 	require.Equal(t, "complete", usage.Coverage)
 	require.Equal(t, "langfuse", usage.Provider)
-	require.Equal(t, "cursor-1", usage.SourceCursor)
+	require.Equal(t, "execution-snapshot:exe-1", usage.SourceCursor)
 	require.NotNil(t, usage.ObservedCost)
 	require.Equal(t, "0.001", usage.ObservedCost.String())
 
@@ -69,6 +69,194 @@ func TestOutboxIdempotentForSameCursor(t *testing.T) {
 	err = db.QueryRow(ctx, `SELECT count(*) FROM execution_usage WHERE tenant_id='tenant-1' AND execution_id='exe-1'`).Scan(&count)
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "同一 cursor 不应产生重复 usage 行")
+}
+
+func TestOutboxEmptyCursorUnavailableRecoversToComplete(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+
+	calls := 0
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		calls++
+		if calls == 1 {
+			return telemetry.CostObservation{Coverage: telemetry.CoverageUnavailable, Provider: "langfuse"}, errors.New("temporary")
+		}
+		return telemetry.CostObservation{ObservedCost: decimal.RequireFromString("0.5"), Coverage: telemetry.CoverageComplete, Provider: "langfuse"}, nil
+	})
+	w := worker.NewOutbox(db, provider)
+	_, err := w.RunBatch(ctx, 1)
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, `UPDATE outbox_events SET claimed_until=clock_timestamp()-interval '1 second' WHERE tenant_id='tenant-1' AND id='evt-1'`)
+	require.NoError(t, err)
+	_, err = w.RunBatch(ctx, 1)
+	require.NoError(t, err)
+
+	var count int
+	var coverage string
+	require.NoError(t, db.QueryRow(ctx, `SELECT count(*), max(coverage) FROM execution_usage WHERE tenant_id='tenant-1' AND execution_id='exe-1'`).Scan(&count, &coverage))
+	require.Equal(t, 1, count)
+	require.Equal(t, "complete", coverage)
+}
+
+func TestOutboxPartialRemainsPendingAndUpgradesWithoutDowngrade(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+
+	observations := []telemetry.CostObservation{
+		{Coverage: telemetry.CoveragePartial, Provider: "langfuse"},
+		{ObservedCost: decimal.RequireFromString("0.75"), Coverage: telemetry.CoverageComplete, Provider: "langfuse"},
+	}
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		obs := observations[0]
+		if len(observations) > 1 {
+			observations = observations[1:]
+		}
+		return obs, nil
+	})
+	w := worker.NewOutbox(db, provider)
+	_, err := w.RunBatch(ctx, 1)
+	require.NoError(t, err)
+	var published bool
+	require.NoError(t, db.QueryRow(ctx, `SELECT published_at IS NOT NULL FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&published))
+	require.False(t, published)
+	_, err = db.Exec(ctx, `UPDATE outbox_events SET claimed_until=clock_timestamp()-interval '1 second' WHERE tenant_id='tenant-1' AND id='evt-1'`)
+	require.NoError(t, err)
+	_, err = w.RunBatch(ctx, 1)
+	require.NoError(t, err)
+
+	u := loadUsage(t, db, "tenant-1", "exe-1")
+	require.Equal(t, "complete", u.Coverage)
+	require.NotNil(t, u.ObservedCost)
+	require.Equal(t, "0.75", u.ObservedCost.String())
+}
+
+func TestOutboxWorseCoverageCannotOverwriteCompleteSnapshot(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-complete", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+	provider := &staticProvider{obs: telemetry.CostObservation{ObservedCost: decimal.RequireFromString("2.5"), Coverage: telemetry.CoverageComplete, Provider: "langfuse"}}
+	w := worker.NewOutbox(db, provider)
+	_, err := w.RunBatch(ctx, 1)
+	require.NoError(t, err)
+
+	insertOutbox(t, db, "tenant-1", "evt-partial", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+	provider.obs = telemetry.CostObservation{Coverage: telemetry.CoveragePartial, Provider: "langfuse"}
+	_, err = w.RunBatch(ctx, 1)
+	require.NoError(t, err)
+	u := loadUsage(t, db, "tenant-1", "exe-1")
+	require.Equal(t, "complete", u.Coverage)
+	require.NotNil(t, u.ObservedCost)
+	require.Equal(t, "2.5", u.ObservedCost.String())
+}
+
+func TestOutboxStaleClaimantCannotWriteUsageOrPublish(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		_, err := db.Exec(ctx, `UPDATE outbox_events SET claimed_until=clock_timestamp()+interval '2 minutes' WHERE tenant_id='tenant-1' AND id='evt-1'`)
+		require.NoError(t, err)
+		return telemetry.CostObservation{ObservedCost: decimal.RequireFromString("1"), Coverage: telemetry.CoverageComplete, Provider: "langfuse"}, nil
+	})
+	_, err := worker.NewOutbox(db, provider).RunBatch(ctx, 1)
+	require.Error(t, err)
+	var usageCount int
+	require.NoError(t, db.QueryRow(ctx, `SELECT count(*) FROM execution_usage WHERE tenant_id='tenant-1' AND execution_id='exe-1'`).Scan(&usageCount))
+	require.Zero(t, usageCount)
+	var published bool
+	require.NoError(t, db.QueryRow(ctx, `SELECT published_at IS NOT NULL FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&published))
+	require.False(t, published)
+}
+
+func TestOutboxStaleClaimantCannotScheduleFailure(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+	var replacementClaim time.Time
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		require.NoError(t, db.QueryRow(ctx, `SELECT clock_timestamp()+interval '2 minutes'`).Scan(&replacementClaim))
+		_, err := db.Exec(ctx, `UPDATE outbox_events SET claimed_until=$1 WHERE tenant_id='tenant-1' AND id='evt-1'`, replacementClaim)
+		require.NoError(t, err)
+		return telemetry.CostObservation{Coverage: telemetry.CoverageUnavailable, Provider: "langfuse"}, errors.New("temporary")
+	})
+	_, err := worker.NewOutbox(db, provider).RunBatch(ctx, 1)
+	require.Error(t, err)
+	var attempts int
+	var claimedUntil time.Time
+	require.NoError(t, db.QueryRow(ctx, `SELECT attempts, claimed_until FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&attempts, &claimedUntil))
+	require.Zero(t, attempts)
+	require.Equal(t, replacementClaim, claimedUntil)
+}
+
+func TestOutboxPoisonEventIsRetried(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	insertOutbox(t, db, "tenant-1", "evt-poison", "execution.started", "execution", "exe", `{}`)
+	_, err := worker.NewOutbox(db, &staticProvider{}).RunBatch(ctx, 1)
+	require.NoError(t, err)
+	var attempts int
+	require.NoError(t, db.QueryRow(ctx, `SELECT attempts FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-poison'`).Scan(&attempts))
+	require.Equal(t, 1, attempts)
+}
+
+func TestOutboxCompleteZeroCostIsStoredAsZero(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+	provider := &staticProvider{obs: telemetry.CostObservation{Coverage: telemetry.CoverageComplete, Provider: "langfuse"}}
+	_, err := worker.NewOutbox(db, provider).RunBatch(ctx, 1)
+	require.NoError(t, err)
+	u := loadUsage(t, db, "tenant-1", "exe-1")
+	require.NotNil(t, u.ObservedCost)
+	require.True(t, u.ObservedCost.IsZero())
+}
+
+func TestOutboxSuccessUsesFreshDatabaseTimeAfterProviderCall(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+	var providerFinished time.Time
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		require.NoError(t, db.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&providerFinished))
+		return telemetry.CostObservation{Coverage: telemetry.CoverageComplete, Provider: "langfuse"}, nil
+	})
+	_, err := worker.NewOutbox(db, provider).RunBatch(ctx, 1)
+	require.NoError(t, err)
+	var observedAt, publishedAt time.Time
+	require.NoError(t, db.QueryRow(ctx, `
+		SELECT u.observed_at, o.published_at
+		FROM execution_usage u JOIN outbox_events o ON o.tenant_id=u.tenant_id
+		WHERE u.tenant_id='tenant-1' AND u.execution_id='exe-1' AND o.id='evt-1'`).Scan(&observedAt, &publishedAt))
+	require.False(t, observedAt.Before(providerFinished))
+	require.False(t, publishedAt.Before(providerFinished))
+}
+
+func TestOutboxFailureBackoffUsesFreshDatabaseTimeAfterProviderCall(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+	var providerFinished time.Time
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		time.Sleep(1300 * time.Millisecond)
+		require.NoError(t, db.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&providerFinished))
+		return telemetry.CostObservation{Coverage: telemetry.CoverageUnavailable, Provider: "langfuse"}, errors.New("temporary")
+	})
+	_, err := worker.NewOutbox(db, provider).RunBatch(ctx, 1)
+	require.NoError(t, err)
+	var retryAt time.Time
+	require.NoError(t, db.QueryRow(ctx, `SELECT claimed_until FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&retryAt))
+	require.True(t, retryAt.After(providerFinished.Add(1500*time.Millisecond)), "backoff must start from fresh post-provider database time")
 }
 
 func TestOutboxCommitsClaimBeforeCallingProvider(t *testing.T) {

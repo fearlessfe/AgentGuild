@@ -22,6 +22,9 @@ type LangfuseConfig struct {
 	Mode         string // "cloud" 或 "self-hosted"
 	SupportsCost bool   // 自托管实例是否支持成本读取
 	MetricsPath  string // 自托管实例兼容的 Metrics API 路径
+	// CompleteCoverageTag 是由执行侧在确认所有成本来源（包括外部工具）均已上报后写入的 trace tag。
+	// 未配置此明确证据时，即使 Metrics API 返回成本也只能判定为 partial。
+	CompleteCoverageTag string
 }
 
 // NewLangfuseProvider 创建 Langfuse TraceCostProvider。
@@ -73,7 +76,7 @@ func (p *langfuseProvider) Observe(ctx context.Context, ref ExecutionRef) (CostO
 		ToTimestamp:   time.Now().UTC().Add(time.Minute).Format(time.RFC3339),
 		Filters: []metricFilter{{
 			Column: "traceTags", Operator: "all of", Type: "arrayOptions",
-			Value: []string{"tenant:" + ref.TenantID, "task:" + ref.TaskID, "execution:" + ref.ExecutionID, "agent_version:" + ref.AgentVersionID},
+			Value: coverageTags(ref, p.cfg.CompleteCoverageTag),
 		}},
 	}
 	encodedQuery, err := json.Marshal(query)
@@ -111,7 +114,19 @@ func (p *langfuseProvider) Observe(ctx context.Context, ref ExecutionRef) (CostO
 	if !ok {
 		return CostObservation{Coverage: CoveragePartial, Provider: "langfuse", Cursor: metrics.Meta.Cursor}, nil
 	}
-	return CostObservation{ObservedCost: cost, Coverage: CoverageComplete, Provider: "langfuse", Cursor: metrics.Meta.Cursor}, nil
+	coverage := CoveragePartial
+	if p.cfg.CompleteCoverageTag != "" {
+		coverage = CoverageComplete
+	}
+	return CostObservation{ObservedCost: cost, Coverage: coverage, Provider: "langfuse", Cursor: metrics.Meta.Cursor}, nil
+}
+
+func coverageTags(ref ExecutionRef, completeCoverageTag string) []string {
+	tags := []string{"tenant:" + ref.TenantID, "task:" + ref.TaskID, "execution:" + ref.ExecutionID, "agent_version:" + ref.AgentVersionID}
+	if completeCoverageTag != "" {
+		tags = append(tags, completeCoverageTag)
+	}
+	return tags
 }
 
 func unavailable(provider string) CostObservation {

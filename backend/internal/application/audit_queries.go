@@ -20,7 +20,6 @@ type TaskEventSummary struct {
 	Intent      string    `json:"intent"`
 	FromState   string    `json:"from_state"`
 	ToState     string    `json:"to_state"`
-	Reason      string    `json:"reason,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

@@ -74,6 +74,10 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 }
 
 func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, command StartExecution) (Envelope[ExecutionView], error) {
+	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
+		var result Envelope[ExecutionView]
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err
@@ -84,6 +88,10 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 }
 
 func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Principal, command HeartbeatExecution) (Envelope[ExecutionView], error) {
+	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
+		var result Envelope[ExecutionView]
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err

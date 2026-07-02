@@ -8,7 +8,28 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/ratelimit"
 )
+
+type countingRateLimiter struct{ calls int }
+
+func (l *countingRateLimiter) Allow(context.Context, ratelimit.Key) (ratelimit.Decision, error) {
+	l.calls++
+	return ratelimit.Decision{Allowed: true}, nil
+}
+
+func TestStartAndHeartbeatAuthorizeBeforeConsumingRateLimit(t *testing.T) {
+	limiter := &countingRateLimiter{}
+	svc, _ := newServiceFixtureWithRateLimiter(limiter)
+	unauthorized := principal("tenant", "worker")
+	_, err := svc.StartExecution(context.Background(), unauthorized, application.StartExecution{ExecutionID: "execution"})
+	assertDomainError(t, err, "forbidden", "")
+	_, err = svc.HeartbeatExecution(context.Background(), unauthorized, application.HeartbeatExecution{ExecutionID: "execution"})
+	assertDomainError(t, err, "forbidden", "")
+	if limiter.calls != 0 {
+		t.Fatalf("unauthorized requests consumed %d rate-limit tokens", limiter.calls)
+	}
+}
 
 func TestClaimIsAtomicAndReplayStable(t *testing.T) {
 	svc, tx := newServiceFixture()

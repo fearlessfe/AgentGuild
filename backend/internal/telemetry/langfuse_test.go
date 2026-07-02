@@ -55,7 +55,7 @@ func TestLangfuseCloudProviderReturnsFullCost(t *testing.T) {
 		require.Equal(t, "traceTags", query.Filters[0].Column)
 		require.Equal(t, "all of", query.Filters[0].Operator)
 		require.Equal(t, "arrayOptions", query.Filters[0].Type)
-		require.Equal(t, []string{"tenant:tenant-1", "task:task-1", "execution:exe-1", "agent_version:agent-1"}, query.Filters[0].Value)
+		require.Equal(t, []string{"tenant:tenant-1", "task:task-1", "execution:exe-1", "agent_version:agent-1", "cost_coverage:complete"}, query.Filters[0].Value)
 
 		resp := map[string]any{
 			"data": []map[string]any{{"sum_totalCost": "0.00123"}},
@@ -66,10 +66,11 @@ func TestLangfuseCloudProviderReturnsFullCost(t *testing.T) {
 	defer server.Close()
 
 	p := telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{
-		BaseURL:   server.URL,
-		PublicKey: "public",
-		SecretKey: "secret",
-		Mode:      "cloud",
+		BaseURL:             server.URL,
+		PublicKey:           "public",
+		SecretKey:           "secret",
+		Mode:                "cloud",
+		CompleteCoverageTag: "cost_coverage:complete",
 	}, server.Client())
 
 	obs, err := p.Observe(context.Background(), ref)
@@ -88,15 +89,28 @@ func TestLangfuseSelfHostedUsesConfiguredCompatibleMetricsPath(t *testing.T) {
 	defer server.Close()
 
 	p := telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{
-		BaseURL:      server.URL,
-		Mode:         "self-hosted",
-		SupportsCost: true,
-		MetricsPath:  "/custom/metrics",
+		BaseURL:             server.URL,
+		Mode:                "self-hosted",
+		SupportsCost:        true,
+		MetricsPath:         "/custom/metrics",
+		CompleteCoverageTag: "cost_coverage:complete",
 	}, server.Client())
 	obs, err := p.Observe(context.Background(), telemetry.ExecutionRef{})
 	require.NoError(t, err)
 	require.Equal(t, telemetry.CoverageComplete, obs.Coverage)
 	require.Equal(t, "1.25", obs.ObservedCost.String())
+}
+
+func TestLangfuseCostWithoutExplicitCoverageEvidenceRemainsPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"sum_totalCost": "1.25"}}})
+	}))
+	defer server.Close()
+
+	p := telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{BaseURL: server.URL, Mode: "cloud"}, server.Client())
+	obs, err := p.Observe(context.Background(), telemetry.ExecutionRef{ExecutionID: "execution"})
+	require.NoError(t, err)
+	require.Equal(t, telemetry.CoveragePartial, obs.Coverage)
 }
 
 func TestLangfuseSelfHostedWithoutCostSupportReturnsUnavailable(t *testing.T) {

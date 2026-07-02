@@ -3,6 +3,7 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -44,11 +45,17 @@ type TokenBucketConfig struct {
 
 // NewLocalTokenBucket 创建进程内令牌桶限流器。
 // 注意：该实现不提供跨实例全局配额。
-func NewLocalTokenBucket(cfg TokenBucketConfig) RateLimiter {
+func NewLocalTokenBucket(cfg TokenBucketConfig) (RateLimiter, error) {
+	if cfg.Rate <= 0 {
+		return nil, fmt.Errorf("rate must be positive")
+	}
+	if cfg.Burst <= 0 {
+		return nil, fmt.Errorf("burst must be positive")
+	}
 	return &localBucket{
 		cfg:     cfg,
 		buckets: make(map[string]*bucket),
-	}
+	}, nil
 }
 
 type localBucket struct {

@@ -128,7 +128,7 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		allowed, retryAfter := s.limiter.Allow(r.Context(), key)
 		if !allowed {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded")
+			writeErrorWithRetry(w, http.StatusTooManyRequests, "RATE_LIMITED", "rate limit exceeded", retryAfter)
 			return
 		}
 		next.ServeHTTP(w, r)

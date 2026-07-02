@@ -98,13 +98,18 @@ func successResult(data any) *mcp.CallToolResult {
 
 // writeError 写入 HTTP 层（非 tool 层）稳定错误响应；用于认证失败等协议级错误。
 func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeErrorWithRetry(w, status, code, message, 0)
+}
+
+func writeErrorWithRetry(w http.ResponseWriter, status int, code, message string, retryAfterSeconds int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	errorBody := MCPError{Code: code, Message: message}
+	if retryAfterSeconds > 0 {
+		errorBody.RetryAfterSeconds = retryAfterSeconds
+	}
 	resp := map[string]any{
-		"error": map[string]any{
-			"code":    code,
-			"message": message,
-		},
+		"error": errorBody,
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
