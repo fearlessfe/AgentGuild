@@ -518,7 +518,7 @@ git commit -m "feat: expose authorized task REST API"
 
 ### Task 6: 暴露无状态 Streamable HTTP MCP 工具
 
-- [ ] **Completion gate: Task 6 MCP adapter**
+- [x] **Completion gate: Task 6 MCP adapter**
 
 **Files:**
 - Create: `backend/internal/transport/mcp/server.go`
@@ -532,7 +532,7 @@ git commit -m "feat: expose authorized task REST API"
 - Produces: `/mcp`
 - Produces tools: `task_publish`、`task_list`、`task_get`、`task_claim`、`task_cancel`、`execution_start`、`execution_heartbeat`、`execution_get`
 
-- [ ] **Step 1: 固定官方 SDK 并写工具 Schema 测试**
+- [x] **Step 1: 固定官方 SDK 并写工具 Schema 测试**
 
 Run: `cd backend && go get github.com/modelcontextprotocol/go-sdk@v1.6.1`
 
@@ -548,13 +548,13 @@ func TestHeartbeatSchemaHasNoLeaseToken(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行 MCP 测试并确认失败**
+- [x] **Step 2: 运行 MCP 测试并确认失败**
 
 Run: `cd backend && go test ./internal/transport/mcp -count=1`
 
 Expected: FAIL，MCP Server 尚未注册工具。
 
-- [ ] **Step 3: 使用官方 MCP Go SDK 注册强类型工具**
+- [x] **Step 3: 使用官方 MCP Go SDK 注册强类型工具**
 
 ```go
 type HeartbeatInput struct {
@@ -568,11 +568,11 @@ type HeartbeatInput struct {
 
 每次调用从 HTTP request context 读取 OAuth Principal，工具 handler 不访问 Repository，只调用共享 Service。
 
-- [ ] **Step 4: 实现稳定 `data/meta` 和领域错误映射**
+- [x] **Step 4: 实现稳定 `data/meta` 和领域错误映射**
 
 MCP tool error content 只包含稳定 code、安全 message、可选 `retry_after_seconds`；Schema 开启未知字段拒绝和请求体大小限制。
 
-- [ ] **Step 5: 编写 REST/MCP 等价契约和 Schema fuzz 测试**
+- [x] **Step 5: 编写 REST/MCP 等价契约和 Schema fuzz 测试**
 
 ```go
 func TestRESTAndMCPClaimAreEquivalent(t *testing.T) {
@@ -584,13 +584,13 @@ func TestRESTAndMCPClaimAreEquivalent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: 运行 MCP 与跨协议测试**
+- [x] **Step 6: 运行 MCP 与跨协议测试**
 
 Run: `cd backend && go test ./internal/transport/mcp ./internal/transport/contract -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交 MCP 适配层**
+- [x] **Step 7: 提交 MCP 适配层**
 
 ```bash
 git add backend/go.mod backend/go.sum backend/internal/transport/mcp backend/internal/transport/contract
