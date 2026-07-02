@@ -284,9 +284,13 @@ git commit -m "feat: persist task lifecycle atomically"
 
 ### Task 3: 实现共享 Application Service 与授权策略
 
-- [ ] **Completion gate: Task 3 application service**
+- [x] **Completion gate: Task 3 application service**
 
 **Files:**
+- Modify: `backend/internal/domain/execution.go`
+- Modify: `backend/internal/domain/execution_test.go`
+- Modify: `backend/migrations/000001_task_lifecycle.up.sql`
+- Modify: `backend/internal/postgres/migration_test.go`
 - Create: `backend/internal/auth/principal.go`
 - Create: `backend/internal/application/contracts.go`
 - Create: `backend/internal/application/service.go`
@@ -299,7 +303,7 @@ git commit -m "feat: persist task lifecycle atomically"
 - Produces: `auth.TokenVerifier` 和 `auth.Principal{TenantID, AgentID, AgentVersionID, Scopes}`
 - Produces: stable `application.Envelope[T]{Data, Meta}`
 
-- [ ] **Step 1: 写权限、deadline 和原子取消测试**
+- [x] **Step 1: 写权限、deadline 和原子取消测试**
 
 ```go
 func TestPublishRequiresDeadlineAndScope(t *testing.T) {
@@ -312,13 +316,13 @@ func TestPublishRequiresDeadlineAndScope(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行 Application Service 测试并确认失败**
+- [x] **Step 2: 运行 Application Service 测试并确认失败**
 
 Run: `cd backend && go test ./internal/application -count=1`
 
 Expected: FAIL，原因是 Service 尚未定义。
 
-- [ ] **Step 3: 定义共享命令、查询和错误边界**
+- [x] **Step 3: 定义共享命令、查询和错误边界**
 
 ```go
 type PublishTask struct {
@@ -336,7 +340,7 @@ type Meta struct {
 }
 ```
 
-- [ ] **Step 4: 实现授权→幂等→领域→审计/outbox 的固定命令管线**
+- [x] **Step 4: 实现授权→幂等→领域→审计/outbox 的固定命令管线**
 
 ```go
 func (s *Service) PublishTask(ctx context.Context, p auth.Principal, cmd PublishTask) (Envelope[TaskView], error) {
@@ -349,17 +353,17 @@ func (s *Service) PublishTask(ctx context.Context, p auth.Principal, cmd Publish
 }
 ```
 
-- [ ] **Step 5: 实现 tenant/Scope 过滤和不透明 cursor**
+- [x] **Step 5: 实现 tenant/Scope 过滤和不透明 cursor**
 
 cursor 使用带 HMAC 的版本化 payload：`tenant_id`、过滤摘要、排序键、过期时间；非法或跨过滤条件 cursor 返回字段错误，不披露 payload。
 
-- [ ] **Step 6: 运行 Application Service 测试**
+- [x] **Step 6: 运行 Application Service 测试**
 
 Run: `cd backend && go test ./internal/application ./internal/auth -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交共享应用层**
+- [x] **Step 7: 提交共享应用层**
 
 ```bash
 git add backend/internal/application backend/internal/auth

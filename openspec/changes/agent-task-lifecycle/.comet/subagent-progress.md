@@ -7,15 +7,15 @@
 
 ## Current Task
 
-- Plan task: `Completion gate: Task 2 PostgreSQL persistence`
-- OpenSpec mapping: `1.1 completion: IdempotencyRecord, audit and persistence; 1.4 partial: database concurrency/idempotency tests`
+- Plan task: `Completion gate: Task 3 application service`
+- OpenSpec mapping: `1.2 task publish/list/get and permission filtering; 2.1 shared Application Service, commands and errors`
 - Phase: `done`
 - Implementer status: `DONE_WITH_CONCERNS`
 - Confirmed technical baseline: `Go 1.26.4; PostgreSQL 18.4; configurable Langfuse provider`
-- Implementation commit: `c5de542..9b718bc`
-- Files changed: `migrations; application/ports.go; postgres store/repositories/tests; testdb; go.mod/go.sum`
-- RED evidence: `missing migration; missing Store/Tx/hash APIs; jsonb altered stable response bytes; migration round-trip helper missing; nullable lease scan failure`
-- GREEN evidence: `isolated schemas; lossless TaskRecord; same-Task FKs; one Tx.Now; owned one-shot idempotency; full migration round-trip; race/vet/diff passed`
-- Batch review: `approved after round 1 fixes; no Critical/Important/Minor findings`
+- Implementation commit: `f99ecb2..69dc887`
+- Files changed: `auth; application service/contracts/ports; domain cancellation/errors; postgres repository/migration tests`
+- RED evidence: `missing auth/application APIs; missing ExecutionCancelled; migration rejection; ListTaskRecords port; event spelling; active status coverage; error helpers`
+- GREEN evidence: `cursor/Principal/deadline/enumeration/idempotency/pagination/JSON/active execution/5-stage rollback tests; PG integration; race; vet; diff passed`
+- Batch review: `approved after round 1 fixes`
 - Review/fix round: `1/2`
-- Unresolved feedback: `none`
+- Unresolved feedback: `Minor for final review: fake ListTaskRecords lacks PublisherAgentVersionID filter regression coverage`

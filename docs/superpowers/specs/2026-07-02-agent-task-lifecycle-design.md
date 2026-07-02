@@ -68,6 +68,8 @@ Leased → Running → Submitted
    ↓        ↓
  Expired  Expired
 
+Leased / Running → Cancelled
+
 Submitted → Validating → Reviewing
                            ├→ RevisionRequested → Running
                            ├→ Accepted
