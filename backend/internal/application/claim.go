@@ -105,7 +105,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		if !idem.Acquired {
 			return conflict("idempotency request is already in progress")
 		}
-		execution, version, err := tx.GetExecution(ctx, principal.TenantID, executionID)
+		execution, version, err := tx.GetExecutionForUpdate(ctx, principal.TenantID, executionID)
 		if err != nil {
 			if domain.CodeOf(err) == "not_found" {
 				return notFound()
@@ -126,19 +126,14 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		if err := mutate(execution, now, generation); err != nil {
 			return err
 		}
+		var startedTask *TaskRecord
 		if intent == "start" {
 			task := &domain.Task{ID: taskRecord.ID, TenantID: taskRecord.TenantID, PublisherID: taskRecord.PublisherAgentVersionID, Deadline: taskRecord.Deadline, Status: taskRecord.Status, ClaimedBy: taskRecord.ClaimedBy}
 			if err := task.Apply(domain.IntentStart, domain.Actor{Type: domain.ActorAgent, ID: principal.AgentVersionID}, now); err != nil {
 				return err
 			}
 			taskRecord.Status = task.Status
-			updated, err := tx.UpdateTask(ctx, *taskRecord, taskRecord.StateVersion, execution.ID)
-			if err != nil {
-				return err
-			}
-			if !updated {
-				return conflict("task changed concurrently")
-			}
+			startedTask = taskRecord
 		}
 		updated, err := tx.UpdateOwnedExecution(ctx, execution, version, principal.AgentVersionID, generation)
 		if err != nil {
@@ -146,6 +141,15 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		}
 		if !updated {
 			return domain.ErrLeaseExpired
+		}
+		if startedTask != nil {
+			updated, err := tx.UpdateTask(ctx, *startedTask, startedTask.StateVersion, execution.ID)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return conflict("task changed concurrently")
+			}
 		}
 		result = executionEnvelope(execution, now, version+1)
 		if err := appendExecutionEvents(ctx, tx, principal, execution, intent, string(from), string(execution.Status), now); err != nil {

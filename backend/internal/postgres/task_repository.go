@@ -8,6 +8,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (tx *Tx) InsertTask(ctx context.Context, task application.TaskRecord) error {
@@ -163,21 +164,40 @@ func (tx *Tx) InsertExecution(
 		execution.Status, leaseSecretHash, execution.Lease.Generation,
 		execution.Lease.SoftExpiry, execution.Lease.HardExpiry, now,
 	)
-	return err
+	return mapExecutionInsertError(err)
 }
 
 func (tx *Tx) GetExecution(
 	ctx context.Context,
 	tenantID, executionID string,
 ) (*domain.Execution, int64, error) {
+	return tx.getExecution(ctx, tenantID, executionID, false)
+}
+
+func (tx *Tx) GetExecutionForUpdate(
+	ctx context.Context,
+	tenantID, executionID string,
+) (*domain.Execution, int64, error) {
+	return tx.getExecution(ctx, tenantID, executionID, true)
+}
+
+func (tx *Tx) getExecution(
+	ctx context.Context,
+	tenantID, executionID string,
+	forUpdate bool,
+) (*domain.Execution, int64, error) {
 	var execution domain.Execution
 	var version int64
 	var softExpiry, hardExpiry *time.Time
-	err := tx.tx.QueryRow(ctx, `
+	query := `
 		SELECT id, tenant_id, task_id, agent_version_id, status, state_version,
 		       lease_generation, lease_soft_expires_at, lease_hard_expires_at
 		FROM executions
-		WHERE tenant_id=$1 AND id=$2`,
+		WHERE tenant_id=$1 AND id=$2`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	err := tx.tx.QueryRow(ctx, query,
 		tenantID, executionID,
 	).Scan(
 		&execution.ID, &execution.TenantID, &execution.TaskID, &execution.AgentID,
@@ -197,6 +217,14 @@ func (tx *Tx) GetExecution(
 		execution.Lease.HardExpiry = *hardExpiry
 	}
 	return &execution, version, nil
+}
+
+func mapExecutionInsertError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "executions_one_active_per_task" {
+		return domain.ErrStateConflict
+	}
+	return err
 }
 
 func (tx *Tx) ListActiveExecutions(ctx context.Context, tenantID, taskID string) ([]application.ExecutionRecord, error) {

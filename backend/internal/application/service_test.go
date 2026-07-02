@@ -438,6 +438,9 @@ func (tx *fakeTx) GetExecution(_ context.Context, tenant, id string) (*domain.Ex
 	copy := *e
 	return &copy, 0, nil
 }
+func (tx *fakeTx) GetExecutionForUpdate(ctx context.Context, tenant, id string) (*domain.Execution, int64, error) {
+	return tx.GetExecution(ctx, tenant, id)
+}
 func (tx *fakeTx) ListActiveExecutions(_ context.Context, tenant, task string) ([]application.ExecutionRecord, error) {
 	var records []application.ExecutionRecord
 	for _, e := range tx.executions {

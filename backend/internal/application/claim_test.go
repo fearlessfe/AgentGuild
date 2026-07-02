@@ -97,6 +97,21 @@ func TestStartAtomicallyMovesTaskToInProgress(t *testing.T) {
 	}
 }
 
+func TestStartRollsBackExecutionWhenTaskUpdateFails(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskClaimed, ClaimedBy: "worker", ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionLeased, Lease: domain.Lease{Generation: 1, SoftExpiry: fixtureNow.Add(10 * time.Minute), HardExpiry: fixtureNow.Add(10*time.Minute + 30*time.Second)}}
+	tx.failAt = "task"
+
+	_, err := svc.StartExecution(context.Background(), principal("tenant", "worker", "tasks:execute"), application.StartExecution{RequestID: "start", ExecutionID: "execution", LeaseGeneration: 1})
+	if err == nil {
+		t.Fatal("expected injected task failure")
+	}
+	if tx.tasks[tx.key("tenant", "task")].Status != domain.TaskClaimed || tx.executions["execution"].Status != domain.ExecutionLeased || len(tx.events) != 0 || len(tx.outbox) != 0 || len(tx.idem) != 0 {
+		t.Fatalf("partial start: task=%s execution=%s events=%d outbox=%d idem=%d", tx.tasks[tx.key("tenant", "task")].Status, tx.executions["execution"].Status, len(tx.events), len(tx.outbox), len(tx.idem))
+	}
+}
+
 func TestHeartbeatAtTaskDeadlineIsRejected(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ClaimedBy: "worker", ActiveExecutionID: "execution", Deadline: fixtureNow})

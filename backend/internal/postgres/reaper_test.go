@@ -101,15 +101,15 @@ func seedReaperExecution(t *testing.T, db *pgxpool.Pool, taskID, executionID str
 
 func assertReapedState(t *testing.T, db *pgxpool.Pool, taskID, executionID, taskStatus, executionStatus string, events int) {
 	t.Helper()
-	var gotTask, gotExecution string
+	var gotTask, gotExecution, activeExecutionID string
 	var eventCount, outboxCount int
 	err := db.QueryRow(context.Background(), `
-		SELECT t.status, e.status,
+		SELECT t.status, e.status, COALESCE(t.active_execution_id, ''),
 		       (SELECT count(*) FROM task_events WHERE task_id=$1 AND execution_id=$2 AND intent='expire'),
 		       (SELECT count(*) FROM outbox_events WHERE aggregate_id=$1)
 		FROM tasks t JOIN executions e ON e.tenant_id=t.tenant_id AND e.task_id=t.id
-		WHERE t.tenant_id='tenant-1' AND t.id=$1 AND e.id=$2`, taskID, executionID).Scan(&gotTask, &gotExecution, &eventCount, &outboxCount)
-	if err != nil || gotTask != taskStatus || gotExecution != executionStatus || eventCount != events || outboxCount != events {
-		t.Fatalf("task=%s execution=%s events=%d outbox=%d err=%v", gotTask, gotExecution, eventCount, outboxCount, err)
+		WHERE t.tenant_id='tenant-1' AND t.id=$1 AND e.id=$2`, taskID, executionID).Scan(&gotTask, &gotExecution, &activeExecutionID, &eventCount, &outboxCount)
+	if err != nil || gotTask != taskStatus || gotExecution != executionStatus || activeExecutionID != "" || eventCount != events || outboxCount != events {
+		t.Fatalf("task=%s execution=%s active=%q events=%d outbox=%d err=%v", gotTask, gotExecution, activeExecutionID, eventCount, outboxCount, err)
 	}
 }
