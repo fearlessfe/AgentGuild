@@ -181,29 +181,43 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 
 func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, query GetExecution) (Envelope[ExecutionView], error) {
 	var result Envelope[ExecutionView]
-	if err := s.policy.Require(principal, "tasks:read"); err != nil {
-		return result, err
+	var requireOwner bool
+	if s.policy.Require(principal, "tasks:read") == nil {
+		requireOwner = false
+	} else if s.policy.Require(principal, "tasks:execute") == nil {
+		requireOwner = true
+	} else {
+		return result, domain.ErrForbidden
 	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
-		err := s.store.WithTx(ctx, func(tx Tx) error {
-			now, err := tx.Now(ctx)
-			if err != nil {
-				return err
+	err := s.store.WithTx(ctx, func(tx Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		execution, version, err := tx.GetExecution(ctx, principal.TenantID, query.ExecutionID)
+		if err != nil {
+			if domain.CodeOf(err) == "not_found" {
+				return notFound()
 			}
-			execution, version, err := tx.GetExecution(ctx, principal.TenantID, query.ExecutionID)
-			if err != nil {
-				if domain.CodeOf(err) == "not_found" {
-					return notFound()
-				}
-				return err
-			}
-			usage, _ := tx.GetExecutionUsage(ctx, principal.TenantID, query.ExecutionID)
-			latestEvent, _ := tx.GetLatestExecutionEvent(ctx, principal.TenantID, query.ExecutionID)
-			result = executionEnvelope(execution, now, version, usage, latestEvent)
-			return nil
-		})
+			return err
+		}
+		if requireOwner && execution.AgentID != principal.AgentVersionID {
+			return notFound()
+		}
+		usage, err := tx.GetExecutionUsage(ctx, principal.TenantID, query.ExecutionID)
+		if err != nil {
+			return err
+		}
+		latestEvent, err := tx.GetLatestExecutionEvent(ctx, principal.TenantID, query.ExecutionID)
+		if err != nil {
+			return err
+		}
+		result = executionEnvelope(execution, now, version, usage, latestEvent)
+		return nil
+	})
 	return result, err
 }
 

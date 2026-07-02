@@ -29,14 +29,14 @@ type Lease struct {
 }
 
 type Execution struct {
-	ID       string
-	TaskID   string
-	TenantID string
-	AgentID  string
-	Status   ExecutionStatus
-	Stage    string
-	Progress float64
-	Lease    Lease
+	ID              string
+	TaskID          string
+	TenantID        string
+	AgentID         string
+	Status          ExecutionStatus
+	Stage           string
+	Progress        float64
+	Lease           Lease
 	ClaimedAt       time.Time
 	StartedAt       time.Time
 	SubmittedAt     time.Time

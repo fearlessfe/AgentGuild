@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"agentguild.dev/agentguild/backend/internal/application"
+	"github.com/jackc/pgx/v5"
 )
 
 func (tx *Tx) AppendTaskEvent(ctx context.Context, event application.TaskEvent) error {
@@ -47,6 +49,9 @@ func (tx *Tx) GetLatestExecutionEvent(ctx context.Context, tenantID, executionID
 	)
 	if executionIDPtr != nil {
 		e.ExecutionID = *executionIDPtr
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return e, nil
 	}
 	return e, err
 }

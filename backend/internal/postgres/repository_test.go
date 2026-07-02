@@ -400,6 +400,34 @@ func TestTransactionRollsBackTaskIdempotencyAuditAndOutbox(t *testing.T) {
 	}
 }
 
+func TestExecutionUsageAndLatestEventReturnZeroValuesWhenMissing(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	ctx := context.Background()
+	rollback := errors.New("rollback")
+
+	err := store.WithTx(ctx, func(tx application.Tx) error {
+		usage, err := tx.GetExecutionUsage(ctx, "tenant-x", "execution-x")
+		if err != nil {
+			t.Fatalf("GetExecutionUsage error: %v", err)
+		}
+		if usage != nil {
+			t.Fatalf("expected nil usage, got %#v", usage)
+		}
+		summary, err := tx.GetLatestExecutionEvent(ctx, "tenant-x", "execution-x")
+		if err != nil {
+			t.Fatalf("GetLatestExecutionEvent error: %v", err)
+		}
+		if summary != (application.TaskEventSummary{}) {
+			t.Fatalf("expected zero summary, got %#v", summary)
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("expected rollback, got %v", err)
+	}
+}
+
 func seedTask(t *testing.T, db *pgxpool.Pool, tenantID, taskID string) {
 	t.Helper()
 	_, err := db.Exec(context.Background(), `

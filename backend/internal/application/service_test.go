@@ -255,6 +255,62 @@ func TestGetExecutionIncludesUsageAndAuditSummary(t *testing.T) {
 	}
 }
 
+func TestGetExecutionAllowsExecutionAgentOwner(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1}}
+
+	got, err := svc.GetExecution(context.Background(), principal("tenant", "worker", "tasks:execute"), application.GetExecution{ExecutionID: "execution"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.ID != "execution" {
+		t.Fatalf("execution view missing: %#v", got.Data)
+	}
+}
+
+func TestGetExecutionExecutionAgentNonOwnerIsNotFound(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1}}
+
+	_, err := svc.GetExecution(context.Background(), principal("tenant", "other", "tasks:execute"), application.GetExecution{ExecutionID: "execution"})
+	assertDomainError(t, err, "not_found", "")
+}
+
+func TestGetExecutionWithoutScopeIsForbidden(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1}}
+
+	_, err := svc.GetExecution(context.Background(), principal("tenant", "worker"), application.GetExecution{ExecutionID: "execution"})
+	assertDomainError(t, err, "forbidden", "")
+}
+
+func TestGetExecutionPropagatesUsageError(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1}}
+	tx.usageErr = errors.New("injected usage error")
+
+	_, err := svc.GetExecution(context.Background(), principal("tenant", "observer", "tasks:read"), application.GetExecution{ExecutionID: "execution"})
+	if err == nil || err.Error() != "injected usage error" {
+		t.Fatalf("expected injected usage error, got %v", err)
+	}
+}
+
+func TestGetExecutionPropagatesLatestEventError(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1}}
+	tx.latestEventErr = errors.New("injected latest event error")
+
+	_, err := svc.GetExecution(context.Background(), principal("tenant", "observer", "tasks:read"), application.GetExecution{ExecutionID: "execution"})
+	if err == nil || err.Error() != "injected latest event error" {
+		t.Fatalf("expected injected latest event error, got %v", err)
+	}
+}
+
 func TestCancelDoesNotRevealWhetherTaskExistsOrHasDifferentOwner(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.seed(application.TaskRecord{ID: "owned-by-other", TenantID: "tenant-1", PublisherAgentVersionID: "other", Status: domain.TaskOpen, Deadline: fixtureNow.Add(time.Hour)})
@@ -354,17 +410,19 @@ func (s *fakeStore) WithTx(_ context.Context, fn func(application.Tx) error) err
 }
 
 type fakeTx struct {
-	now        time.Time
-	tasks      map[string]application.TaskRecord
-	executions map[string]*domain.Execution
-	idem       map[application.IdempotencyKey]*application.IdempotencyRecord
-	events     []application.TaskEvent
-	outbox     []application.OutboxEvent
-	failAt     string
+	now            time.Time
+	tasks          map[string]application.TaskRecord
+	executions     map[string]*domain.Execution
+	idem           map[application.IdempotencyKey]*application.IdempotencyRecord
+	events         []application.TaskEvent
+	outbox         []application.OutboxEvent
+	failAt         string
+	usageErr       error
+	latestEventErr error
 }
 
 func (tx *fakeTx) clone() *fakeTx {
-	copyTx := &fakeTx{now: tx.now, tasks: make(map[string]application.TaskRecord, len(tx.tasks)), executions: make(map[string]*domain.Execution, len(tx.executions)), idem: make(map[application.IdempotencyKey]*application.IdempotencyRecord, len(tx.idem)), events: append([]application.TaskEvent(nil), tx.events...), outbox: append([]application.OutboxEvent(nil), tx.outbox...), failAt: tx.failAt}
+	copyTx := &fakeTx{now: tx.now, tasks: make(map[string]application.TaskRecord, len(tx.tasks)), executions: make(map[string]*domain.Execution, len(tx.executions)), idem: make(map[application.IdempotencyKey]*application.IdempotencyRecord, len(tx.idem)), events: append([]application.TaskEvent(nil), tx.events...), outbox: append([]application.OutboxEvent(nil), tx.outbox...), failAt: tx.failAt, usageErr: tx.usageErr, latestEventErr: tx.latestEventErr}
 	for key, task := range tx.tasks {
 		task.Constraints = append([]byte(nil), task.Constraints...)
 		task.Requirements = append([]byte(nil), task.Requirements...)
@@ -479,7 +537,12 @@ func (tx *fakeTx) GetExecution(_ context.Context, tenant, id string) (*domain.Ex
 	copy := *e
 	return &copy, 0, nil
 }
-func (tx *fakeTx) GetExecutionUsage(_ context.Context, _, _ string) (*application.UsageView, error) { return nil, nil }
+func (tx *fakeTx) GetExecutionUsage(_ context.Context, _, _ string) (*application.UsageView, error) {
+	if tx.usageErr != nil {
+		return nil, tx.usageErr
+	}
+	return nil, nil
+}
 func (tx *fakeTx) GetExecutionForUpdate(ctx context.Context, tenant, id string) (*domain.Execution, int64, error) {
 	return tx.GetExecution(ctx, tenant, id)
 }
@@ -576,6 +639,9 @@ func (tx *fakeTx) AppendOutboxEvent(_ context.Context, e application.OutboxEvent
 	return nil
 }
 func (tx *fakeTx) GetLatestExecutionEvent(_ context.Context, _, executionID string) (application.TaskEventSummary, error) {
+	if tx.latestEventErr != nil {
+		return application.TaskEventSummary{}, tx.latestEventErr
+	}
 	for i := len(tx.events) - 1; i >= 0; i-- {
 		if tx.events[i].ExecutionID == executionID {
 			return application.TaskEventSummary{ID: tx.events[i].CreatedAt.UnixNano(), TenantID: tx.events[i].TenantID, TaskID: tx.events[i].TaskID, ExecutionID: tx.events[i].ExecutionID, ActorType: tx.events[i].ActorType, ActorID: tx.events[i].ActorID, Intent: tx.events[i].Intent, FromState: tx.events[i].FromState, ToState: tx.events[i].ToState, CreatedAt: tx.events[i].CreatedAt}, nil
