@@ -16,6 +16,9 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 	if err := s.policy.Require(principal, "tasks:claim"); err != nil {
 		return result, err
 	}
+	if err := s.checkRateLimit(ctx, principal); err != nil {
+		return result, err
+	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
@@ -71,12 +74,20 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 }
 
 func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, command StartExecution) (Envelope[ExecutionView], error) {
+	if err := s.checkRateLimit(ctx, principal); err != nil {
+		var result Envelope[ExecutionView]
+		return result, err
+	}
 	return s.mutateExecution(ctx, principal, "execution_start", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "start", func(execution *domain.Execution, now time.Time, generation int64) error {
 		return execution.Start(now, generation)
 	})
 }
 
 func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Principal, command HeartbeatExecution) (Envelope[ExecutionView], error) {
+	if err := s.checkRateLimit(ctx, principal); err != nil {
+		var result Envelope[ExecutionView]
+		return result, err
+	}
 	return s.mutateExecution(ctx, principal, "execution_heartbeat", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "heartbeat", func(execution *domain.Execution, now time.Time, generation int64) error {
 		_, err := execution.Heartbeat(now, generation)
 		return err
@@ -163,6 +174,9 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, query GetExecution) (Envelope[ExecutionView], error) {
 	var result Envelope[ExecutionView]
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
+		return result, err
+	}
+	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {

@@ -118,4 +118,5 @@ type OutboxEvent struct {
 type EventRepository interface {
 	AppendTaskEvent(context.Context, TaskEvent) error
 	AppendOutboxEvent(context.Context, OutboxEvent) error
+	ListTaskEvents(context.Context, string, string, int64, int) ([]TaskEventSummary, error)
 }

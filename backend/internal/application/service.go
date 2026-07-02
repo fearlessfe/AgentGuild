@@ -1,17 +1,21 @@
 package application
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/auth"
+	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/ratelimit"
 )
 
 type Options struct {
 	CursorSecret []byte
 	CursorTTL    time.Duration
 	NewID        func() string
+	RateLimiter  ratelimit.RateLimiter
 }
 
 type Service struct {
@@ -20,6 +24,7 @@ type Service struct {
 	cursorSecret []byte
 	cursorTTL    time.Duration
 	newID        func() string
+	rateLimiter  ratelimit.RateLimiter
 }
 
 func NewService(store Store, options Options) (*Service, error) {
@@ -32,7 +37,10 @@ func NewService(store Store, options Options) (*Service, error) {
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
-	return &Service{store: store, cursorSecret: append([]byte(nil), options.CursorSecret...), cursorTTL: options.CursorTTL, newID: options.NewID}, nil
+	if options.RateLimiter == nil {
+		options.RateLimiter = ratelimit.NewUnlimited()
+	}
+	return &Service{store: store, cursorSecret: append([]byte(nil), options.CursorSecret...), cursorTTL: options.CursorTTL, newID: options.NewID, rateLimiter: options.RateLimiter}, nil
 }
 
 func randomID() string {
@@ -41,4 +49,15 @@ func randomID() string {
 		panic(err)
 	}
 	return hex.EncodeToString(value[:])
+}
+
+func (s *Service) checkRateLimit(ctx context.Context, principal auth.Principal) error {
+	decision, err := s.rateLimiter.Allow(ctx, ratelimit.Key{TenantID: principal.TenantID, AgentID: principal.AgentID, AgentVersionID: principal.AgentVersionID})
+	if err != nil {
+		return err
+	}
+	if !decision.Allowed {
+		return &domain.Error{Code: "rate_limited", Message: "rate limit exceeded", RetryAfter: decision.RetryAfter}
+	}
+	return nil
 }

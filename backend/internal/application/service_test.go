@@ -507,6 +507,25 @@ func (tx *fakeTx) AppendTaskEvent(_ context.Context, e application.TaskEvent) er
 	tx.events = append(tx.events, e)
 	return nil
 }
+func (tx *fakeTx) ListTaskEvents(_ context.Context, tenantID, taskID string, afterID int64, limit int) ([]application.TaskEventSummary, error) {
+	var out []application.TaskEventSummary
+	for _, e := range tx.events {
+		if e.TenantID != tenantID || e.TaskID != taskID {
+			continue
+		}
+		// fakeTx 没有保存自增 ID，这里用 created_at 与 actor 模拟唯一键。
+		id := e.CreatedAt.UnixNano()
+		if id <= afterID {
+			continue
+		}
+		out = append(out, application.TaskEventSummary{TenantID: e.TenantID, TaskID: e.TaskID, ExecutionID: e.ExecutionID, ActorType: e.ActorType, ActorID: e.ActorID, Intent: e.Intent, FromState: e.FromState, ToState: e.ToState, Reason: e.Reason, CreatedAt: e.CreatedAt})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 func (tx *fakeTx) AppendOutboxEvent(_ context.Context, e application.OutboxEvent) error {
 	if tx.failAt == "outbox" {
 		return errors.New("injected outbox failure")

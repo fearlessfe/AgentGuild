@@ -31,6 +31,9 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
+	if err := s.checkRateLimit(ctx, principal); err != nil {
+		return result, err
+	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
@@ -53,6 +56,9 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query ListTasks) (Envelope[[]TaskView], error) {
 	var result Envelope[[]TaskView]
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
+		return result, err
+	}
+	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
 	limit := query.Limit

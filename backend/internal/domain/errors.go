@@ -1,11 +1,15 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 type Error struct {
-	Code    string
-	Message string
-	Field   string
+	Code       string
+	Message    string
+	Field      string
+	RetryAfter time.Duration
 }
 
 func (e Error) Error() string {
@@ -27,6 +31,7 @@ var (
 	ErrStateConflict = &Error{Code: "state_conflict", Message: "state transition is not allowed"}
 	ErrLeaseExpired  = &Error{Code: "lease_expired", Message: "lease is expired or stale"}
 	ErrForbidden     = &Error{Code: "forbidden", Message: "actor is not allowed to perform this transition"}
+	ErrRateLimited   = &Error{Code: "rate_limited", Message: "rate limit exceeded"}
 )
 
 func invalidArgument(field string) error {

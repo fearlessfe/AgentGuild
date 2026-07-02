@@ -28,3 +28,35 @@ func (tx *Tx) AppendOutboxEvent(ctx context.Context, event application.OutboxEve
 	)
 	return err
 }
+
+func (tx *Tx) ListTaskEvents(ctx context.Context, tenantID, taskID string, afterID int64, limit int) ([]application.TaskEventSummary, error) {
+	rows, err := tx.tx.Query(ctx, `
+		SELECT id, tenant_id, task_id, execution_id, actor_type, actor_id, intent,
+		       from_state, to_state, reason, created_at
+		FROM task_events
+		WHERE tenant_id=$1 AND task_id=$2 AND id>$3
+		ORDER BY id
+		LIMIT $4`,
+		tenantID, taskID, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []application.TaskEventSummary
+	for rows.Next() {
+		var e application.TaskEventSummary
+		var executionID *string
+		if err := rows.Scan(
+			&e.ID, &e.TenantID, &e.TaskID, &executionID,
+			&e.ActorType, &e.ActorID, &e.Intent,
+			&e.FromState, &e.ToState, &e.Reason, &e.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if executionID != nil {
+			e.ExecutionID = *executionID
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
