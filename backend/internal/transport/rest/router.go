@@ -91,7 +91,7 @@ func jsonResponse(next http.Handler) http.Handler {
 func (s *Server) rateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal := mustPrincipal(r)
-		key := r.URL.Path
+		key := r.Method + "|" + r.URL.Path
 		if principal.TenantID != "" {
 			key = principal.TenantID + "|" + key
 		}

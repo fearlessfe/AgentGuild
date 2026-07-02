@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,80 @@ func TestJWKSVerifierAcceptsValidToken(t *testing.T) {
 	require.Equal(t, "agent-1", principal.AgentID)
 	require.Equal(t, "version-1", principal.AgentVersionID)
 	require.Equal(t, []string{"tasks:read"}, principal.Scopes)
+}
+
+func TestJWKSVerifierAcceptsSpaceSeparatedScopes(t *testing.T) {
+	issuer := "https://auth.example.com"
+	audience := "agentguild"
+	kid, key, jwks := newRSAJWKS(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	defer server.Close()
+
+	verifier := auth.NewJWKSVerifier(issuer, audience, server.URL, nil)
+	token := signedToken(t, kid, key, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           "tasks:read tasks:write",
+	}, time.Hour)
+
+	principal, err := verifier.Verify(context.Background(), token)
+	require.NoError(t, err)
+	require.Equal(t, []string{"tasks:read", "tasks:write"}, principal.Scopes)
+}
+
+func TestJWKSVerifierRejectsTokenSignedByWrongKey(t *testing.T) {
+	issuer := "https://auth.example.com"
+	audience := "agentguild"
+	kid1, _, jwks1 := newRSAJWKS(t)
+	_, key2, _ := newRSAJWKS(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(jwks1)
+	}))
+	defer server.Close()
+
+	verifier := auth.NewJWKSVerifier(issuer, audience, server.URL, nil)
+	token := signedToken(t, kid1, key2, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           []string{"tasks:read"},
+	}, time.Hour)
+
+	_, err := verifier.Verify(context.Background(), token)
+	require.Error(t, err)
+}
+
+func TestJWKSVerifierRejectsTamperedToken(t *testing.T) {
+	issuer := "https://auth.example.com"
+	audience := "agentguild"
+	kid, key, jwks := newRSAJWKS(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(jwks)
+	}))
+	defer server.Close()
+
+	verifier := auth.NewJWKSVerifier(issuer, audience, server.URL, nil)
+	token := signedToken(t, kid, key, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           []string{"tasks:read"},
+	}, time.Hour)
+
+	parts := strings.Split(token, ".")
+	require.Len(t, parts, 3)
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	tampered := strings.ReplaceAll(string(payload), `"agent_id":"agent-1"`, `"agent_id":"attacker"`)
+	parts[1] = base64.RawURLEncoding.EncodeToString([]byte(tampered))
+	token = strings.Join(parts, ".")
+
+	_, err = verifier.Verify(context.Background(), token)
+	require.Error(t, err)
 }
 
 func TestJWKSVerifierRejectsExpiredToken(t *testing.T) {
@@ -185,6 +260,51 @@ func TestJWKSVerifierCachesKeysAndHandlesRotation(t *testing.T) {
 	_, err = verifier.Verify(context.Background(), token2)
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
+}
+
+func TestJWKSVerifierRetainsOldKeyDuringRotation(t *testing.T) {
+	issuer := "https://auth.example.com"
+	audience := "agentguild"
+	kid1, key1, jwks1 := newRSAJWKS(t)
+	kid2, key2, jwks2 := newRSAJWKS(t)
+
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			_, _ = w.Write(jwks1)
+			return
+		}
+		_, _ = w.Write(jwks2)
+	}))
+	defer server.Close()
+
+	verifier := auth.NewJWKSVerifier(issuer, audience, server.URL, nil)
+	token1 := signedToken(t, kid1, key1, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           []string{"tasks:read"},
+	}, time.Hour)
+
+	_, err := verifier.Verify(context.Background(), token1)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+
+	// 触发一次只返回新 key 的刷新。
+	token2 := signedToken(t, kid2, key2, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           []string{"tasks:read"},
+	}, time.Hour)
+	_, err = verifier.Verify(context.Background(), token2)
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+
+	// 用旧 key 签名的 token 仍应通过，说明轮换过渡期旧 key 未被删除。
+	_, err = verifier.Verify(context.Background(), token1)
+	require.NoError(t, err)
 }
 
 func TestJWKSVerifierFetchesKeysOnDemand(t *testing.T) {

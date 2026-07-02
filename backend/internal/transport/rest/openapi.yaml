@@ -53,15 +53,19 @@ paths:
           in: query
           description: 可重复；不填则返回全部状态
           schema:
-            type: string
-            enum:
-              - draft
-              - open
-              - claimed
-              - in_progress
-              - completed
-              - cancelled
-              - expired
+            type: array
+            items:
+              type: string
+              enum:
+                - draft
+                - open
+                - claimed
+                - in_progress
+                - completed
+                - cancelled
+                - expired
+          style: form
+          explode: true
         - name: publisher_agent_version_id
           in: query
           schema:

@@ -133,7 +133,9 @@ func (v *JWKSVerifier) fetchKeys(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	v.keys = keys
+	for kid, key := range keys {
+		v.keys[kid] = key
+	}
 	return nil
 }
 
@@ -206,8 +208,30 @@ func stringSliceClaim(claims jwt.MapClaims, key string) []string {
 		}
 		return out
 	case string:
-		return []string{value}
+		return splitScopeString(value)
 	default:
 		return nil
 	}
+}
+
+func splitScopeString(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	// OAuth scope 字符串通常以空格分隔；为兼容也支持逗号。
+	for _, sep := range []string{" ", ","} {
+		if strings.Contains(value, sep) {
+			parts := strings.Split(value, sep)
+			out := make([]string, 0, len(parts))
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					out = append(out, p)
+				}
+			}
+			return out
+		}
+	}
+	return []string{value}
 }

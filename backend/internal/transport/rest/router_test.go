@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -188,6 +189,16 @@ func TestListUsesQueryParams(t *testing.T) {
 	require.Equal(t, "abc", q.Cursor)
 }
 
+func TestListTasksFiltersByMultipleStatuses(t *testing.T) {
+	app := &fakeApplication{}
+	server := newTestServer(app)
+	res := get(t, server, "/v1/tasks?status=open&status=claimed", "token-publisher")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, app.calls, 1)
+	q := app.calls[0].payload.(application.ListTasks)
+	require.Equal(t, []domain.TaskStatus{domain.TaskOpen, domain.TaskClaimed}, q.Statuses)
+}
+
 func TestGetTask(t *testing.T) {
 	app := &fakeApplication{}
 	server := newTestServer(app)
@@ -231,6 +242,63 @@ func TestAdminSeesTrueForbidden(t *testing.T) {
 	res := get(t, server, "/v1/tasks/task-1", "token-admin")
 	require.Equal(t, http.StatusForbidden, res.Code)
 	require.JSONEq(t, `{"error":{"code":"FORBIDDEN","message":"not allowed"}}`, res.Body.String())
+}
+
+func TestDeadlineExceededReturns409(t *testing.T) {
+	app := &fakeApplication{publishErr: &domain.Error{Code: "deadline_exceeded", Message: "task deadline has passed"}}
+	server := newTestServer(app)
+	body := `{"type":"code","title":"Fix parser","problem":"It races","deadline":"2026-07-02T11:00:00Z"}`
+	res := postJSON(t, server, "/v1/tasks", body, "token-publisher", "Idempotency-Key", "req-1")
+	require.Equal(t, http.StatusConflict, res.Code)
+	require.JSONEq(t, `{"error":{"code":"DEADLINE_EXCEEDED","message":"task deadline has passed"}}`, res.Body.String())
+}
+
+// fakeMethodRateLimiter 按 key 独立计数，budget 为每个 key 的允许次数。
+type fakeMethodRateLimiter struct {
+	mu      sync.Mutex
+	budgets map[string]int
+	counts  map[string]int
+}
+
+func newFakeMethodRateLimiter(budgets map[string]int) *fakeMethodRateLimiter {
+	return &fakeMethodRateLimiter{
+		budgets: budgets,
+		counts:  make(map[string]int),
+	}
+}
+
+func (f *fakeMethodRateLimiter) Allow(ctx context.Context, key string) (bool, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	budget, ok := f.budgets[key]
+	if !ok {
+		return true, 0
+	}
+	f.counts[key]++
+	if f.counts[key] > budget {
+		return false, 60
+	}
+	return true, 0
+}
+
+func TestRateLimitKeyDistinguishesMethod(t *testing.T) {
+	budgets := map[string]int{
+		"tenant-1|POST|/v1/tasks": 1,
+		"tenant-1|GET|/v1/tasks":  2,
+	}
+	limiter := newFakeMethodRateLimiter(budgets)
+	app := &fakeApplication{}
+	server := rest.NewServer(app, &tokenVerifier{}, rest.WithRateLimiter(limiter)).Router()
+
+	body := `{"type":"code","title":"Fix parser","problem":"It races","deadline":"2026-07-02T11:00:00Z"}`
+	res := postJSON(t, server, "/v1/tasks", body, "token-publisher", "Idempotency-Key", "req-1")
+	require.Equal(t, http.StatusCreated, res.Code)
+
+	res = postJSON(t, server, "/v1/tasks", body, "token-publisher", "Idempotency-Key", "req-2")
+	require.Equal(t, http.StatusTooManyRequests, res.Code)
+
+	res = get(t, server, "/v1/tasks", "token-publisher")
+	require.Equal(t, http.StatusOK, res.Code)
 }
 
 func TestRateLimitReturns429WithRetryAfter(t *testing.T) {

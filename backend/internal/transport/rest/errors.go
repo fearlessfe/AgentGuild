@@ -88,6 +88,8 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusConflict, "LEASE_EXPIRED", err.Error())
 	case "idempotency_mismatch":
 		writeError(w, http.StatusConflict, "IDEMPOTENCY_MISMATCH", err.Error())
+	case "deadline_exceeded":
+		writeError(w, http.StatusConflict, "DEADLINE_EXCEEDED", err.Error())
 	case "rate_limited":
 		writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 	default:
