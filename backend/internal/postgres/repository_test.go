@@ -2,7 +2,9 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,6 +14,40 @@ import (
 	"agentguild.dev/agentguild/backend/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestTaskPersistenceRecordRoundTripsWithoutInventedContent(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	want := application.TaskRecord{
+		ID: "task-lossless", TenantID: "tenant-1", PublisherAgentVersionID: "publisher-7",
+		Type: "code-review", Title: "Review the scheduler", Problem: "Find lifecycle races",
+		Constraints:  []byte(`{"network":"offline","max_minutes":15}`),
+		Requirements: []byte(`{"language":"go","tests":true}`),
+		Deadline:     time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond),
+		Status:       domain.TaskStatus("active"),
+	}
+
+	if err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		if err := tx.InsertTask(context.Background(), want); err != nil {
+			return err
+		}
+		got, err := tx.GetTask(context.Background(), want.TenantID, want.ID)
+		if err != nil {
+			return err
+		}
+		if got.ID != want.ID || got.TenantID != want.TenantID ||
+			got.PublisherAgentVersionID != want.PublisherAgentVersionID ||
+			got.Type != want.Type || got.Title != want.Title || got.Problem != want.Problem ||
+			!got.Deadline.Equal(want.Deadline) || got.Status != want.Status {
+			t.Fatalf("task record changed: got=%#v want=%#v", got, want)
+		}
+		assertJSONEqual(t, got.Constraints, want.Constraints)
+		assertJSONEqual(t, got.Requirements, want.Requirements)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestOnlyOneNonTerminalExecutionPerTask(t *testing.T) {
 	db := testdb.StartPostgres(t)
@@ -29,6 +65,50 @@ func TestOnlyOneNonTerminalExecutionPerTask(t *testing.T) {
 	}
 	if !contains(err.Error(), "executions_one_active_per_task") {
 		t.Fatalf("expected executions_one_active_per_task violation, got %v", err)
+	}
+}
+
+func TestActiveExecutionCannotBelongToAnotherTask(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-1", "task-a")
+	seedTask(t, db, "tenant-1", "task-b")
+	insertExecution(t, db, "tenant-1", "exe-a", "task-a", "leased")
+
+	_, err := db.Exec(context.Background(), `
+		UPDATE tasks SET active_execution_id='exe-a'
+		WHERE tenant_id='tenant-1' AND id='task-b'`)
+	if err == nil {
+		t.Fatal("active_execution_id accepted an execution belonging to another task")
+	}
+}
+
+func TestTaskEventExecutionCannotBelongToAnotherTask(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-1", "task-a")
+	seedTask(t, db, "tenant-1", "task-b")
+	insertExecution(t, db, "tenant-1", "exe-a", "task-a", "accepted")
+
+	_, err := db.Exec(context.Background(), `
+		INSERT INTO task_events
+			(tenant_id, task_id, execution_id, actor_type, actor_id, intent, from_state, to_state)
+		VALUES ('tenant-1', 'task-b', 'exe-a', 'system', 'scheduler', 'test', 'open', 'open')`)
+	if err == nil {
+		t.Fatal("task event accepted an execution belonging to another task")
+	}
+}
+
+func TestExecutionUsageCannotBelongToAnotherTask(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-1", "task-a")
+	seedTask(t, db, "tenant-1", "task-b")
+	insertExecution(t, db, "tenant-1", "exe-a", "task-a", "accepted")
+
+	_, err := db.Exec(context.Background(), `
+		INSERT INTO execution_usage
+			(tenant_id, task_id, execution_id, agent_version_id, coverage, provider, source_cursor, observed_at)
+		VALUES ('tenant-1', 'task-b', 'exe-a', 'agent-1', 'complete', 'test', 'cursor-1', clock_timestamp())`)
+	if err == nil {
+		t.Fatal("execution usage accepted an execution belonging to another task")
 	}
 }
 
@@ -56,6 +136,67 @@ func TestTransactionUsesOneDatabaseTimestamp(t *testing.T) {
 	}
 }
 
+func TestRepositoriesReuseTransactionDatabaseTimestamp(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	var want time.Time
+
+	err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		var err error
+		want, err = tx.Now(context.Background())
+		if err != nil {
+			return err
+		}
+		task := application.TaskRecord{
+			ID: "task-time", TenantID: "tenant-1", PublisherAgentVersionID: "publisher-1",
+			Type: "code", Title: "title", Problem: "problem",
+			Constraints: []byte(`{}`), Requirements: []byte(`{}`),
+			Deadline: want.Add(time.Hour), Status: domain.TaskOpen,
+		}
+		if err := tx.InsertTask(context.Background(), task); err != nil {
+			return err
+		}
+		execution, err := domain.NewLeasedExecution(
+			"exe-time", task.ID, task.TenantID, "agent-1", want, 1,
+		)
+		if err != nil {
+			return err
+		}
+		if err := tx.InsertExecution(context.Background(), execution, []byte("secret")); err != nil {
+			return err
+		}
+		claimed, err := tx.ClaimTask(
+			context.Background(), task.TenantID, task.ID, 0, execution.ID,
+		)
+		if err != nil || !claimed {
+			t.Fatalf("claim task: claimed=%v err=%v", claimed, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var taskCreated, taskUpdated, executionCreated, executionUpdated, claimedAt time.Time
+	if err := db.QueryRow(context.Background(), `
+		SELECT t.created_at, t.updated_at, e.created_at, e.updated_at, e.claimed_at
+		FROM tasks t JOIN executions e
+		  ON e.tenant_id=t.tenant_id AND e.task_id=t.id
+		WHERE t.tenant_id='tenant-1' AND t.id='task-time'`,
+	).Scan(&taskCreated, &taskUpdated, &executionCreated, &executionUpdated, &claimedAt); err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]time.Time{
+		"task.created_at": taskCreated, "task.updated_at": taskUpdated,
+		"execution.created_at": executionCreated, "execution.updated_at": executionUpdated,
+		"execution.claimed_at": claimedAt,
+	} {
+		if !got.Equal(want) {
+			t.Errorf("%s=%v, want cached transaction time %v", name, got, want)
+		}
+	}
+}
+
 func TestTaskRepositoryIsTenantScopedAndClaimIsConditional(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	seedTask(t, db, "tenant-a", "shared")
@@ -64,29 +205,25 @@ func TestTaskRepositoryIsTenantScopedAndClaimIsConditional(t *testing.T) {
 	rollbackClaim := errors.New("rollback claim fixture")
 
 	err := store.WithTx(context.Background(), func(tx application.Tx) error {
-		task, version, err := tx.GetTask(context.Background(), "tenant-a", "shared")
+		task, err := tx.GetTask(context.Background(), "tenant-a", "shared")
 		if err != nil {
 			return err
 		}
-		if task.TenantID != "tenant-a" || version != 0 {
-			t.Fatalf("unexpected task: %#v version=%d", task, version)
+		if task.TenantID != "tenant-a" || task.StateVersion != 0 {
+			t.Fatalf("unexpected task: %#v", task)
 		}
-		now, err := tx.Now(context.Background())
-		if err != nil {
-			return err
-		}
-		claimed, err := tx.ClaimTask(context.Background(), "tenant-a", "shared", version, "execution-a", now)
+		claimed, err := tx.ClaimTask(context.Background(), "tenant-a", "shared", task.StateVersion, "execution-a")
 		if err != nil || !claimed {
 			t.Fatalf("claim task: claimed=%v err=%v", claimed, err)
 		}
-		staleClaim, err := tx.ClaimTask(context.Background(), "tenant-a", "shared", version, "execution-b", now)
+		staleClaim, err := tx.ClaimTask(context.Background(), "tenant-a", "shared", task.StateVersion, "execution-b")
 		if err != nil {
 			return err
 		}
 		if staleClaim {
 			t.Fatal("stale state version unexpectedly claimed task")
 		}
-		other, _, err := tx.GetTask(context.Background(), "tenant-b", "shared")
+		other, err := tx.GetTask(context.Background(), "tenant-b", "shared")
 		if err != nil {
 			return err
 		}
@@ -134,7 +271,7 @@ func TestTransactionRollsBackTaskIdempotencyAuditAndOutbox(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		claimed, err := tx.ClaimTask(context.Background(), "tenant-1", "task-1", 0, "exe-1", now)
+		claimed, err := tx.ClaimTask(context.Background(), "tenant-1", "task-1", 0, "exe-1")
 		if err != nil || !claimed {
 			t.Fatalf("claim: claimed=%v err=%v", claimed, err)
 		}
@@ -150,10 +287,13 @@ func TestTransactionRollsBackTaskIdempotencyAuditAndOutbox(t *testing.T) {
 			return err
 		}
 		key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "agent-1", Operation: "claim", RequestID: "request-1"}
-		if _, err := tx.LockIdempotency(context.Background(), key, hash, now.Add(time.Hour)); err != nil {
+		record, err := tx.AcquireIdempotency(context.Background(), key, hash, now.Add(time.Hour))
+		if err != nil {
 			return err
 		}
-		if err := tx.SaveIdempotencyResponse(context.Background(), key, 200, []byte(`{"execution_id":"exe-1"}`), now); err != nil {
+		if err := tx.CompleteIdempotency(
+			context.Background(), key, record.OwnerToken, 200, []byte(`{"execution_id":"exe-1"}`),
+		); err != nil {
 			return err
 		}
 		event := application.TaskEvent{
@@ -237,4 +377,18 @@ func index(value, fragment string) int {
 		}
 	}
 	return -1
+}
+
+func assertJSONEqual(t *testing.T, got, want []byte) {
+	t.Helper()
+	var gotValue, wantValue any
+	if err := json.Unmarshal(got, &gotValue); err != nil {
+		t.Fatalf("decode got JSON %q: %v", got, err)
+	}
+	if err := json.Unmarshal(want, &wantValue); err != nil {
+		t.Fatalf("decode want JSON %q: %v", want, err)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("JSON differs: got=%s want=%s", got, want)
+	}
 }

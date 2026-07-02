@@ -19,17 +19,35 @@ type Tx interface {
 	Now(context.Context) (time.Time, error)
 }
 
+type TaskRecord struct {
+	ID                      string
+	TenantID                string
+	PublisherAgentVersionID string
+	Type                    string
+	Title                   string
+	Problem                 string
+	Constraints             []byte
+	Requirements            []byte
+	Deadline                time.Time
+	Status                  domain.TaskStatus
+	ClaimedBy               string
+	StateVersion            int64
+	ActiveExecutionID       string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
 type TaskRepository interface {
-	InsertTask(context.Context, *domain.Task) error
-	GetTask(context.Context, string, string) (*domain.Task, int64, error)
-	UpdateTask(context.Context, *domain.Task, int64, string, time.Time) (bool, error)
-	ClaimTask(context.Context, string, string, int64, string, time.Time) (bool, error)
+	InsertTask(context.Context, TaskRecord) error
+	GetTask(context.Context, string, string) (*TaskRecord, error)
+	UpdateTask(context.Context, TaskRecord, int64, string) (bool, error)
+	ClaimTask(context.Context, string, string, int64, string) (bool, error)
 }
 
 type ExecutionRepository interface {
 	InsertExecution(context.Context, *domain.Execution, []byte) error
 	GetExecution(context.Context, string, string) (*domain.Execution, int64, error)
-	UpdateExecution(context.Context, *domain.Execution, int64, time.Time) (bool, error)
+	UpdateExecution(context.Context, *domain.Execution, int64) (bool, error)
 }
 
 type IdempotencyKey struct {
@@ -45,11 +63,14 @@ type IdempotencyRecord struct {
 	ResponseCode *int
 	ResponseBody []byte
 	ExpiresAt    time.Time
+	OwnerToken   string
+	Acquired     bool
+	Completed    bool
 }
 
 type IdempotencyRepository interface {
-	LockIdempotency(context.Context, IdempotencyKey, [32]byte, time.Time) (*IdempotencyRecord, error)
-	SaveIdempotencyResponse(context.Context, IdempotencyKey, int, []byte, time.Time) error
+	AcquireIdempotency(context.Context, IdempotencyKey, [32]byte, time.Time) (*IdempotencyRecord, error)
+	CompleteIdempotency(context.Context, IdempotencyKey, string, int, []byte) error
 }
 
 type TaskEvent struct {

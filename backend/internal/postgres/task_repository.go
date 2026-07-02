@@ -5,17 +5,23 @@ import (
 	"errors"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"github.com/jackc/pgx/v5"
 )
 
-func (tx *Tx) InsertTask(ctx context.Context, task *domain.Task) error {
-	_, err := tx.tx.Exec(ctx, `
+func (tx *Tx) InsertTask(ctx context.Context, task application.TaskRecord) error {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.tx.Exec(ctx, `
 		INSERT INTO tasks (
 			tenant_id, id, publisher_agent_version_id, type, title, problem,
-			constraints, requirements, deadline, status
-		) VALUES ($1, $2, $3, 'generic', $2, $2, '{}'::jsonb, '{}'::jsonb, $4, $5)`,
-		task.TenantID, task.ID, task.PublisherID, task.Deadline, task.Status,
+			constraints, requirements, deadline, status, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $11)`,
+		task.TenantID, task.ID, task.PublisherAgentVersionID, task.Type, task.Title,
+		task.Problem, task.Constraints, task.Requirements, task.Deadline, task.Status, now,
 	)
 	return err
 }
@@ -23,39 +29,45 @@ func (tx *Tx) InsertTask(ctx context.Context, task *domain.Task) error {
 func (tx *Tx) GetTask(
 	ctx context.Context,
 	tenantID, taskID string,
-) (*domain.Task, int64, error) {
-	var task domain.Task
+) (*application.TaskRecord, error) {
+	var task application.TaskRecord
 	var status string
-	var version int64
 	err := tx.tx.QueryRow(ctx, `
-		SELECT t.id, t.tenant_id, t.publisher_agent_version_id, t.deadline, t.status,
-		       COALESCE(e.agent_version_id, ''), t.state_version
+		SELECT t.id, t.tenant_id, t.publisher_agent_version_id, t.type, t.title,
+		       t.problem, t.constraints, t.requirements, t.deadline, t.status,
+		       COALESCE(e.agent_version_id, ''), t.state_version,
+		       COALESCE(t.active_execution_id, ''), t.created_at, t.updated_at
 		FROM tasks t
 		LEFT JOIN executions e
-		  ON e.tenant_id = t.tenant_id AND e.id = t.active_execution_id
+		  ON e.tenant_id = t.tenant_id AND e.id = t.active_execution_id AND e.task_id = t.id
 		WHERE t.tenant_id = $1 AND t.id = $2`,
 		tenantID, taskID,
 	).Scan(
-		&task.ID, &task.TenantID, &task.PublisherID, &task.Deadline, &status,
-		&task.ClaimedBy, &version,
+		&task.ID, &task.TenantID, &task.PublisherAgentVersionID, &task.Type, &task.Title,
+		&task.Problem, &task.Constraints, &task.Requirements, &task.Deadline, &status,
+		&task.ClaimedBy, &task.StateVersion, &task.ActiveExecutionID,
+		&task.CreatedAt, &task.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, 0, notFound("task")
+		return nil, notFound("task")
 	}
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	task.Status = taskStatus(status)
-	return &task, version, nil
+	task.Status = domain.TaskStatus(status)
+	return &task, nil
 }
 
 func (tx *Tx) UpdateTask(
 	ctx context.Context,
-	task *domain.Task,
+	task application.TaskRecord,
 	expectedVersion int64,
 	activeExecutionID string,
-	now time.Time,
 ) (bool, error) {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return false, err
+	}
 	tag, err := tx.tx.Exec(ctx, `
 		UPDATE tasks
 		SET status=$4, state_version=state_version+1,
@@ -76,8 +88,11 @@ func (tx *Tx) ClaimTask(
 	tenantID, taskID string,
 	expectedVersion int64,
 	executionID string,
-	now time.Time,
 ) (bool, error) {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return false, err
+	}
 	tag, err := tx.tx.Exec(ctx, claimSQL, tenantID, taskID, expectedVersion, executionID, now)
 	return tag.RowsAffected() == 1, err
 }
@@ -87,14 +102,19 @@ func (tx *Tx) InsertExecution(
 	execution *domain.Execution,
 	leaseSecretHash []byte,
 ) error {
-	_, err := tx.tx.Exec(ctx, `
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.tx.Exec(ctx, `
 		INSERT INTO executions (
 			tenant_id, id, task_id, agent_version_id, status, lease_secret_hash,
-			lease_generation, lease_soft_expires_at, lease_hard_expires_at, claimed_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, clock_timestamp())`,
+			lease_generation, lease_soft_expires_at, lease_hard_expires_at, claimed_at,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $10)`,
 		execution.TenantID, execution.ID, execution.TaskID, execution.AgentID,
 		execution.Status, leaseSecretHash, execution.Lease.Generation,
-		execution.Lease.SoftExpiry, execution.Lease.HardExpiry,
+		execution.Lease.SoftExpiry, execution.Lease.HardExpiry, now,
 	)
 	return err
 }
@@ -136,8 +156,11 @@ func (tx *Tx) UpdateExecution(
 	ctx context.Context,
 	execution *domain.Execution,
 	expectedVersion int64,
-	now time.Time,
 ) (bool, error) {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return false, err
+	}
 	tag, err := tx.tx.Exec(ctx, `
 		UPDATE executions
 		SET status=$4, state_version=state_version+1, lease_generation=$5,
@@ -149,13 +172,6 @@ func (tx *Tx) UpdateExecution(
 		execution.Lease.HardExpiry, now,
 	)
 	return tag.RowsAffected() == 1, err
-}
-
-func taskStatus(status string) domain.TaskStatus {
-	if status == "active" {
-		return domain.TaskClaimed
-	}
-	return domain.TaskStatus(status)
 }
 
 func notFound(resource string) error {

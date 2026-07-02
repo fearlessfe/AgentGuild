@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestCanonicalHashIgnoresObjectKeyOrder(t *testing.T) {
@@ -40,22 +42,29 @@ func TestConcurrentFirstUseOfIdempotencyKeySerializes(t *testing.T) {
 
 	firstLocked := make(chan struct{})
 	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
 	results := make(chan *application.IdempotencyRecord, 2)
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+	defer release()
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
 		err := store.WithTx(context.Background(), func(tx application.Tx) error {
-			record, err := tx.LockIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+			record, err := tx.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
 			if err != nil {
 				return err
 			}
+			if !record.Acquired || record.Completed || record.OwnerToken == "" {
+				return fmt.Errorf("first acquire state: %#v", record)
+			}
 			close(firstLocked)
 			<-releaseFirst
-			if err := tx.SaveIdempotencyResponse(
-				context.Background(), key, 200, []byte(`{"execution_id":"exe-1"}`), time.Now(),
+			if err := tx.CompleteIdempotency(
+				context.Background(), key, record.OwnerToken, 200, []byte(`{"execution_id":"exe-1"}`),
 			); err != nil {
 				return err
 			}
@@ -69,7 +78,8 @@ func TestConcurrentFirstUseOfIdempotencyKeySerializes(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		err := store.WithTx(context.Background(), func(tx application.Tx) error {
-			record, err := tx.LockIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+			close(secondStarted)
+			record, err := tx.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
 			if err != nil {
 				return err
 			}
@@ -78,8 +88,9 @@ func TestConcurrentFirstUseOfIdempotencyKeySerializes(t *testing.T) {
 		})
 		errs <- err
 	}()
-	time.Sleep(50 * time.Millisecond)
-	close(releaseFirst)
+	<-secondStarted
+	waitForBlockedIdempotencyQuery(t, db)
+	release()
 	wg.Wait()
 	close(results)
 	close(errs)
@@ -91,9 +102,10 @@ func TestConcurrentFirstUseOfIdempotencyKeySerializes(t *testing.T) {
 	}
 	var completed int
 	for record := range results {
-		if record.ResponseCode != nil {
+		if record.Completed {
 			completed++
-			if *record.ResponseCode != 200 || string(record.ResponseBody) != `{"execution_id":"exe-1"}` {
+			if record.Acquired || record.ResponseCode == nil || *record.ResponseCode != 200 ||
+				string(record.ResponseBody) != `{"execution_id":"exe-1"}` {
 				t.Fatalf("unexpected stable response: %#v", record)
 			}
 		}
@@ -113,17 +125,105 @@ func TestIdempotencyHashMismatchReturnsStableDomainError(t *testing.T) {
 	second, _ := postgres.CanonicalHash(map[string]any{"task_id": "task-2"})
 
 	if err := store.WithTx(context.Background(), func(tx application.Tx) error {
-		_, err := tx.LockIdempotency(context.Background(), key, first, time.Now().Add(time.Hour))
-		return err
+		record, err := tx.AcquireIdempotency(context.Background(), key, first, time.Now().Add(time.Hour))
+		if err != nil {
+			return err
+		}
+		return tx.CompleteIdempotency(context.Background(), key, record.OwnerToken, 204, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	err := store.WithTx(context.Background(), func(tx application.Tx) error {
-		_, err := tx.LockIdempotency(context.Background(), key, second, time.Now().Add(time.Hour))
+		_, err := tx.AcquireIdempotency(context.Background(), key, second, time.Now().Add(time.Hour))
 		return err
 	})
 	var domainErr *domain.Error
 	if !errors.As(err, &domainErr) || domainErr.Code != "idempotency_mismatch" {
 		t.Fatalf("expected idempotency_mismatch domain error, got %v", err)
+	}
+}
+
+func TestIdempotencyCompletionRequiresOwnerAndIsOneShot(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{
+		TenantID: "tenant-1", ActorID: "agent-1", Operation: "claim", RequestID: "owner-test",
+	}
+	hash, _ := postgres.CanonicalHash(map[string]any{"task_id": "task-1"})
+
+	err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		record, err := tx.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+		if err != nil {
+			return err
+		}
+		if err := tx.CompleteIdempotency(context.Background(), key, "not-the-owner", 200, []byte("wrong")); err == nil {
+			t.Fatal("non-owner completed idempotency record")
+		}
+		if err := tx.CompleteIdempotency(context.Background(), key, record.OwnerToken, 200, []byte("stable")); err != nil {
+			return err
+		}
+		if err := tx.CompleteIdempotency(context.Background(), key, record.OwnerToken, 201, []byte("overwrite")); err == nil {
+			t.Fatal("completed idempotency response was overwritten")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTransactionCannotCommitAcquiredPendingIdempotency(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{
+		TenantID: "tenant-1", ActorID: "agent-1", Operation: "claim", RequestID: "pending-test",
+	}
+	hash, _ := postgres.CanonicalHash(map[string]any{"task_id": "task-1"})
+
+	err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		record, err := tx.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+		if err != nil {
+			return err
+		}
+		if !record.Acquired || record.Completed {
+			t.Fatalf("unexpected acquire state: %#v", record)
+		}
+		return nil
+	})
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != "idempotency_incomplete" {
+		t.Fatalf("expected idempotency_incomplete, got %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow(context.Background(), `SELECT count(*) FROM idempotency_records`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("pending idempotency record committed: count=%d", count)
+	}
+}
+
+func waitForBlockedIdempotencyQuery(t *testing.T, db *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var blocked bool
+		err := db.QueryRow(context.Background(), `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE datname=current_database()
+				  AND wait_event_type='Lock'
+				  AND query LIKE '%idempotency_records%'
+			)`).Scan(&blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second idempotency acquire never became lock-blocked")
+		}
 	}
 }

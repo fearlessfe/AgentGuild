@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
+	"agentguild.dev/agentguild/backend/internal/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,9 +26,15 @@ func (s *Store) WithTx(ctx context.Context, fn func(application.Tx) error) error
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	wrapped := &Tx{tx: tx}
+	wrapped := &Tx{tx: tx, acquiredIdempotency: make(map[application.IdempotencyKey]string)}
 	if err := fn(wrapped); err != nil {
 		return err
+	}
+	if len(wrapped.acquiredIdempotency) != 0 {
+		return &domain.Error{
+			Code:    "idempotency_incomplete",
+			Message: "acquired idempotency record must be completed before commit",
+		}
 	}
 	return tx.Commit(ctx)
 }
@@ -38,6 +45,8 @@ type Tx struct {
 	nowOnce sync.Once
 	now     time.Time
 	nowErr  error
+
+	acquiredIdempotency map[application.IdempotencyKey]string
 }
 
 func (tx *Tx) Now(ctx context.Context) (time.Time, error) {

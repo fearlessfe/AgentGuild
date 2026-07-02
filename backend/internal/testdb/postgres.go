@@ -77,16 +77,16 @@ func startContainer(t *testing.T) string {
 
 func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	t.Helper()
-	db, err := pgxpool.New(context.Background(), dsn)
+	admin, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)
 	}
-	t.Cleanup(db.Close)
+	t.Cleanup(admin.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for {
-		if err := db.Ping(ctx); err == nil {
+		if err := admin.Ping(ctx); err == nil {
 			break
 		}
 		if ctx.Err() != nil {
@@ -96,14 +96,32 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	}
 
 	var version string
-	if err := db.QueryRow(context.Background(), `SHOW server_version`).Scan(&version); err != nil {
+	if err := admin.QueryRow(context.Background(), `SHOW server_version`).Scan(&version); err != nil {
 		t.Fatalf("read PostgreSQL version: %v", err)
 	}
 	if !strings.HasPrefix(version, "18.4") {
 		t.Fatalf("PostgreSQL version=%q, want 18.4", version)
 	}
 
-	applyMigration(t, db, "000001_task_lifecycle.down.sql")
+	schema := fmt.Sprintf("agentguild_test_%d", time.Now().UnixNano())
+	if _, err := admin.Exec(context.Background(), `CREATE SCHEMA `+schema); err != nil {
+		t.Fatalf("create isolated test schema %s: %v", schema, err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DROP SCHEMA IF EXISTS `+schema+` CASCADE`)
+	})
+
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse PostgreSQL DSN: %v", err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	db, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		t.Fatalf("open isolated PostgreSQL schema: %v", err)
+	}
+	t.Cleanup(db.Close)
+
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
 	return db
 }

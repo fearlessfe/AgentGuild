@@ -40,6 +40,8 @@ CREATE TABLE executions (
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (tenant_id, id),
+    CONSTRAINT executions_tenant_id_task_id_key
+        UNIQUE (tenant_id, id, task_id),
     CONSTRAINT executions_task_fk
         FOREIGN KEY (tenant_id, task_id) REFERENCES tasks (tenant_id, id),
     CONSTRAINT executions_status_valid CHECK (
@@ -63,8 +65,8 @@ CREATE UNIQUE INDEX executions_one_active_per_task
 
 ALTER TABLE tasks
     ADD CONSTRAINT tasks_active_execution_fk
-    FOREIGN KEY (tenant_id, active_execution_id)
-    REFERENCES executions (tenant_id, id)
+    FOREIGN KEY (tenant_id, active_execution_id, id)
+    REFERENCES executions (tenant_id, id, task_id)
     DEFERRABLE INITIALLY DEFERRED;
 
 CREATE TABLE idempotency_records (
@@ -73,6 +75,7 @@ CREATE TABLE idempotency_records (
     operation text NOT NULL,
     request_id text NOT NULL,
     request_hash bytea NOT NULL CHECK (octet_length(request_hash) = 32),
+    owner_token text NOT NULL,
     response_code integer,
     response_body bytea,
     expires_at timestamptz NOT NULL,
@@ -100,7 +103,8 @@ CREATE TABLE task_events (
     CONSTRAINT task_events_task_fk
         FOREIGN KEY (tenant_id, task_id) REFERENCES tasks (tenant_id, id),
     CONSTRAINT task_events_execution_fk
-        FOREIGN KEY (tenant_id, execution_id) REFERENCES executions (tenant_id, id)
+        FOREIGN KEY (tenant_id, execution_id, task_id)
+        REFERENCES executions (tenant_id, id, task_id)
 );
 
 CREATE INDEX task_events_tenant_task_created
@@ -142,7 +146,8 @@ CREATE TABLE execution_usage (
     CONSTRAINT execution_usage_task_fk
         FOREIGN KEY (tenant_id, task_id) REFERENCES tasks (tenant_id, id),
     CONSTRAINT execution_usage_execution_fk
-        FOREIGN KEY (tenant_id, execution_id) REFERENCES executions (tenant_id, id),
+        FOREIGN KEY (tenant_id, execution_id, task_id)
+        REFERENCES executions (tenant_id, id, task_id),
     CONSTRAINT execution_usage_coverage_valid
         CHECK (coverage IN ('complete', 'partial', 'unavailable')),
     CONSTRAINT execution_usage_cost_nonnegative
