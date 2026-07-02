@@ -59,6 +59,7 @@ type ExecutionRepository interface {
 	GetExecution(context.Context, string, string) (*domain.Execution, int64, error)
 	ListActiveExecutions(context.Context, string, string) ([]ExecutionRecord, error)
 	UpdateExecution(context.Context, *domain.Execution, int64) (bool, error)
+	UpdateOwnedExecution(context.Context, *domain.Execution, int64, string, int64) (bool, error)
 }
 
 type ExecutionRecord struct {

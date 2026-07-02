@@ -127,7 +127,7 @@ func (tx *Tx) UpdateTask(
 
 const claimSQL = `
 UPDATE tasks
-SET status='active', state_version=state_version+1, active_execution_id=$4, updated_at=$5
+SET status='claimed', state_version=state_version+1, active_execution_id=$4, updated_at=$5
 WHERE tenant_id=$1 AND id=$2 AND status='open' AND state_version=$3 AND deadline>$5`
 
 func (tx *Tx) ClaimTask(
@@ -250,6 +250,35 @@ func (tx *Tx) UpdateExecution(
 		execution.TenantID, execution.ID, expectedVersion, execution.Status,
 		execution.Lease.Generation, execution.Lease.SoftExpiry,
 		execution.Lease.HardExpiry, now,
+	)
+	return tag.RowsAffected() == 1, err
+}
+
+func (tx *Tx) UpdateOwnedExecution(
+	ctx context.Context,
+	execution *domain.Execution,
+	expectedVersion int64,
+	agentVersionID string,
+	expectedGeneration int64,
+) (bool, error) {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return false, err
+	}
+	tag, err := tx.tx.Exec(ctx, `
+		UPDATE executions
+		SET status=$6, state_version=state_version+1, lease_generation=$7,
+		    lease_soft_expires_at=$8, lease_hard_expires_at=$9,
+		    last_heartbeat_at=CASE WHEN $6 IN ('leased','running') THEN $10 ELSE last_heartbeat_at END,
+		    started_at=CASE WHEN $6='running' AND started_at IS NULL THEN $10 ELSE started_at END,
+		    updated_at=$10
+		WHERE tenant_id=$1 AND id=$2 AND state_version=$3
+		  AND agent_version_id=$4 AND lease_generation=$5
+		  AND status IN ('leased','running')
+		  AND lease_hard_expires_at >= $10`,
+		execution.TenantID, execution.ID, expectedVersion, agentVersionID,
+		expectedGeneration, execution.Status, execution.Lease.Generation,
+		execution.Lease.SoftExpiry, execution.Lease.HardExpiry, now,
 	)
 	return tag.RowsAffected() == 1, err
 }

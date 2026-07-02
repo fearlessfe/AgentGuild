@@ -380,8 +380,17 @@ func (tx *fakeTx) UpdateTask(_ context.Context, r application.TaskRecord, versio
 	tx.seed(r)
 	return true, nil
 }
-func (tx *fakeTx) ClaimTask(context.Context, string, string, int64, string) (bool, error) {
-	return false, nil
+func (tx *fakeTx) ClaimTask(_ context.Context, tenant, id string, version int64, executionID string) (bool, error) {
+	r, ok := tx.tasks[tx.key(tenant, id)]
+	if !ok || r.StateVersion != version || r.Status != domain.TaskOpen || !tx.now.Before(r.Deadline) {
+		return false, nil
+	}
+	r.Status = domain.TaskClaimed
+	r.StateVersion++
+	r.ActiveExecutionID = executionID
+	r.UpdatedAt = tx.now
+	tx.seed(r)
+	return true, nil
 }
 func (tx *fakeTx) ListTaskRecords(_ context.Context, q application.TaskListQuery) ([]application.TaskRecord, error) {
 	var out []application.TaskRecord
@@ -416,7 +425,11 @@ func statusAllowed(status domain.TaskStatus, allowed []domain.TaskStatus) bool {
 	}
 	return false
 }
-func (tx *fakeTx) InsertExecution(context.Context, *domain.Execution, []byte) error { return nil }
+func (tx *fakeTx) InsertExecution(_ context.Context, execution *domain.Execution, _ []byte) error {
+	copy := *execution
+	tx.executions[execution.ID] = &copy
+	return nil
+}
 func (tx *fakeTx) GetExecution(_ context.Context, tenant, id string) (*domain.Execution, int64, error) {
 	e, ok := tx.executions[id]
 	if !ok || e.TenantID != tenant {
@@ -446,6 +459,15 @@ func isActiveExecution(status domain.ExecutionStatus) bool {
 func (tx *fakeTx) UpdateExecution(_ context.Context, e *domain.Execution, _ int64) (bool, error) {
 	if tx.failAt == "execution" {
 		return false, errors.New("injected execution failure")
+	}
+	copy := *e
+	tx.executions[e.ID] = &copy
+	return true, nil
+}
+func (tx *fakeTx) UpdateOwnedExecution(_ context.Context, e *domain.Execution, _ int64, owner string, generation int64) (bool, error) {
+	stored, ok := tx.executions[e.ID]
+	if !ok || stored.AgentID != owner || stored.Lease.Generation != generation || tx.now.After(stored.Lease.HardExpiry) {
+		return false, nil
 	}
 	copy := *e
 	tx.executions[e.ID] = &copy
