@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -283,6 +284,34 @@ func TestExecutionRepositoryIsTenantScoped(t *testing.T) {
 		}
 		if execution.TenantID != "tenant-a" || execution.Status != domain.ExecutionExpired {
 			t.Fatalf("unexpected execution: %#v", execution)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListActiveExecutionsIsTenantTaskScopedAndComplete(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	active := []string{"leased", "running", "submitted", "validating", "reviewing", "revision_requested"}
+	for i, status := range active {
+		taskID := fmt.Sprintf("task-%d", i)
+		seedTask(t, db, "tenant-a", taskID)
+		seedTask(t, db, "tenant-b", taskID)
+		insertExecution(t, db, "tenant-a", fmt.Sprintf("e-%d", i), taskID, status)
+		insertExecution(t, db, "tenant-b", fmt.Sprintf("other-%d", i), taskID, "running")
+	}
+	store := postgres.NewStore(db)
+	err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		for i := range active {
+			records, err := tx.ListActiveExecutions(context.Background(), "tenant-a", fmt.Sprintf("task-%d", i))
+			if err != nil {
+				return err
+			}
+			if len(records) != 1 || records[0].Execution.ID != fmt.Sprintf("e-%d", i) {
+				t.Fatalf("status %s records=%#v", active[i], records)
+			}
 		}
 		return nil
 	})

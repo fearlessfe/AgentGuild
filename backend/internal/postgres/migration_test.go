@@ -104,3 +104,18 @@ func TestExecutionMigrationAcceptsCancelledAsTerminal(t *testing.T) {
 		t.Fatalf("cancelled execution rejected by migration: %v", err)
 	}
 }
+
+func TestTaskJSONDefaultsAreArrays(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	var constraints, requirements string
+	err := db.QueryRow(context.Background(), `
+		INSERT INTO tasks (tenant_id,id,publisher_agent_version_id,type,title,problem,deadline,status)
+		VALUES ('tenant','task','publisher','type','title','problem',clock_timestamp()+interval '1 hour','open')
+		RETURNING constraints::text, requirements::text`).Scan(&constraints, &requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if constraints != "[]" || requirements != "[]" {
+		t.Fatalf("defaults=%s/%s, want []/[]", constraints, requirements)
+	}
+}

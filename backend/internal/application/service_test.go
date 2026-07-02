@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,53 @@ func TestPublishRequiresDeadlineAndScope(t *testing.T) {
 		RequestID: "req-1", Title: "Fix parser", Deadline: fixtureNow.Add(time.Hour),
 	})
 	assertDomainError(t, err, "forbidden", "")
+}
+
+func TestNewServiceRejectsShortCursorSecret(t *testing.T) {
+	_, err := application.NewService(&fakeStore{tx: newFakeTx()}, application.Options{CursorSecret: []byte(strings.Repeat("x", 31))})
+	assertDomainError(t, err, "invalid_argument", "cursor_secret")
+}
+
+func TestPublishDeadlineMustBeStrictlyAfterTransactionTime(t *testing.T) {
+	for _, deadline := range []time.Time{fixtureNow, fixtureNow.Add(-time.Nanosecond)} {
+		svc, tx := newServiceFixture()
+		_, err := svc.PublishTask(context.Background(), principal("tenant-1", "publisher-1", "tasks:publish"), application.PublishTask{RequestID: "req", Deadline: deadline})
+		assertDomainError(t, err, "invalid_argument", "deadline")
+		if len(tx.tasks) != 0 {
+			t.Fatalf("deadline %v persisted a task", deadline)
+		}
+	}
+}
+
+func TestEveryEntryRejectsIncompletePrincipalBeforeAuthorization(t *testing.T) {
+	svc, _ := newServiceFixture()
+	calls := []struct {
+		name string
+		call func(auth.Principal) error
+	}{
+		{"publish", func(p auth.Principal) error {
+			_, err := svc.PublishTask(context.Background(), p, application.PublishTask{})
+			return err
+		}},
+		{"list", func(p auth.Principal) error {
+			_, err := svc.ListTasks(context.Background(), p, application.ListTasks{})
+			return err
+		}},
+		{"get", func(p auth.Principal) error {
+			_, err := svc.GetTask(context.Background(), p, application.GetTask{})
+			return err
+		}},
+		{"cancel", func(p auth.Principal) error {
+			_, err := svc.CancelTask(context.Background(), p, application.CancelTask{})
+			return err
+		}},
+	}
+	for _, call := range calls {
+		t.Run(call.name, func(t *testing.T) {
+			err := call.call(auth.Principal{AgentID: "agent", AgentVersionID: "version", Scopes: []string{"tasks:publish", "tasks:read", "tasks:cancel"}})
+			assertDomainError(t, err, "invalid_argument", "tenant_id")
+		})
+	}
 }
 
 func TestPublishPersistsLosslessBodyEventsAndStableReplay(t *testing.T) {
@@ -72,6 +120,78 @@ func TestListCursorIsSignedAndBoundToTenantAndFilter(t *testing.T) {
 	assertDomainError(t, err, "invalid_argument", "cursor")
 }
 
+func TestListRejectsTamperedExpiredCursorAndInvalidLimits(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "b", TenantID: "tenant-1", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+	tx.seed(application.TaskRecord{ID: "a", TenantID: "tenant-1", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+	page, err := svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := page.Meta.NextCursor[:len(page.Meta.NextCursor)-1] + "A"
+	_, err = svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Cursor: tampered})
+	assertDomainError(t, err, "invalid_argument", "cursor")
+	tx.now = fixtureNow.Add(2 * time.Hour)
+	_, err = svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Cursor: page.Meta.NextCursor})
+	assertDomainError(t, err, "invalid_argument", "cursor")
+	for _, limit := range []int{-1, 101} {
+		_, err = svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Limit: limit})
+		assertDomainError(t, err, "invalid_argument", "limit")
+	}
+}
+
+func TestCursorCannotBeVerifiedByDifferentSecret(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "b", TenantID: "tenant-1", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+	tx.seed(application.TaskRecord{ID: "a", TenantID: "tenant-1", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+	page, err := svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := application.NewService(&fakeStore{tx: tx}, application.Options{CursorSecret: []byte("abcdefghijklmnopqrstuvwxyz123456")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = other.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Cursor: page.Meta.NextCursor})
+	assertDomainError(t, err, "invalid_argument", "cursor")
+}
+
+func TestListPaginatesEveryTaskWithSameTimestamp(t *testing.T) {
+	svc, tx := newServiceFixture()
+	for _, id := range []string{"c", "b", "a"} {
+		tx.seed(application.TaskRecord{ID: id, TenantID: "tenant-1", Status: domain.TaskOpen, CreatedAt: fixtureNow})
+	}
+	var ids []string
+	cursor := ""
+	for {
+		page, err := svc.ListTasks(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.ListTasks{Limit: 1, Cursor: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, task := range page.Data {
+			ids = append(ids, task.ID)
+		}
+		cursor = page.Meta.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	if !reflect.DeepEqual(ids, []string{"c", "b", "a"}) {
+		t.Fatalf("ids=%v", ids)
+	}
+}
+
+func TestIdempotencyRequestMismatchIsRejected(t *testing.T) {
+	svc, _ := newServiceFixture()
+	p := principal("tenant-1", "publisher-1", "tasks:publish")
+	_, err := svc.PublishTask(context.Background(), p, application.PublishTask{RequestID: "same", Title: "first", Deadline: fixtureNow.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.PublishTask(context.Background(), p, application.PublishTask{RequestID: "same", Title: "different", Deadline: fixtureNow.Add(time.Hour)})
+	assertDomainError(t, err, "idempotency_mismatch", "")
+}
+
 func TestGetIsTenantScopedAndCancelAtomicallyCancelsActiveExecution(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.seed(application.TaskRecord{ID: "shared", TenantID: "tenant-1", PublisherAgentVersionID: "publisher-1", Status: domain.TaskInProgress, Deadline: fixtureNow.Add(time.Hour), ActiveExecutionID: "execution-1", StateVersion: 2})
@@ -83,7 +203,7 @@ func TestGetIsTenantScopedAndCancelAtomicallyCancelsActiveExecution(t *testing.T
 		t.Fatalf("GetTask()=%#v, %v", got, err)
 	}
 	_, err = svc.CancelTask(context.Background(), principal("tenant-1", "other-publisher", "tasks:cancel"), application.CancelTask{RequestID: "cancel-1", TaskID: "shared"})
-	assertDomainError(t, err, "forbidden", "")
+	assertDomainError(t, err, "not_found", "")
 
 	cancelled, err := svc.CancelTask(context.Background(), principal("tenant-1", "publisher-1", "tasks:cancel"), application.CancelTask{RequestID: "cancel-2", TaskID: "shared", Reason: "superseded"})
 	if err != nil || cancelled.Data.Status != domain.TaskCancelled || tx.executions["execution-1"].Status != domain.ExecutionCancelled {
@@ -97,17 +217,83 @@ func TestGetIsTenantScopedAndCancelAtomicallyCancelsActiveExecution(t *testing.T
 	}
 }
 
+func TestCancelDoesNotRevealWhetherTaskExistsOrHasDifferentOwner(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "owned-by-other", TenantID: "tenant-1", PublisherAgentVersionID: "other", Status: domain.TaskOpen, Deadline: fixtureNow.Add(time.Hour)})
+	p := principal("tenant-1", "publisher", "tasks:cancel")
+	_, invisible := svc.CancelTask(context.Background(), p, application.CancelTask{RequestID: "one", TaskID: "owned-by-other"})
+	_, missing := svc.CancelTask(context.Background(), p, application.CancelTask{RequestID: "two", TaskID: "missing"})
+	if invisible == nil || missing == nil || invisible.Error() != missing.Error() || domain.CodeOf(invisible) != domain.CodeOf(missing) {
+		t.Fatalf("invisible=%v missing=%v", invisible, missing)
+	}
+}
+
+func TestCancelRollsBackAtEveryMutationFailure(t *testing.T) {
+	stages := []string{"execution", "task", "event", "outbox", "complete"}
+	for _, stage := range stages {
+		t.Run(stage, func(t *testing.T) {
+			svc, tx := newServiceFixture()
+			tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant-1", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, Deadline: fixtureNow.Add(time.Hour), ActiveExecutionID: "execution", StateVersion: 2})
+			tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant-1", Status: domain.ExecutionRunning}
+			tx.failAt = stage
+			_, err := svc.CancelTask(context.Background(), principal("tenant-1", "publisher", "tasks:cancel"), application.CancelTask{RequestID: "cancel", TaskID: "task"})
+			if err == nil {
+				t.Fatal("expected injected failure")
+			}
+			task := tx.tasks[tx.key("tenant-1", "task")]
+			if task.Status != domain.TaskInProgress || task.StateVersion != 2 || task.ActiveExecutionID != "execution" || tx.executions["execution"].Status != domain.ExecutionRunning || len(tx.events) != 0 || len(tx.outbox) != 0 || len(tx.idem) != 0 {
+				t.Fatalf("partial state after %s failure: task=%#v execution=%s events=%d outbox=%d idem=%d", stage, task, tx.executions["execution"].Status, len(tx.events), len(tx.outbox), len(tx.idem))
+			}
+		})
+	}
+}
+
+func TestCancelQueriesAllActiveExecutionsInsteadOfTrustingTaskPointer(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant-1", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, Deadline: fixtureNow.Add(time.Hour), ActiveExecutionID: "stale"})
+	for i, status := range []domain.ExecutionStatus{domain.ExecutionLeased, domain.ExecutionRunning, domain.ExecutionSubmitted, domain.ExecutionValidating, domain.ExecutionReviewing, domain.ExecutionRevisionRequested} {
+		id := "execution-" + string(rune('a'+i))
+		tx.executions[id] = &domain.Execution{ID: id, TaskID: "task", TenantID: "tenant-1", Status: status}
+	}
+	_, err := svc.CancelTask(context.Background(), principal("tenant-1", "publisher", "tasks:cancel"), application.CancelTask{RequestID: "cancel", TaskID: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, execution := range tx.executions {
+		if execution.Status != domain.ExecutionCancelled {
+			t.Errorf("%s status=%s", id, execution.Status)
+		}
+	}
+}
+
+func TestCorruptTaskJSONIsReturnedAsDataIntegrityError(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "bad", TenantID: "tenant-1", Constraints: []byte(`{}`), Requirements: []byte(`[]`), Status: domain.TaskOpen})
+	_, err := svc.GetTask(context.Background(), principal("tenant-1", "agent", "tasks:read"), application.GetTask{TaskID: "bad"})
+	if err == nil {
+		t.Fatal("corrupt constraints were silently ignored")
+	}
+}
+
 func principal(tenant, agentVersion string, scopes ...string) auth.Principal {
 	return auth.Principal{TenantID: tenant, AgentID: "agent", AgentVersionID: agentVersion, Scopes: scopes}
 }
 
 func newServiceFixture() (*application.Service, *fakeTx) {
-	tx := &fakeTx{now: fixtureNow, tasks: map[string]application.TaskRecord{}, executions: map[string]*domain.Execution{}, idem: map[application.IdempotencyKey]*application.IdempotencyRecord{}}
+	tx := newFakeTx()
 	next := 0
-	return application.NewService(&fakeStore{tx: tx}, application.Options{
+	svc, err := application.NewService(&fakeStore{tx: tx}, application.Options{
 		CursorSecret: []byte("01234567890123456789012345678901"), CursorTTL: time.Hour,
 		NewID: func() string { next++; return "id-" + string(rune('0'+next)) },
-	}), tx
+	})
+	if err != nil {
+		panic(err)
+	}
+	return svc, tx
+}
+
+func newFakeTx() *fakeTx {
+	return &fakeTx{now: fixtureNow, tasks: map[string]application.TaskRecord{}, executions: map[string]*domain.Execution{}, idem: map[application.IdempotencyKey]*application.IdempotencyRecord{}}
 }
 
 func assertDomainError(t *testing.T, err error, code, field string) {
@@ -120,7 +306,14 @@ func assertDomainError(t *testing.T, err error, code, field string) {
 
 type fakeStore struct{ tx *fakeTx }
 
-func (s *fakeStore) WithTx(_ context.Context, fn func(application.Tx) error) error { return fn(s.tx) }
+func (s *fakeStore) WithTx(_ context.Context, fn func(application.Tx) error) error {
+	working := s.tx.clone()
+	if err := fn(working); err != nil {
+		return err
+	}
+	*s.tx = *working
+	return nil
+}
 
 type fakeTx struct {
 	now        time.Time
@@ -129,10 +322,38 @@ type fakeTx struct {
 	idem       map[application.IdempotencyKey]*application.IdempotencyRecord
 	events     []application.TaskEvent
 	outbox     []application.OutboxEvent
+	failAt     string
 }
 
-func (tx *fakeTx) key(tenant, id string) string           { return tenant + "/" + id }
-func (tx *fakeTx) seed(r application.TaskRecord)          { tx.tasks[tx.key(r.TenantID, r.ID)] = r }
+func (tx *fakeTx) clone() *fakeTx {
+	copyTx := &fakeTx{now: tx.now, tasks: make(map[string]application.TaskRecord, len(tx.tasks)), executions: make(map[string]*domain.Execution, len(tx.executions)), idem: make(map[application.IdempotencyKey]*application.IdempotencyRecord, len(tx.idem)), events: append([]application.TaskEvent(nil), tx.events...), outbox: append([]application.OutboxEvent(nil), tx.outbox...), failAt: tx.failAt}
+	for key, task := range tx.tasks {
+		task.Constraints = append([]byte(nil), task.Constraints...)
+		task.Requirements = append([]byte(nil), task.Requirements...)
+		copyTx.tasks[key] = task
+	}
+	for key, execution := range tx.executions {
+		copyExecution := *execution
+		copyTx.executions[key] = &copyExecution
+	}
+	for key, record := range tx.idem {
+		copyRecord := *record
+		copyRecord.ResponseBody = append([]byte(nil), record.ResponseBody...)
+		copyTx.idem[key] = &copyRecord
+	}
+	return copyTx
+}
+
+func (tx *fakeTx) key(tenant, id string) string { return tenant + "/" + id }
+func (tx *fakeTx) seed(r application.TaskRecord) {
+	if r.Constraints == nil {
+		r.Constraints = []byte(`[]`)
+	}
+	if r.Requirements == nil {
+		r.Requirements = []byte(`[]`)
+	}
+	tx.tasks[tx.key(r.TenantID, r.ID)] = r
+}
 func (tx *fakeTx) Now(context.Context) (time.Time, error) { return tx.now, nil }
 func (tx *fakeTx) InsertTask(_ context.Context, r application.TaskRecord) error {
 	tx.seed(r)
@@ -141,11 +362,14 @@ func (tx *fakeTx) InsertTask(_ context.Context, r application.TaskRecord) error 
 func (tx *fakeTx) GetTask(_ context.Context, tenant, id string) (*application.TaskRecord, error) {
 	r, ok := tx.tasks[tx.key(tenant, id)]
 	if !ok {
-		return nil, &domain.Error{Code: "not_found", Message: "resource not found"}
+		return nil, &domain.Error{Code: "not_found", Message: "task was not found"}
 	}
 	return &r, nil
 }
 func (tx *fakeTx) UpdateTask(_ context.Context, r application.TaskRecord, version int64, active string) (bool, error) {
+	if tx.failAt == "task" {
+		return false, errors.New("injected task failure")
+	}
 	old, ok := tx.tasks[tx.key(r.TenantID, r.ID)]
 	if !ok || old.StateVersion != version {
 		return false, nil
@@ -201,7 +425,28 @@ func (tx *fakeTx) GetExecution(_ context.Context, tenant, id string) (*domain.Ex
 	copy := *e
 	return &copy, 0, nil
 }
+func (tx *fakeTx) ListActiveExecutions(_ context.Context, tenant, task string) ([]application.ExecutionRecord, error) {
+	var records []application.ExecutionRecord
+	for _, e := range tx.executions {
+		if e.TenantID == tenant && e.TaskID == task && isActiveExecution(e.Status) {
+			copy := *e
+			records = append(records, application.ExecutionRecord{Execution: &copy, StateVersion: 0})
+		}
+	}
+	return records, nil
+}
+func isActiveExecution(status domain.ExecutionStatus) bool {
+	switch status {
+	case domain.ExecutionLeased, domain.ExecutionRunning, domain.ExecutionSubmitted, domain.ExecutionValidating, domain.ExecutionReviewing, domain.ExecutionRevisionRequested:
+		return true
+	default:
+		return false
+	}
+}
 func (tx *fakeTx) UpdateExecution(_ context.Context, e *domain.Execution, _ int64) (bool, error) {
+	if tx.failAt == "execution" {
+		return false, errors.New("injected execution failure")
+	}
 	copy := *e
 	tx.executions[e.ID] = &copy
 	return true, nil
@@ -220,6 +465,9 @@ func (tx *fakeTx) AcquireIdempotency(_ context.Context, key application.Idempote
 	return &copy, nil
 }
 func (tx *fakeTx) CompleteIdempotency(_ context.Context, key application.IdempotencyKey, _ string, code int, body []byte) error {
+	if tx.failAt == "complete" {
+		return errors.New("injected complete failure")
+	}
 	r := tx.idem[key]
 	r.ResponseCode = &code
 	r.ResponseBody = append([]byte(nil), body...)
@@ -228,10 +476,16 @@ func (tx *fakeTx) CompleteIdempotency(_ context.Context, key application.Idempot
 	return nil
 }
 func (tx *fakeTx) AppendTaskEvent(_ context.Context, e application.TaskEvent) error {
+	if tx.failAt == "event" {
+		return errors.New("injected event failure")
+	}
 	tx.events = append(tx.events, e)
 	return nil
 }
 func (tx *fakeTx) AppendOutboxEvent(_ context.Context, e application.OutboxEvent) error {
+	if tx.failAt == "outbox" {
+		return errors.New("injected outbox failure")
+	}
 	tx.outbox = append(tx.outbox, e)
 	return nil
 }

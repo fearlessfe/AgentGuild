@@ -32,6 +32,9 @@ func (s *Service) PublishTask(ctx context.Context, principal auth.Principal, com
 		if !record.Acquired {
 			return conflict("idempotency request is already in progress")
 		}
+		if !now.Before(command.Deadline) {
+			return invalid("deadline")
+		}
 
 		task, err := domain.NewTask(s.newID(), principal.TenantID, principal.AgentVersionID, command.Deadline)
 		if err != nil {
@@ -49,7 +52,11 @@ func (s *Service) PublishTask(ctx context.Context, principal auth.Principal, com
 		if err := tx.InsertTask(ctx, recordTask); err != nil {
 			return err
 		}
-		result = Envelope[TaskView]{Data: taskView(recordTask), Meta: Meta{ServerTime: now, ResourceVersion: recordTask.StateVersion}}
+		view, err := taskView(recordTask)
+		if err != nil {
+			return err
+		}
+		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: recordTask.StateVersion}}
 		if err := appendEvents(ctx, tx, principal, recordTask, "publish", "draft", string(task.Status), ""); err != nil {
 			return err
 		}
@@ -80,7 +87,13 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 		}
 		record, err := tx.GetTask(ctx, principal.TenantID, command.TaskID)
 		if err != nil {
+			if domain.CodeOf(err) == "not_found" {
+				return notFound()
+			}
 			return err
+		}
+		if record.PublisherAgentVersionID != principal.AgentVersionID {
+			return notFound()
 		}
 		task := &domain.Task{ID: record.ID, TenantID: record.TenantID, PublisherID: record.PublisherAgentVersionID, Deadline: record.Deadline, Status: record.Status, ClaimedBy: record.ClaimedBy}
 		from := task.Status
@@ -88,15 +101,15 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 		if err := task.Apply(domain.IntentCancel, actor, now); err != nil {
 			return err
 		}
-		if record.ActiveExecutionID != "" {
-			execution, version, err := tx.GetExecution(ctx, principal.TenantID, record.ActiveExecutionID)
-			if err != nil {
+		executions, err := tx.ListActiveExecutions(ctx, principal.TenantID, record.ID)
+		if err != nil {
+			return err
+		}
+		for _, active := range executions {
+			if err := active.Execution.Cancel(actor, now); err != nil {
 				return err
 			}
-			if err := execution.Cancel(actor, now); err != nil {
-				return err
-			}
-			updated, err := tx.UpdateExecution(ctx, execution, version)
+			updated, err := tx.UpdateExecution(ctx, active.Execution, active.StateVersion)
 			if err != nil {
 				return err
 			}
@@ -115,7 +128,11 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 		record.StateVersion++
 		record.ActiveExecutionID = ""
 		record.UpdatedAt = now
-		result = Envelope[TaskView]{Data: taskView(*record), Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion}}
+		view, err := taskView(*record)
+		if err != nil {
+			return err
+		}
+		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion}}
 		if err := appendEvents(ctx, tx, principal, *record, "cancel", string(from), string(task.Status), command.Reason); err != nil {
 			return err
 		}
@@ -164,3 +181,4 @@ func invalid(field string) error {
 	return &domain.Error{Code: "invalid_argument", Message: field + " is invalid", Field: field}
 }
 func conflict(message string) error { return &domain.Error{Code: "state_conflict", Message: message} }
+func notFound() error               { return &domain.Error{Code: "not_found", Message: "resource not found"} }

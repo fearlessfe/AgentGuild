@@ -57,7 +57,13 @@ type TaskListQuery struct {
 type ExecutionRepository interface {
 	InsertExecution(context.Context, *domain.Execution, []byte) error
 	GetExecution(context.Context, string, string) (*domain.Execution, int64, error)
+	ListActiveExecutions(context.Context, string, string) ([]ExecutionRecord, error)
 	UpdateExecution(context.Context, *domain.Execution, int64) (bool, error)
+}
+
+type ExecutionRecord struct {
+	Execution    *domain.Execution
+	StateVersion int64
 }
 
 type IdempotencyKey struct {

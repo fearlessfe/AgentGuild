@@ -22,14 +22,17 @@ type Service struct {
 	newID        func() string
 }
 
-func NewService(store Store, options Options) *Service {
+func NewService(store Store, options Options) (*Service, error) {
+	if len(options.CursorSecret) < 32 {
+		return nil, invalid("cursor_secret")
+	}
 	if options.CursorTTL <= 0 {
 		options.CursorTTL = 15 * time.Minute
 	}
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
-	return &Service{store: store, cursorSecret: append([]byte(nil), options.CursorSecret...), cursorTTL: options.CursorTTL, newID: options.NewID}
+	return &Service{store: store, cursorSecret: append([]byte(nil), options.CursorSecret...), cursorTTL: options.CursorTTL, newID: options.NewID}, nil
 }
 
 func randomID() string {

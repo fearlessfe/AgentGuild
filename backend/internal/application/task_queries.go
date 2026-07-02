@@ -40,7 +40,11 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 		if err != nil {
 			return err
 		}
-		result = Envelope[TaskView]{Data: taskView(*record), Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion}}
+		view, err := taskView(*record)
+		if err != nil {
+			return err
+		}
+		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion}}
 		return nil
 	})
 	return result, err
@@ -83,7 +87,10 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 		}
 		views := make([]TaskView, len(records))
 		for i := range records {
-			views[i] = taskView(records[i])
+			views[i], err = taskView(records[i])
+			if err != nil {
+				return err
+			}
 		}
 		result = Envelope[[]TaskView]{Data: views, Meta: Meta{ServerTime: now}}
 		if hasMore {
@@ -95,11 +102,15 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 	return result, err
 }
 
-func taskView(record TaskRecord) TaskView {
+func taskView(record TaskRecord) (TaskView, error) {
 	var constraints, requirements []string
-	_ = json.Unmarshal(record.Constraints, &constraints)
-	_ = json.Unmarshal(record.Requirements, &requirements)
-	return TaskView{ID: record.ID, TenantID: record.TenantID, PublisherAgentVersionID: record.PublisherAgentVersionID, Type: record.Type, Title: record.Title, Problem: record.Problem, Constraints: constraints, Requirements: requirements, Deadline: record.Deadline, Status: record.Status, ClaimedBy: record.ClaimedBy, ActiveExecutionID: record.ActiveExecutionID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, StateVersion: record.StateVersion}
+	if err := json.Unmarshal(record.Constraints, &constraints); err != nil {
+		return TaskView{}, err
+	}
+	if err := json.Unmarshal(record.Requirements, &requirements); err != nil {
+		return TaskView{}, err
+	}
+	return TaskView{ID: record.ID, TenantID: record.TenantID, PublisherAgentVersionID: record.PublisherAgentVersionID, Type: record.Type, Title: record.Title, Problem: record.Problem, Constraints: constraints, Requirements: requirements, Deadline: record.Deadline, Status: record.Status, ClaimedBy: record.ClaimedBy, ActiveExecutionID: record.ActiveExecutionID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt, StateVersion: record.StateVersion}, nil
 }
 
 func filterDigest(query ListTasks) string {

@@ -199,6 +199,39 @@ func (tx *Tx) GetExecution(
 	return &execution, version, nil
 }
 
+func (tx *Tx) ListActiveExecutions(ctx context.Context, tenantID, taskID string) ([]application.ExecutionRecord, error) {
+	rows, err := tx.tx.Query(ctx, `
+		SELECT id, tenant_id, task_id, agent_version_id, status, state_version,
+		       lease_generation, lease_soft_expires_at, lease_hard_expires_at
+		FROM executions
+		WHERE tenant_id=$1 AND task_id=$2
+		  AND status IN ('leased','running','submitted','validating','reviewing','revision_requested')
+		ORDER BY id
+		FOR UPDATE`, tenantID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []application.ExecutionRecord
+	for rows.Next() {
+		var execution domain.Execution
+		var version int64
+		var softExpiry, hardExpiry *time.Time
+		if err := rows.Scan(&execution.ID, &execution.TenantID, &execution.TaskID, &execution.AgentID,
+			&execution.Status, &version, &execution.Lease.Generation, &softExpiry, &hardExpiry); err != nil {
+			return nil, err
+		}
+		if softExpiry != nil {
+			execution.Lease.SoftExpiry = *softExpiry
+		}
+		if hardExpiry != nil {
+			execution.Lease.HardExpiry = *hardExpiry
+		}
+		records = append(records, application.ExecutionRecord{Execution: &execution, StateVersion: version})
+	}
+	return records, rows.Err()
+}
+
 func (tx *Tx) UpdateExecution(
 	ctx context.Context,
 	execution *domain.Execution,

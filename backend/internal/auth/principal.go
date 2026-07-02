@@ -20,6 +20,13 @@ type TokenVerifier interface {
 type ScopePolicy struct{}
 
 func (ScopePolicy) Require(principal Principal, scope string) error {
+	for field, value := range map[string]string{
+		"tenant_id": principal.TenantID, "agent_id": principal.AgentID, "agent_version_id": principal.AgentVersionID,
+	} {
+		if value == "" {
+			return &domain.Error{Code: "invalid_argument", Message: field + " is invalid", Field: field}
+		}
+	}
 	for _, candidate := range principal.Scopes {
 		if candidate == scope {
 			return nil
