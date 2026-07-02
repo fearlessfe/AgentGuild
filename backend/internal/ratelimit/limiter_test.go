@@ -68,11 +68,22 @@ func TestRateLimiterLocalTokenBucketIsKeyScoped(t *testing.T) {
 	require.True(t, d.Allowed)
 }
 
+func TestRateLimiterLocalTokenBucketKeysByTenantAndAgentAcrossVersions(t *testing.T) {
+	l := ratelimit.NewLocalTokenBucket(ratelimit.TokenBucketConfig{Rate: time.Second, Burst: 1})
+
+	first, err := l.Allow(context.Background(), ratelimit.Key{TenantID: "t", AgentID: "agent", AgentVersionID: "v1"})
+	require.NoError(t, err)
+	require.True(t, first.Allowed)
+
+	second, err := l.Allow(context.Background(), ratelimit.Key{TenantID: "t", AgentID: "agent", AgentVersionID: "v2"})
+	require.NoError(t, err)
+	require.False(t, second.Allowed, "同一 tenant+Agent 的不同版本必须共享配额")
+}
+
 func TestRateLimiterLocalTokenBucketPerAgentScope(t *testing.T) {
 	l := ratelimit.NewLocalTokenBucket(ratelimit.TokenBucketConfig{
-		Rate:     100 * time.Millisecond,
-		Burst:    1,
-		PerAgent: true,
+		Rate:  100 * time.Millisecond,
+		Burst: 1,
 	})
 	d, err := l.Allow(context.Background(), ratelimit.Key{TenantID: "t", AgentID: "agent-1", AgentVersionID: "v1"})
 	require.NoError(t, err)

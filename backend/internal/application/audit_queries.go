@@ -30,6 +30,9 @@ func (s *Service) ListTaskEvents(ctx context.Context, principal auth.Principal, 
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
+	if err := s.checkRateLimit(ctx, principal); err != nil {
+		return result, err
+	}
 	if query.TaskID == "" {
 		return result, invalid("task_id")
 	}
@@ -71,8 +74,8 @@ func (s *Service) ListTaskEvents(ctx context.Context, principal auth.Principal, 
 
 // ListTaskEvents 查询参数。
 type ListTaskEvents struct {
-	TaskID string
-	Limit  int
+	TaskID  string
+	Limit   int
 	AfterID int64 // 基于事件自增 ID 的游标
 }
 

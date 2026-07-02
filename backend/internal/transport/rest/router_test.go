@@ -311,6 +311,23 @@ func TestRateLimitReturns429WithRetryAfter(t *testing.T) {
 	require.Contains(t, res.Body.String(), "RATE_LIMITED")
 }
 
+func TestApplicationRateLimitReturnsRetryAfterSeconds(t *testing.T) {
+	app := &fakeApplication{listErr: &domain.Error{Code: "rate_limited", Message: "rate limit exceeded", RetryAfter: 1500 * time.Millisecond}}
+	server := newTestServer(app)
+	res := get(t, server, "/v1/tasks", "token-publisher")
+	require.Equal(t, http.StatusTooManyRequests, res.Code)
+	require.Equal(t, "2", res.Header().Get("Retry-After"))
+	var body struct {
+		Error struct {
+			Code              string `json:"code"`
+			RetryAfterSeconds int    `json:"retry_after_seconds"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
+	require.Equal(t, "RATE_LIMITED", body.Error.Code)
+	require.Equal(t, 2, body.Error.RetryAfterSeconds)
+}
+
 func TestExecutionEndpointsMapToService(t *testing.T) {
 	app := &fakeApplication{}
 	server := newTestServer(app)

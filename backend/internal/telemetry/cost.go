@@ -11,7 +11,7 @@ import (
 type Coverage string
 
 const (
-	CoverageFull        Coverage = "full"
+	CoverageComplete    Coverage = "complete"
 	CoveragePartial     Coverage = "partial"
 	CoverageUnavailable Coverage = "unavailable"
 )

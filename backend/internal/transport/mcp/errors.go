@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
@@ -58,13 +59,20 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 	case "deadline_exceeded":
 		errContent = MCPError{Code: "DEADLINE_EXCEEDED", Message: err.Error()}
 	case "rate_limited":
-		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error()}
+		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error(), RetryAfterSeconds: retryAfterSeconds(domain.RetryAfterOf(err))}
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			errContent = MCPError{Code: "TEMPORARILY_UNAVAILABLE", Message: "request timed out"}
 		}
 	}
 	return errorResult(errContent)
+}
+
+func retryAfterSeconds(duration time.Duration) int {
+	if duration <= 0 {
+		return 1
+	}
+	return int((duration + time.Second - 1) / time.Second)
 }
 
 // errorResult 构造带 JSON 文本内容的工具错误结果。

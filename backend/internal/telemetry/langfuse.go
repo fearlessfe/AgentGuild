@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -20,6 +21,7 @@ type LangfuseConfig struct {
 	SecretKey    string
 	Mode         string // "cloud" 或 "self-hosted"
 	SupportsCost bool   // 自托管实例是否支持成本读取
+	MetricsPath  string // 自托管实例兼容的 Metrics API 路径
 }
 
 // NewLangfuseProvider 创建 Langfuse TraceCostProvider。
@@ -45,7 +47,14 @@ func (p *langfuseProvider) Observe(ctx context.Context, ref ExecutionRef) (CostO
 	endpoint := baseURL + "/api/public/v2/metrics"
 	if p.cfg.Mode == "self-hosted" {
 		// 自托管模式使用兼容 API 路径；若实例不支持成本读取已在上面返回 unavailable。
-		endpoint = baseURL + "/api/public/metrics"
+		path := p.cfg.MetricsPath
+		if path == "" {
+			path = "/api/public/metrics"
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		endpoint = baseURL + path
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -56,35 +65,53 @@ func (p *langfuseProvider) Observe(ctx context.Context, ref ExecutionRef) (CostO
 	req.Header.Set("Authorization", "Basic "+auth)
 	req.Header.Set("Accept", "application/json")
 
+	query := metricsQuery{
+		View:          "observations",
+		Dimensions:    []metricDimension{},
+		Metrics:       []metric{{Measure: "totalCost", Aggregation: "sum"}},
+		FromTimestamp: time.Unix(0, 0).UTC().Format(time.RFC3339),
+		ToTimestamp:   time.Now().UTC().Add(time.Minute).Format(time.RFC3339),
+		Filters: []metricFilter{{
+			Column: "traceTags", Operator: "all of", Type: "arrayOptions",
+			Value: []string{"tenant:" + ref.TenantID, "task:" + ref.TaskID, "execution:" + ref.ExecutionID, "agent_version:" + ref.AgentVersionID},
+		}},
+	}
+	encodedQuery, err := json.Marshal(query)
+	if err != nil {
+		return unavailable("langfuse"), nil
+	}
 	q := req.URL.Query()
-	q.Set("traceTags", fmt.Sprintf("tenant:%s,task:%s,execution:%s,agent_version:%s", ref.TenantID, ref.TaskID, ref.ExecutionID, ref.AgentVersionID))
+	q.Set("query", string(encodedQuery))
 	req.URL.RawQuery = q.Encode()
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return unavailable("langfuse"), nil
+		return unavailable("langfuse"), fmt.Errorf("langfuse metrics request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return unavailable("langfuse"), nil
+		return unavailable("langfuse"), fmt.Errorf("langfuse metrics status: %s", resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return unavailable("langfuse"), nil
+		return unavailable("langfuse"), fmt.Errorf("read langfuse metrics: %w", err)
 	}
 
 	var metrics metricsResponse
 	if err := json.Unmarshal(body, &metrics); err != nil {
-		return unavailable("langfuse"), nil
+		return unavailable("langfuse"), fmt.Errorf("decode langfuse metrics: %w", err)
 	}
 
-	cost, ok := metrics.totalCost()
+	cost, ok, err := metrics.totalCost()
+	if err != nil {
+		return unavailable("langfuse"), err
+	}
 	if !ok {
 		return CostObservation{Coverage: CoveragePartial, Provider: "langfuse", Cursor: metrics.Meta.Cursor}, nil
 	}
-	return CostObservation{ObservedCost: cost, Coverage: CoverageFull, Provider: "langfuse", Cursor: metrics.Meta.Cursor}, nil
+	return CostObservation{ObservedCost: cost, Coverage: CoverageComplete, Provider: "langfuse", Cursor: metrics.Meta.Cursor}, nil
 }
 
 func unavailable(provider string) CostObservation {
@@ -99,16 +126,50 @@ type metricsResponse struct {
 }
 
 type metricItem struct {
-	TotalCost *float64 `json:"totalCost"`
+	TotalCost    json.Number `json:"totalCost"`
+	SumTotalCost json.Number `json:"sum_totalCost"`
 }
 
-func (r metricsResponse) totalCost() (decimal.Decimal, bool) {
+func (r metricsResponse) totalCost() (decimal.Decimal, bool, error) {
 	for _, d := range r.Data {
-		if d.TotalCost != nil {
-			return decimal.NewFromFloat(*d.TotalCost), true
+		value := d.SumTotalCost
+		if value == "" {
+			value = d.TotalCost
+		}
+		if value != "" {
+			cost, err := decimal.NewFromString(value.String())
+			if err != nil {
+				return decimal.Zero, false, fmt.Errorf("decode langfuse total cost: %w", err)
+			}
+			return cost, true, nil
 		}
 	}
-	return decimal.Zero, false
+	return decimal.Zero, false, nil
+}
+
+type metricsQuery struct {
+	View          string            `json:"view"`
+	Dimensions    []metricDimension `json:"dimensions"`
+	Metrics       []metric          `json:"metrics"`
+	Filters       []metricFilter    `json:"filters"`
+	FromTimestamp string            `json:"fromTimestamp"`
+	ToTimestamp   string            `json:"toTimestamp"`
+}
+
+type metricDimension struct {
+	Field string `json:"field"`
+}
+
+type metric struct {
+	Measure     string `json:"measure"`
+	Aggregation string `json:"aggregation"`
+}
+
+type metricFilter struct {
+	Column   string   `json:"column"`
+	Operator string   `json:"operator"`
+	Value    []string `json:"value"`
+	Type     string   `json:"type"`
 }
 
 // FailingProvider 返回一个总是失败的 Provider，用于故障场景测试。

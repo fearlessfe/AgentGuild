@@ -38,9 +38,8 @@ func (u *unlimited) Allow(context.Context, Key) (Decision, error) {
 
 // TokenBucketConfig 配置本地令牌桶。
 type TokenBucketConfig struct {
-	Rate     time.Duration // 每个令牌产生间隔
-	Burst    int           // 桶容量
-	PerAgent bool          // true 按 tenant|agent_id 分桶，false 按 tenant|agent_version_id 分桶
+	Rate  time.Duration // 每个令牌产生间隔
+	Burst int           // 桶容量
 }
 
 // NewLocalTokenBucket 创建进程内令牌桶限流器。
@@ -98,8 +97,5 @@ func (l *localBucket) Allow(_ context.Context, key Key) (Decision, error) {
 }
 
 func (l *localBucket) key(key Key) string {
-	if l.cfg.PerAgent {
-		return key.TenantID + "|" + key.AgentID
-	}
-	return key.TenantID + "|" + key.AgentVersionID
+	return key.TenantID + "|" + key.AgentID
 }

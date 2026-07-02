@@ -24,7 +24,7 @@ func TestOutboxProcessesExecutionEventAndRecordsUsage(t *testing.T) {
 
 	provider := &staticProvider{obs: telemetry.CostObservation{
 		ObservedCost: decimal.RequireFromString("0.001"),
-		Coverage:     telemetry.CoverageFull,
+		Coverage:     telemetry.CoverageComplete,
 		Provider:     "langfuse",
 		Cursor:       "cursor-1",
 	}}
@@ -34,14 +34,15 @@ func TestOutboxProcessesExecutionEventAndRecordsUsage(t *testing.T) {
 	require.Equal(t, 1, processed)
 
 	usage := loadUsage(t, db, "tenant-1", "exe-1")
-	require.Equal(t, "full", usage.Coverage)
+	require.Equal(t, "complete", usage.Coverage)
 	require.Equal(t, "langfuse", usage.Provider)
 	require.Equal(t, "cursor-1", usage.SourceCursor)
 	require.NotNil(t, usage.ObservedCost)
 	require.Equal(t, "0.001", usage.ObservedCost.String())
 
-	remain := countOutbox(t, db)
-	require.Equal(t, 0, remain)
+	var published bool
+	require.NoError(t, db.QueryRow(ctx, `SELECT published_at IS NOT NULL FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&published))
+	require.True(t, published)
 }
 
 func TestOutboxIdempotentForSameCursor(t *testing.T) {
@@ -52,7 +53,7 @@ func TestOutboxIdempotentForSameCursor(t *testing.T) {
 
 	provider := &staticProvider{obs: telemetry.CostObservation{
 		ObservedCost: decimal.RequireFromString("0.001"),
-		Coverage:     telemetry.CoverageFull,
+		Coverage:     telemetry.CoverageComplete,
 		Provider:     "langfuse",
 		Cursor:       "cursor-1",
 	}}
@@ -70,6 +71,25 @@ func TestOutboxIdempotentForSameCursor(t *testing.T) {
 	require.Equal(t, 1, count, "同一 cursor 不应产生重复 usage 行")
 }
 
+func TestOutboxCommitsClaimBeforeCallingProvider(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	seedTaskAndExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-1")
+	insertOutbox(t, db, "tenant-1", "evt-1", "execution.started", "execution", "exe-1", `{"task_id":"task-1","execution_id":"exe-1"}`)
+
+	provider := providerFunc(func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+		var claimed bool
+		err := db.QueryRow(ctx, `SELECT claimed_until IS NOT NULL FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&claimed)
+		require.NoError(t, err)
+		require.True(t, claimed, "调用外部 Provider 前必须提交领取状态")
+		return telemetry.CostObservation{Coverage: telemetry.CoveragePartial, Provider: "langfuse", Cursor: "cursor"}, nil
+	})
+
+	processed, err := worker.NewOutbox(db, provider).RunBatch(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+}
+
 func TestOutboxMarksUnavailableWhenProviderFails(t *testing.T) {
 	ctx := context.Background()
 	db := testdb.StartPostgres(t)
@@ -83,6 +103,13 @@ func TestOutboxMarksUnavailableWhenProviderFails(t *testing.T) {
 
 	usage := loadUsage(t, db, "tenant-1", "exe-1")
 	require.Equal(t, "unavailable", usage.Coverage)
+	var attempts int
+	var pending bool
+	require.NoError(t, db.QueryRow(ctx, `
+		SELECT attempts, published_at IS NULL AND claimed_until > clock_timestamp()
+		FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-1'`).Scan(&attempts, &pending))
+	require.Equal(t, 1, attempts)
+	require.True(t, pending)
 }
 
 func TestOutboxSkipLockedPreventsDuplicateProcessing(t *testing.T) {
@@ -122,8 +149,30 @@ func TestOutboxBackoffOnDatabaseFailureIsNotExercised(t *testing.T) {
 	require.Equal(t, "invalid_argument", domain.CodeOf(err))
 }
 
+func TestOutboxBackoffCapsWithoutOverflow(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	insertOutbox(t, db, "tenant-1", "evt-overflow", "execution.started", "execution", "exe", `{"task_id":1}`)
+	_, err := db.Exec(ctx, `UPDATE outbox_events SET attempts=100 WHERE tenant_id='tenant-1' AND id='evt-overflow'`)
+	require.NoError(t, err)
+
+	processed, err := worker.NewOutbox(db, &staticProvider{}).RunBatch(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	var retryAt time.Time
+	require.NoError(t, db.QueryRow(ctx, `SELECT claimed_until FROM outbox_events WHERE tenant_id='tenant-1' AND id='evt-overflow'`).Scan(&retryAt))
+	require.True(t, retryAt.After(time.Now()), "高 attempts 的退避不能溢出到过去")
+	require.True(t, retryAt.Before(time.Now().Add(6*time.Minute)), "退避必须受五分钟上限约束")
+}
+
 type staticProvider struct {
 	obs telemetry.CostObservation
+}
+
+type providerFunc func(context.Context, telemetry.ExecutionRef) (telemetry.CostObservation, error)
+
+func (f providerFunc) Observe(ctx context.Context, ref telemetry.ExecutionRef) (telemetry.CostObservation, error) {
+	return f(ctx, ref)
 }
 
 func (p *staticProvider) Observe(_ context.Context, _ telemetry.ExecutionRef) (telemetry.CostObservation, error) {

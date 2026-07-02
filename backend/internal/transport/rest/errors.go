@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
@@ -13,10 +15,22 @@ import (
 // ErrorResponse 是 REST 暴露的稳定错误结构；code 为全大写领域错误码。
 type ErrorResponse struct {
 	Error struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-		Field   string `json:"field,omitempty"`
+		Code              string `json:"code"`
+		Message           string `json:"message"`
+		Field             string `json:"field,omitempty"`
+		RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
 	} `json:"error"`
+}
+
+func writeRateLimited(w http.ResponseWriter, message string, retryAfter int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	w.WriteHeader(http.StatusTooManyRequests)
+	resp := ErrorResponse{}
+	resp.Error.Code = "RATE_LIMITED"
+	resp.Error.Message = message
+	resp.Error.RetryAfterSeconds = retryAfter
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // RateLimiter 决定请求是否被限流；若不允许，返回建议等待秒数。
@@ -91,7 +105,7 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 	case "deadline_exceeded":
 		writeError(w, http.StatusConflict, "DEADLINE_EXCEEDED", err.Error())
 	case "rate_limited":
-		writeError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+		writeRateLimited(w, err.Error(), retryAfterSeconds(domain.RetryAfterOf(err)))
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(w, http.StatusServiceUnavailable, "TEMPORARILY_UNAVAILABLE", "request timed out")
@@ -99,4 +113,11 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
+}
+
+func retryAfterSeconds(duration time.Duration) int {
+	if duration <= 0 {
+		return 1
+	}
+	return int((duration + time.Second - 1) / time.Second)
 }

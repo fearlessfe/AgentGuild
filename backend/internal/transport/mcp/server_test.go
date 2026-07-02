@@ -406,6 +406,17 @@ func TestMCPRateLimiterReturns429WhenLimited(t *testing.T) {
 	require.Equal(t, "30", rec.Header().Get("Retry-After"))
 }
 
+func TestMCPApplicationRateLimitIncludesRetryAfterSeconds(t *testing.T) {
+	result := mapDomainError(&domain.Error{Code: "rate_limited", Message: "rate limit exceeded", RetryAfter: 1500 * time.Millisecond}, testPrincipal())
+	require.True(t, result.IsError)
+	text, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	var got MCPError
+	require.NoError(t, json.Unmarshal([]byte(text.Text), &got))
+	require.Equal(t, "RATE_LIMITED", got.Code)
+	require.Equal(t, 2, got.RetryAfterSeconds)
+}
+
 type fakeRateLimiter struct {
 	allowed    bool
 	retryAfter int

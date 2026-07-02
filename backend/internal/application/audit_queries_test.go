@@ -18,7 +18,7 @@ func TestListTaskEventsIsTenantScopedAndSanitized(t *testing.T) {
 		TenantID: "tenant-1", TaskID: "task", ExecutionID: "exe-1",
 		ActorType: "agent", ActorID: "agent-1", Intent: "claim",
 		FromState: "open", ToState: "claimed", Reason: "wanted",
-		Payload:   []byte(`{"secret":"x"}`), CreatedAt: fixtureNow,
+		Payload: []byte(`{"secret":"x"}`), CreatedAt: fixtureNow,
 	})
 
 	page, err := svc.ListTaskEvents(context.Background(), principal("tenant-1", "agent-1", "tasks:read"), application.ListTaskEvents{TaskID: "task", Limit: 10})
@@ -51,6 +51,17 @@ func TestListTaskEventsRequiresReadScope(t *testing.T) {
 	require.Equal(t, "forbidden", domain.CodeOf(err))
 }
 
+func TestListTaskEventsAppliesApplicationRateLimit(t *testing.T) {
+	limiter := ratelimit.NewLocalTokenBucket(ratelimit.TokenBucketConfig{Rate: time.Second, Burst: 1})
+	svc, tx := newServiceFixtureWithRateLimiter(limiter)
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant-1", PublisherAgentVersionID: "publisher", Status: domain.TaskOpen})
+	p := principal("tenant-1", "agent-1", "tasks:read")
+	_, err := svc.ListTaskEvents(context.Background(), p, application.ListTaskEvents{TaskID: "task"})
+	require.NoError(t, err)
+	_, err = svc.ListTaskEvents(context.Background(), p, application.ListTaskEvents{TaskID: "task"})
+	require.Equal(t, "rate_limited", domain.CodeOf(err))
+}
+
 func TestRateLimitRejectsOverLimit(t *testing.T) {
 	limiter := ratelimit.NewLocalTokenBucket(ratelimit.TokenBucketConfig{
 		Rate:  100 * time.Millisecond,
@@ -64,6 +75,7 @@ func TestRateLimitRejectsOverLimit(t *testing.T) {
 
 	_, err = svc.ClaimTask(context.Background(), principal("tenant-1", "agent-1", "tasks:claim"), application.ClaimTask{RequestID: "r2", TaskID: "task"})
 	require.Equal(t, "rate_limited", domain.CodeOf(err))
+	require.Greater(t, domain.RetryAfterOf(err), time.Duration(0))
 }
 
 func newServiceFixtureWithRateLimiter(limiter ratelimit.RateLimiter) (*application.Service, *fakeTx) {

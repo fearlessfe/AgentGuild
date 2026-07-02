@@ -30,10 +30,35 @@ func TestLangfuseCloudProviderReturnsFullCost(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, "public", user)
 		require.Equal(t, "secret", pass)
-		require.Contains(t, r.URL.Query().Get("traceTags"), "execution:exe-1")
+		var query struct {
+			View          string `json:"view"`
+			FromTimestamp string `json:"fromTimestamp"`
+			ToTimestamp   string `json:"toTimestamp"`
+			Metrics       []struct {
+				Measure     string `json:"measure"`
+				Aggregation string `json:"aggregation"`
+			} `json:"metrics"`
+			Filters []struct {
+				Column   string   `json:"column"`
+				Operator string   `json:"operator"`
+				Value    []string `json:"value"`
+				Type     string   `json:"type"`
+			} `json:"filters"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(r.URL.Query().Get("query")), &query))
+		require.Equal(t, "observations", query.View)
+		require.NotEmpty(t, query.FromTimestamp)
+		require.NotEmpty(t, query.ToTimestamp)
+		require.Equal(t, "totalCost", query.Metrics[0].Measure)
+		require.Equal(t, "sum", query.Metrics[0].Aggregation)
+		require.Len(t, query.Filters, 1)
+		require.Equal(t, "traceTags", query.Filters[0].Column)
+		require.Equal(t, "all of", query.Filters[0].Operator)
+		require.Equal(t, "arrayOptions", query.Filters[0].Type)
+		require.Equal(t, []string{"tenant:tenant-1", "task:task-1", "execution:exe-1", "agent_version:agent-1"}, query.Filters[0].Value)
 
 		resp := map[string]any{
-			"data": []map[string]any{{"totalCost": 0.00123}},
+			"data": []map[string]any{{"sum_totalCost": "0.00123"}},
 			"meta": map[string]any{"cursor": "cursor-1"},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -49,10 +74,29 @@ func TestLangfuseCloudProviderReturnsFullCost(t *testing.T) {
 
 	obs, err := p.Observe(context.Background(), ref)
 	require.NoError(t, err)
-	require.Equal(t, telemetry.CoverageFull, obs.Coverage)
+	require.Equal(t, telemetry.CoverageComplete, obs.Coverage)
 	require.True(t, obs.ObservedCost.GreaterThan(decimal.Zero))
 	require.Equal(t, "langfuse", obs.Provider)
 	require.Equal(t, "cursor-1", obs.Cursor)
+}
+
+func TestLangfuseSelfHostedUsesConfiguredCompatibleMetricsPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/custom/metrics", r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"sum_totalCost": "1.25"}}})
+	}))
+	defer server.Close()
+
+	p := telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{
+		BaseURL:      server.URL,
+		Mode:         "self-hosted",
+		SupportsCost: true,
+		MetricsPath:  "/custom/metrics",
+	}, server.Client())
+	obs, err := p.Observe(context.Background(), telemetry.ExecutionRef{})
+	require.NoError(t, err)
+	require.Equal(t, telemetry.CoverageComplete, obs.Coverage)
+	require.Equal(t, "1.25", obs.ObservedCost.String())
 }
 
 func TestLangfuseSelfHostedWithoutCostSupportReturnsUnavailable(t *testing.T) {
@@ -62,6 +106,17 @@ func TestLangfuseSelfHostedWithoutCostSupportReturnsUnavailable(t *testing.T) {
 	}, nil)
 	obs, err := p.Observe(context.Background(), telemetry.ExecutionRef{})
 	require.NoError(t, err)
+	require.Equal(t, telemetry.CoverageUnavailable, obs.Coverage)
+}
+
+func TestLangfuseMalformedCostReturnsUnavailableError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"sum_totalCost":"not-a-decimal"}]}`))
+	}))
+	defer server.Close()
+	p := telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{BaseURL: server.URL, Mode: "cloud"}, server.Client())
+	obs, err := p.Observe(context.Background(), telemetry.ExecutionRef{})
+	require.Error(t, err)
 	require.Equal(t, telemetry.CoverageUnavailable, obs.Coverage)
 }
 
@@ -79,7 +134,7 @@ func TestLangfuseCloudHTTPErrorReturnsUnavailable(t *testing.T) {
 	}, server.Client())
 
 	obs, err := p.Observe(context.Background(), telemetry.ExecutionRef{})
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Equal(t, telemetry.CoverageUnavailable, obs.Coverage)
 }
 
