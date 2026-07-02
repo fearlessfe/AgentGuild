@@ -387,7 +387,7 @@ git commit -m "feat: add shared task application service"
 - Produces: `Service.ClaimTask`、`StartExecution`、`HeartbeatExecution`、`GetExecution`
 - Produces: `postgres.Reaper.RunBatch(ctx, limit int) (int, error)`
 
-- [ ] **Step 1: 写 100 并发 Claim 和 Lease 边界测试**
+- [x] **Step 1: 写 100 并发 Claim 和 Lease 边界测试**
 
 ```go
 func TestConcurrentClaimHasExactlyOneWinner(t *testing.T) {
@@ -403,13 +403,13 @@ func TestConcurrentClaimHasExactlyOneWinner(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行并发测试并确认失败**
+- [x] **Step 2: 运行并发测试并确认失败**
 
 Run: `cd backend && go test ./internal/postgres -run TestConcurrentClaimHasExactlyOneWinner -count=1`
 
 Expected: FAIL，Claim 尚未实现。
 
-- [ ] **Step 3: 实现 Claim 单事务和 generation fencing**
+- [x] **Step 3: 实现 Claim 单事务和 generation fencing**
 
 Claim 使用数据库时间、Task 条件更新和部分唯一索引双重防线；heartbeat 条件必须包含：
 
@@ -424,7 +424,7 @@ WHERE tenant_id=$1
 
 成功 heartbeat 将 generation 加一，并以数据库时间重算 soft/hard expiry。
 
-- [ ] **Step 4: 实现 SKIP LOCKED 回收批次**
+- [x] **Step 4: 实现 SKIP LOCKED 回收批次**
 
 ```sql
 SELECT id
@@ -438,13 +438,13 @@ LIMIT $1;
 
 同一事务按 deadline 决定 Task 回到 `open` 或进入 `expired`，并写审计和 outbox；重复运行不得产生第二次状态事件。
 
-- [ ] **Step 5: 验证宽限期、旧 generation、deadline 和多回收器**
+- [x] **Step 5: 验证宽限期、旧 generation、deadline 和多回收器**
 
 Run: `cd backend && go test ./internal/application ./internal/postgres -run 'Claim|Heartbeat|Reaper|Deadline' -count=1`
 
 Expected: PASS，且 race detector 下无数据竞争。
 
-- [ ] **Step 6: 提交 Lease 生命周期**
+- [x] **Step 6: 提交 Lease 生命周期**
 
 ```bash
 git add backend/internal/application/claim.go backend/internal/postgres/reaper.go backend/internal/**/*claim*test.go backend/internal/**/*reaper*test.go
