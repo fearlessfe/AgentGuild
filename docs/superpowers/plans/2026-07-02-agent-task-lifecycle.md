@@ -601,7 +601,7 @@ git commit -m "feat: expose task lifecycle over MCP"
 
 ### Task 7: 实现 outbox、Langfuse 成本覆盖、限流和审计查询
 
-- [ ] **Completion gate: Task 7 operations and telemetry**
+- [x] **Completion gate: Task 7 operations and telemetry**
 
 **Files:**
 - Create: `backend/internal/telemetry/cost.go`
@@ -619,7 +619,7 @@ git commit -m "feat: expose task lifecycle over MCP"
 - Produces: `worker.Outbox.RunBatch(ctx, limit int) (int, error)`
 - Produces: `ratelimit.RateLimiter.Allow(ctx, Key) (Decision, error)`
 
-- [ ] **Step 1: 写 Provider 故障不影响领域提交测试**
+- [x] **Step 1: 写 Provider 故障不影响领域提交测试**
 
 ```go
 func TestLangfuseFailureLeavesLifecycleCommitted(t *testing.T) {
@@ -631,13 +631,13 @@ func TestLangfuseFailureLeavesLifecycleCommitted(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行 telemetry/worker 测试并确认失败**
+- [x] **Step 2: 运行 telemetry/worker 测试并确认失败**
 
 Run: `cd backend && go test ./internal/telemetry ./internal/worker -count=1`
 
 Expected: FAIL，Provider 和 worker 尚未定义。
 
-- [ ] **Step 3: 实现 TraceCostProvider 与可配置 Langfuse 读取模式**
+- [x] **Step 3: 实现 TraceCostProvider 与可配置 Langfuse 读取模式**
 
 ```go
 type TraceCostProvider interface {
@@ -655,21 +655,21 @@ type CostObservation struct {
 
 Langfuse Cloud 模式使用 Basic Auth 调用 `/api/public/v2/metrics`，按 execution、tenant、task、agent version 标签聚合 `totalCost`。自托管模式从配置读取兼容 API 路径和能力，若实例不支持成本读取则返回 `unavailable`；没有外部工具 trace 时标记 `partial`，HTTP/解析故障标记 `unavailable`。
 
-- [ ] **Step 4: 实现 outbox 锁定、指数退避和幂等消费**
+- [x] **Step 4: 实现 outbox 锁定、指数退避和幂等消费**
 
 worker 使用 `FOR UPDATE SKIP LOCKED` 领取事件，通过 `attempts`、`claimed_until`、`published_at` 防止并发重复；同一 source cursor 更新 `execution_usage` 必须幂等。
 
-- [ ] **Step 5: 实现可替换 RateLimiter、tenant+Agent 本地令牌桶与审计查询**
+- [x] **Step 5: 实现可替换 RateLimiter、tenant+Agent 本地令牌桶与审计查询**
 
 Application Service 依赖 `RateLimiter` 接口；MVP 提供 tenant+Agent 进程内令牌桶，并明确其不提供跨实例全局配额。生产部署可由 Redis 或 API Gateway 实现同一接口。限流错误统一返回 `RATE_LIMITED` 和 `retry_after_seconds`；审计查询只返回调用者可见 Task 的脱敏事件摘要。
 
-- [ ] **Step 6: 运行故障、重放和限流测试**
+- [x] **Step 6: 运行故障、重放和限流测试**
 
 Run: `cd backend && go test ./internal/telemetry ./internal/worker ./internal/ratelimit ./internal/application -run 'Langfuse|Outbox|Rate|Audit' -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交可观测性与运行组件**
+- [x] **Step 7: 提交可观测性与运行组件**
 
 ```bash
 git add backend/internal/telemetry backend/internal/worker backend/internal/ratelimit backend/internal/application/audit_queries.go

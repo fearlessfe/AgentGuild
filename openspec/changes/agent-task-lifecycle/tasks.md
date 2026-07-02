@@ -16,5 +16,5 @@
 ## 3. 观察与运行
 
 - [ ] 3.1 实现 React 任务列表、筛选和只读详情
-- [ ] 3.2 实现 Lease 回收调度、Langfuse TraceCostProvider、成本覆盖指标、限流和审计查询
+- [x] 3.2 实现 Lease 回收调度、Langfuse TraceCostProvider、成本覆盖指标、限流和审计查询
 - [ ] 3.3 完成 Agent 端轮询、断线恢复和非法状态迁移验收测试
