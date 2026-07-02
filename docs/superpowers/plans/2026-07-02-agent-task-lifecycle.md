@@ -455,7 +455,7 @@ git commit -m "feat: enforce claim and lease fencing"
 
 ### Task 5: 暴露 REST API、OAuth 和 OpenAPI
 
-- [ ] **Completion gate: Task 5 REST and OAuth**
+- [x] **Completion gate: Task 5 REST and OAuth**
 
 **Files:**
 - Create: `backend/internal/auth/oauth.go`
@@ -470,7 +470,7 @@ git commit -m "feat: enforce claim and lease fencing"
 - Produces: `/v1/tasks`、`/v1/tasks/{id}`、`/v1/tasks/{id}:claim`、`/v1/tasks/{id}:cancel`
 - Produces: `/v1/executions/{id}`、`:start`、`:heartbeat`
 
-- [ ] **Step 1: 写 REST 状态码、幂等 Header 和不可见资源测试**
+- [x] **Step 1: 写 REST 状态码、幂等 Header 和不可见资源测试**
 
 ```go
 func TestClaimMapsConflictWithoutLeakingHolder(t *testing.T) {
@@ -481,33 +481,33 @@ func TestClaimMapsConflictWithoutLeakingHolder(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行 REST 测试并确认失败**
+- [x] **Step 2: 运行 REST 测试并确认失败**
 
 Run: `cd backend && go test ./internal/transport/rest ./internal/auth -count=1`
 
 Expected: FAIL，路由和 OAuth verifier 不存在。
 
-- [ ] **Step 3: 实现可替换 TokenVerifier、OAuth JWT/JWKS 验证和 Principal 注入**
+- [x] **Step 3: 实现可替换 TokenVerifier、OAuth JWT/JWKS 验证和 Principal 注入**
 
 `TokenVerifier.Verify(ctx, rawToken) (Principal, error)` 是 transport 依赖的边界；首个 JWT/JWKS 实现验证 issuer、audience、expiry、tenant、agent/version claims 和 scopes。HTTP middleware 只把验证后的 `auth.Principal` 放入 context，后续 Agent identity change 可替换验证实现而不修改生命周期服务。
 
-- [ ] **Step 4: 实现 REST 适配与稳定映射**
+- [x] **Step 4: 实现 REST 适配与稳定映射**
 
 REST 写请求要求 `Idempotency-Key`，并映射到 Application Service `RequestID`；`FORBIDDEN/NOT_FOUND` 对非管理员使用相同安全响应，冲突映射 409，限流映射 429 并返回 `Retry-After`。
 
-- [ ] **Step 5: 编写并校验 OpenAPI 契约**
+- [x] **Step 5: 编写并校验 OpenAPI 契约**
 
 Run: `cd backend && go run github.com/getkin/kin-openapi/cmd/validate@latest internal/transport/rest/openapi.yaml`
 
 Expected: `openapi document is valid`。
 
-- [ ] **Step 6: 运行 REST 与 OAuth 测试**
+- [x] **Step 6: 运行 REST 与 OAuth 测试**
 
 Run: `cd backend && go test ./internal/auth ./internal/transport/rest -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交 REST 接口**
+- [x] **Step 7: 提交 REST 接口**
 
 ```bash
 git add backend/internal/auth/oauth.go backend/internal/transport/rest

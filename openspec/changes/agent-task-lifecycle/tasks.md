@@ -8,7 +8,7 @@
 ## 2. REST 与 MCP 接口
 
 - [x] 2.1 实现共享 Application Service、命令对象和错误模型
-- [ ] 2.2 实现任务 REST API 与 OpenAPI 契约
+- [x] 2.2 实现任务 REST API 与 OpenAPI 契约
 - [ ] 2.3 实现无状态 Streamable HTTP MCP Server 和 OAuth 2.1 鉴权
 - [ ] 2.4 实现任务发布、发现、读取、领取、heartbeat 和状态查询 MCP 工具
 - [ ] 2.5 建立 REST/MCP 行为一致性、Schema、Scope 和幂等契约测试
