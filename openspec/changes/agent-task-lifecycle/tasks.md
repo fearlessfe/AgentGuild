@@ -2,8 +2,8 @@
 
 - [x] 1.1 实现 Task、Execution、Lease、IdempotencyRecord 和审计数据模型
 - [x] 1.2 实现任务发布、发现、读取和权限过滤
-- [ ] 1.3 实现并发安全 Claim、10 分钟 Lease、heartbeat、generation fencing、deadline 和过期回收
-- [ ] 1.4 为状态机、并发领取、重试和过期竞态编写测试
+- [x] 1.3 实现并发安全 Claim、10 分钟 Lease、heartbeat、generation fencing、deadline 和过期回收
+- [x] 1.4 为状态机、并发领取、重试和过期竞态编写测试
 
 ## 2. REST 与 MCP 接口
 

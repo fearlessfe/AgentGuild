@@ -374,7 +374,7 @@ git commit -m "feat: add shared task application service"
 
 ### Task 4: 实现 Claim、Lease、heartbeat 和回收器
 
-- [ ] **Completion gate: Task 4 claim and lease**
+- [x] **Completion gate: Task 4 claim and lease**
 
 **Files:**
 - Create: `backend/internal/application/claim.go`
