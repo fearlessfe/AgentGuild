@@ -7,17 +7,15 @@
 
 ## Current Task
 
-- Plan task: `Completion gate: Task 1 domain lifecycle`
-- OpenSpec mapping: `1.1 partial: Task/Execution/Lease complete; IdempotencyRecord/audit persistence deferred to Task 2`
+- Plan task: `Completion gate: Task 2 PostgreSQL persistence`
+- OpenSpec mapping: `1.1 completion: IdempotencyRecord, audit and persistence; 1.4 partial: database concurrency/idempotency tests`
 - Phase: `done`
-- Implementer status: `DONE`
+- Implementer status: `DONE_WITH_CONCERNS`
 - Confirmed technical baseline: `Go 1.26.4; PostgreSQL 18.4; configurable Langfuse provider`
-- Implementation commit: `98d9996..e294270`
-- Files changed: `Makefile; backend/go.mod; backend/internal/domain/*; docker-compose.yml`
-- RED evidence: `domain API missing; lease/state transitions missing; completion actor and domain.Error semantics failed before implementation`
-- GREEN evidence: `structured constructors; complete Task/Execution matrices; focused boundaries; 2s real-sequence fuzz; race; vet; Compose all passed with Go 1.26.4`
-- Batch review: `approved on clean branch; no Critical/Important/Minor findings`
-- Review/fix round: `2/2`
-- User override: `authorized one extra targeted fix for NewDraftTask`
-- User decision: `constructors return (*Task,error) / (*Execution,error)`
+- Implementation commit: `c5de542..9b718bc`
+- Files changed: `migrations; application/ports.go; postgres store/repositories/tests; testdb; go.mod/go.sum`
+- RED evidence: `missing migration; missing Store/Tx/hash APIs; jsonb altered stable response bytes; migration round-trip helper missing; nullable lease scan failure`
+- GREEN evidence: `isolated schemas; lossless TaskRecord; same-Task FKs; one Tx.Now; owned one-shot idempotency; full migration round-trip; race/vet/diff passed`
+- Batch review: `approved after round 1 fixes; no Critical/Important/Minor findings`
+- Review/fix round: `1/2`
 - Unresolved feedback: `none`

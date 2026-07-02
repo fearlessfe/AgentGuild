@@ -189,9 +189,10 @@ git commit -m "feat: define task and execution lifecycle"
 
 ### Task 2: 建立 PostgreSQL Schema、事务和 Repository
 
-- [ ] **Completion gate: Task 2 PostgreSQL persistence**
+- [x] **Completion gate: Task 2 PostgreSQL persistence**
 
 **Files:**
+- Create: `backend/internal/application/ports.go`
 - Create: `backend/migrations/000001_task_lifecycle.up.sql`
 - Create: `backend/migrations/000001_task_lifecycle.down.sql`
 - Create: `backend/internal/postgres/store.go`
@@ -202,10 +203,11 @@ git commit -m "feat: define task and execution lifecycle"
 
 **Interfaces:**
 - Consumes: `domain.Task`、`domain.Execution`、`domain.Error`
-- Produces: `postgres.Store.WithTx(ctx, func(application.Tx) error) error`
+- Produces: `application.Store.WithTx(ctx, func(application.Tx) error) error`
+- Produces: `application.Tx` 和 Task/Execution/Idempotency/Event repository ports；ports 不依赖 PostgreSQL
 - Produces: `application.TaskRepository`、`ExecutionRepository`、`IdempotencyRepository`、`EventRepository`
 
-- [ ] **Step 1: 写迁移约束集成测试**
+- [x] **Step 1: 写迁移约束集成测试**
 
 ```go
 func TestOnlyOneNonTerminalExecutionPerTask(t *testing.T) {
@@ -218,13 +220,13 @@ func TestOnlyOneNonTerminalExecutionPerTask(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试并确认迁移缺失**
+- [x] **Step 2: 运行测试并确认迁移缺失**
 
 Run: `cd backend && go test ./internal/postgres -run TestOnlyOneNonTerminalExecutionPerTask -count=1`
 
 Expected: FAIL，原因是迁移或测试数据库辅助代码不存在。
 
-- [ ] **Step 3: 创建多租户表和部分唯一索引**
+- [x] **Step 3: 创建多租户表和部分唯一索引**
 
 ```sql
 CREATE UNIQUE INDEX executions_one_active_per_task
@@ -237,13 +239,14 @@ ON idempotency_records (tenant_id, actor_id, operation, request_id);
 
 同一迁移创建 `tasks`、`executions`、`idempotency_records`、`task_events`、`outbox_events`、`execution_usage`；所有业务主键唯一约束必须包含或显式校验 `tenant_id`。
 
-- [ ] **Step 4: 实现事务内数据库时间和条件更新**
+- [x] **Step 4: 实现事务内数据库时间和条件更新**
 
 ```go
 func (tx *Tx) Now(ctx context.Context) (time.Time, error) {
-    var now time.Time
-    err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
-    return now, err
+    tx.nowOnce.Do(func() {
+        tx.nowErr = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&tx.now)
+    })
+    return tx.now, tx.nowErr
 }
 
 const claimSQL = `
@@ -252,7 +255,7 @@ SET status='active', state_version=state_version+1, active_execution_id=$4, upda
 WHERE tenant_id=$1 AND id=$2 AND status='open' AND state_version=$3 AND deadline>$5`
 ```
 
-- [ ] **Step 5: 实现规范请求哈希和幂等结果锁定**
+- [x] **Step 5: 实现规范请求哈希和幂等结果锁定**
 
 ```go
 func CanonicalHash(v any) ([32]byte, error) {
@@ -264,13 +267,13 @@ func CanonicalHash(v any) ([32]byte, error) {
 
 读取幂等记录时使用 `SELECT ... FOR UPDATE`；相同 hash 返回已存响应，不同 hash 返回 `IDEMPOTENCY_MISMATCH`。
 
-- [ ] **Step 6: 运行迁移、tenant 隔离和幂等并发测试**
+- [x] **Step 6: 运行迁移、tenant 隔离和幂等并发测试**
 
 Run: `cd backend && go test ./internal/postgres -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交持久化层**
+- [x] **Step 7: 提交持久化层**
 
 ```bash
 git add backend/migrations backend/internal/postgres
