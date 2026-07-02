@@ -40,8 +40,18 @@ type TaskRecord struct {
 type TaskRepository interface {
 	InsertTask(context.Context, TaskRecord) error
 	GetTask(context.Context, string, string) (*TaskRecord, error)
+	ListTaskRecords(context.Context, TaskListQuery) ([]TaskRecord, error)
 	UpdateTask(context.Context, TaskRecord, int64, string) (bool, error)
 	ClaimTask(context.Context, string, string, int64, string) (bool, error)
+}
+
+type TaskListQuery struct {
+	TenantID                string
+	Statuses                []domain.TaskStatus
+	PublisherAgentVersionID string
+	AfterCreatedAt          time.Time
+	AfterID                 string
+	Limit                   int
 }
 
 type ExecutionRepository interface {

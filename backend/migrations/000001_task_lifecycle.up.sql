@@ -47,7 +47,7 @@ CREATE TABLE executions (
     CONSTRAINT executions_status_valid CHECK (
         status IN (
             'leased', 'running', 'submitted', 'validating', 'reviewing',
-            'revision_requested', 'accepted', 'rejected', 'expired'
+            'revision_requested', 'accepted', 'rejected', 'expired', 'cancelled'
         )
     ),
     CONSTRAINT executions_lease_expiry_order CHECK (

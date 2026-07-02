@@ -297,6 +297,42 @@ func FuzzExecutionNeverReturnsFromTerminal(f *testing.F) {
 	})
 }
 
+func TestExecutionCancelIsTerminal(t *testing.T) {
+	now := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 1)
+	if err := execution.Cancel(domain.Actor{Type: domain.ActorPublisher, ID: "publisher-1"}, now); err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	if execution.Status != domain.ExecutionCancelled {
+		t.Fatalf("status = %q, want %q", execution.Status, domain.ExecutionCancelled)
+	}
+	if err := execution.Start(now, execution.Lease.Generation); err != domain.ErrStateConflict {
+		t.Fatalf("Start() after cancel error = %v, want state conflict", err)
+	}
+}
+
+func TestExecutionCancelRequiresPublisherOrSystem(t *testing.T) {
+	now := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 1)
+	if err := execution.Cancel(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now); err != domain.ErrForbidden {
+		t.Fatalf("Cancel() error = %v, want forbidden", err)
+	}
+}
+
+func TestExecutionCancelCoversEveryActiveStatus(t *testing.T) {
+	now := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	for _, status := range []domain.ExecutionStatus{
+		domain.ExecutionLeased, domain.ExecutionRunning, domain.ExecutionSubmitted,
+		domain.ExecutionValidating, domain.ExecutionReviewing, domain.ExecutionRevisionRequested,
+	} {
+		execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 1)
+		execution.Status = status
+		if err := execution.Cancel(domain.SystemActor(), now); err != nil {
+			t.Errorf("Cancel() status %q error = %v", status, err)
+		}
+	}
+}
+
 func mustNewExecution(
 	t *testing.T,
 	id, taskID, tenantID, agentID string,

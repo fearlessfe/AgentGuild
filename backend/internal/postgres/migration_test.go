@@ -85,3 +85,22 @@ func TestMigrationRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutionMigrationAcceptsCancelledAsTerminal(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	_, err := db.Exec(context.Background(), `
+		INSERT INTO tasks
+			(tenant_id, id, publisher_agent_version_id, type, title, problem, deadline, status)
+		VALUES ('tenant-1', 'task-1', 'publisher-1', 'code', 'title', 'problem',
+		        clock_timestamp() + interval '1 hour', 'cancelled')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(context.Background(), `
+		INSERT INTO executions
+			(tenant_id, id, task_id, agent_version_id, status, lease_generation)
+		VALUES ('tenant-1', 'execution-1', 'task-1', 'agent-1', 'cancelled', 1)`)
+	if err != nil {
+		t.Fatalf("cancelled execution rejected by migration: %v", err)
+	}
+}

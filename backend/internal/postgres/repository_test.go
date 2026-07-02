@@ -237,6 +237,37 @@ func TestTaskRepositoryIsTenantScopedAndClaimIsConditional(t *testing.T) {
 	}
 }
 
+func TestTaskListIsTenantFilteredAndKeysetOrdered(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-a", "task-1")
+	seedTask(t, db, "tenant-a", "task-2")
+	seedTask(t, db, "tenant-b", "task-3")
+	for id, createdAt := range map[string]time.Time{"task-1": fixtureTime(1), "task-2": fixtureTime(2)} {
+		if _, err := db.Exec(context.Background(), `UPDATE tasks SET created_at=$1 WHERE tenant_id='tenant-a' AND id=$2`, createdAt, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := postgres.NewStore(db)
+	err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		first, err := tx.ListTaskRecords(context.Background(), application.TaskListQuery{TenantID: "tenant-a", Statuses: []domain.TaskStatus{domain.TaskOpen}, Limit: 1})
+		if err != nil || len(first) != 1 || first[0].ID != "task-2" {
+			t.Fatalf("first page=%#v err=%v", first, err)
+		}
+		second, err := tx.ListTaskRecords(context.Background(), application.TaskListQuery{TenantID: "tenant-a", Statuses: []domain.TaskStatus{domain.TaskOpen}, AfterCreatedAt: first[0].CreatedAt, AfterID: first[0].ID, Limit: 2})
+		if err != nil || len(second) != 1 || second[0].ID != "task-1" {
+			t.Fatalf("second page=%#v err=%v", second, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func fixtureTime(minute int) time.Time {
+	return time.Date(2026, 7, 2, 10, minute, 0, 0, time.UTC)
+}
+
 func TestExecutionRepositoryIsTenantScoped(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	seedTask(t, db, "tenant-a", "task")

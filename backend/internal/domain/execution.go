@@ -10,10 +10,16 @@ const (
 type ExecutionStatus string
 
 const (
-	ExecutionLeased   ExecutionStatus = "leased"
-	ExecutionRunning  ExecutionStatus = "running"
-	ExecutionAccepted ExecutionStatus = "accepted"
-	ExecutionExpired  ExecutionStatus = "expired"
+	ExecutionLeased            ExecutionStatus = "leased"
+	ExecutionRunning           ExecutionStatus = "running"
+	ExecutionSubmitted         ExecutionStatus = "submitted"
+	ExecutionValidating        ExecutionStatus = "validating"
+	ExecutionReviewing         ExecutionStatus = "reviewing"
+	ExecutionRevisionRequested ExecutionStatus = "revision_requested"
+	ExecutionAccepted          ExecutionStatus = "accepted"
+	ExecutionRejected          ExecutionStatus = "rejected"
+	ExecutionExpired           ExecutionStatus = "expired"
+	ExecutionCancelled         ExecutionStatus = "cancelled"
 )
 
 type Lease struct {
@@ -111,9 +117,25 @@ func (e *Execution) Apply(intent Intent, actor Actor, now time.Time) error {
 	switch intent {
 	case IntentAccept:
 		return e.Accept(actor, now)
+	case IntentCancel:
+		return e.Cancel(actor, now)
 	default:
 		return ErrStateConflict
 	}
+}
+
+func (e *Execution) Cancel(actor Actor, _ time.Time) error {
+	switch e.Status {
+	case ExecutionLeased, ExecutionRunning, ExecutionSubmitted, ExecutionValidating,
+		ExecutionReviewing, ExecutionRevisionRequested:
+	default:
+		return ErrStateConflict
+	}
+	if actor.ID == "" || (actor.Type != ActorPublisher && actor.Type != ActorSystem) {
+		return ErrForbidden
+	}
+	e.Status = ExecutionCancelled
+	return nil
 }
 
 func (e *Execution) Accept(actor Actor, now time.Time) error {

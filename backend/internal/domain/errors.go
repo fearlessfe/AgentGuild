@@ -1,5 +1,7 @@
 package domain
 
+import "errors"
+
 type Error struct {
 	Code    string
 	Message string
@@ -33,4 +35,30 @@ func invalidArgument(field string) error {
 		Message: field + " is invalid",
 		Field:   field,
 	}
+}
+
+func CodeOf(err error) string {
+	if domainErr := errorOf(err); domainErr != nil {
+		return domainErr.Code
+	}
+	return ""
+}
+
+func FieldOf(err error) string {
+	if domainErr := errorOf(err); domainErr != nil {
+		return domainErr.Field
+	}
+	return ""
+}
+
+func errorOf(err error) *Error {
+	var pointer *Error
+	if errors.As(err, &pointer) {
+		return pointer
+	}
+	var value Error
+	if errors.As(err, &value) {
+		return &value
+	}
+	return nil
 }

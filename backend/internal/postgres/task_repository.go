@@ -58,6 +58,53 @@ func (tx *Tx) GetTask(
 	return &task, nil
 }
 
+func (tx *Tx) ListTaskRecords(
+	ctx context.Context,
+	query application.TaskListQuery,
+) ([]application.TaskRecord, error) {
+	statuses := make([]string, len(query.Statuses))
+	for i := range query.Statuses {
+		statuses[i] = string(query.Statuses[i])
+	}
+	rows, err := tx.tx.Query(ctx, `
+		SELECT t.id, t.tenant_id, t.publisher_agent_version_id, t.type, t.title,
+		       t.problem, t.constraints, t.requirements, t.deadline, t.status,
+		       COALESCE(e.agent_version_id, ''), t.state_version,
+		       COALESCE(t.active_execution_id, ''), t.created_at, t.updated_at
+		FROM tasks t
+		LEFT JOIN executions e
+		  ON e.tenant_id=t.tenant_id AND e.id=t.active_execution_id AND e.task_id=t.id
+		WHERE t.tenant_id=$1
+		  AND (cardinality($2::text[])=0 OR t.status=ANY($2::text[]))
+		  AND ($3='' OR t.publisher_agent_version_id=$3)
+		  AND ($4 OR (t.created_at, t.id) < ($5, $6))
+		ORDER BY t.created_at DESC, t.id DESC
+		LIMIT $7`,
+		query.TenantID, statuses, query.PublisherAgentVersionID,
+		query.AfterCreatedAt.IsZero(), query.AfterCreatedAt, query.AfterID, query.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []application.TaskRecord
+	for rows.Next() {
+		var task application.TaskRecord
+		var status string
+		if err := rows.Scan(
+			&task.ID, &task.TenantID, &task.PublisherAgentVersionID, &task.Type,
+			&task.Title, &task.Problem, &task.Constraints, &task.Requirements,
+			&task.Deadline, &status, &task.ClaimedBy, &task.StateVersion,
+			&task.ActiveExecutionID, &task.CreatedAt, &task.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		task.Status = domain.TaskStatus(status)
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
 func (tx *Tx) UpdateTask(
 	ctx context.Context,
 	task application.TaskRecord,
