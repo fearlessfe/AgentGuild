@@ -33,6 +33,7 @@ const (
 	ActorPublisher ActorType = "publisher"
 	ActorAgent     ActorType = "agent"
 	ActorSystem    ActorType = "system"
+	ActorReviewer  ActorType = "reviewer"
 )
 
 type Actor struct {
@@ -50,6 +51,9 @@ type Task struct {
 }
 
 func NewTask(id, tenantID, publisherID string, deadline time.Time) *Task {
+	if id == "" || tenantID == "" || publisherID == "" || deadline.IsZero() {
+		return nil
+	}
 	return &Task{
 		ID:          id,
 		TenantID:    tenantID,
@@ -61,6 +65,9 @@ func NewTask(id, tenantID, publisherID string, deadline time.Time) *Task {
 
 func NewDraftTask(id, tenantID, publisherID string, deadline time.Time) *Task {
 	task := NewTask(id, tenantID, publisherID, deadline)
+	if task == nil {
+		return nil
+	}
 	task.Status = TaskDraft
 	return task
 }
@@ -70,6 +77,15 @@ func SystemActor() Actor {
 }
 
 func (t *Task) Apply(intent Intent, actor Actor, now time.Time) error {
+	if actor.ID == "" {
+		return ErrForbidden
+	}
+	switch intent {
+	case IntentPublish, IntentClaim, IntentStart, IntentComplete:
+		if !now.Before(t.Deadline) {
+			return ErrStateConflict
+		}
+	}
 	switch intent {
 	case IntentPublish:
 		if t.Status != TaskDraft {
@@ -124,7 +140,7 @@ func (t *Task) Apply(intent Intent, actor Actor, now time.Time) error {
 		if actor.Type != ActorSystem {
 			return ErrForbidden
 		}
-		if !now.After(t.Deadline) {
+		if now.Before(t.Deadline) {
 			return ErrStateConflict
 		}
 		t.Status = TaskExpired

@@ -26,6 +26,132 @@ func TestTaskRejectsProgressBeforeClaim(t *testing.T) {
 	}
 }
 
+func TestTaskConstructorRejectsMissingDeadline(t *testing.T) {
+	task := domain.NewTask("task-1", "tenant-1", "publisher-1", time.Time{})
+
+	if task != nil {
+		t.Fatalf("NewTask() = %+v, want nil for missing deadline", task)
+	}
+}
+
+func TestTaskConstructorRejectsEmptyIdentity(t *testing.T) {
+	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		id          string
+		tenantID    string
+		publisherID string
+	}{
+		{name: "empty task ID", tenantID: "tenant-1", publisherID: "publisher-1"},
+		{name: "empty tenant ID", id: "task-1", publisherID: "publisher-1"},
+		{name: "empty publisher ID", id: "task-1", tenantID: "tenant-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := domain.NewTask(tt.id, tt.tenantID, tt.publisherID, deadline)
+			if task != nil {
+				t.Fatalf("NewTask() = %+v, want nil", task)
+			}
+		})
+	}
+}
+
+func TestTaskRejectsClaimAtOrAfterDeadlineWithoutMutation(t *testing.T) {
+	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	agent := domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}
+
+	for _, claimAt := range []time.Time{deadline, deadline.Add(time.Nanosecond)} {
+		t.Run(claimAt.Sub(deadline).String(), func(t *testing.T) {
+			task := domain.NewTask("task-1", "tenant-1", "publisher-1", deadline)
+
+			err := task.Apply(domain.IntentClaim, agent, claimAt)
+
+			if !errors.Is(err, domain.ErrStateConflict) {
+				t.Fatalf("Apply(claim) error = %v, want %v", err, domain.ErrStateConflict)
+			}
+			if task.Status != domain.TaskOpen || task.ClaimedBy != "" {
+				t.Fatalf("task mutated after rejected claim: %+v", task)
+			}
+		})
+	}
+}
+
+func TestTaskExpiresAtDeadline(t *testing.T) {
+	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	task := domain.NewTask("task-1", "tenant-1", "publisher-1", deadline)
+
+	if err := task.Apply(domain.IntentExpire, domain.SystemActor(), deadline); err != nil {
+		t.Fatalf("Apply(expire at deadline) error = %v", err)
+	}
+	if task.Status != domain.TaskExpired {
+		t.Fatalf("status = %q, want %q", task.Status, domain.TaskExpired)
+	}
+}
+
+func TestTaskRejectsProgressAtDeadlineWithoutMutation(t *testing.T) {
+	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	beforeDeadline := deadline.Add(-time.Minute)
+	publisher := domain.Actor{Type: domain.ActorPublisher, ID: "publisher-1"}
+	agent := domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}
+
+	tests := []struct {
+		name   string
+		task   *domain.Task
+		intent domain.Intent
+		actor  domain.Actor
+	}{
+		{
+			name:   "publish",
+			task:   domain.NewDraftTask("task-1", "tenant-1", "publisher-1", deadline),
+			intent: domain.IntentPublish,
+			actor:  publisher,
+		},
+		{
+			name: "start",
+			task: func() *domain.Task {
+				task := domain.NewTask("task-1", "tenant-1", "publisher-1", deadline)
+				if err := task.Apply(domain.IntentClaim, agent, beforeDeadline); err != nil {
+					t.Fatalf("claim fixture: %v", err)
+				}
+				return task
+			}(),
+			intent: domain.IntentStart,
+			actor:  agent,
+		},
+		{
+			name: "complete",
+			task: func() *domain.Task {
+				task := domain.NewTask("task-1", "tenant-1", "publisher-1", deadline)
+				if err := task.Apply(domain.IntentClaim, agent, beforeDeadline); err != nil {
+					t.Fatalf("claim fixture: %v", err)
+				}
+				if err := task.Apply(domain.IntentStart, agent, beforeDeadline); err != nil {
+					t.Fatalf("start fixture: %v", err)
+				}
+				return task
+			}(),
+			intent: domain.IntentComplete,
+			actor:  agent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := *tt.task
+
+			err := tt.task.Apply(tt.intent, tt.actor, deadline)
+
+			if !errors.Is(err, domain.ErrStateConflict) {
+				t.Fatalf("Apply() error = %v, want %v", err, domain.ErrStateConflict)
+			}
+			if *tt.task != before {
+				t.Fatalf("task mutated: got %+v, want %+v", *tt.task, before)
+			}
+		})
+	}
+}
+
 func TestTaskLegalTransitions(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
 	publisher := domain.Actor{Type: domain.ActorPublisher, ID: "publisher-1"}
@@ -154,6 +280,60 @@ func TestTaskTerminalStatesNeverTransition(t *testing.T) {
 				t.Fatalf("task status = %q, want unchanged %q", task.Status, status)
 			}
 		})
+	}
+}
+
+func TestTaskIllegalTransitionMatrixDoesNotMutate(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	publisher := domain.Actor{Type: domain.ActorPublisher, ID: "publisher-1"}
+	agent := domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}
+
+	tests := []struct {
+		name   string
+		status domain.TaskStatus
+		intent domain.Intent
+		actor  domain.Actor
+	}{
+		{name: "draft cannot be claimed", status: domain.TaskDraft, intent: domain.IntentClaim, actor: agent},
+		{name: "open cannot be completed", status: domain.TaskOpen, intent: domain.IntentComplete, actor: agent},
+		{name: "claimed cannot be published", status: domain.TaskClaimed, intent: domain.IntentPublish, actor: publisher},
+		{name: "in progress cannot be claimed", status: domain.TaskInProgress, intent: domain.IntentClaim, actor: agent},
+		{name: "completed cannot be cancelled", status: domain.TaskCompleted, intent: domain.IntentCancel, actor: publisher},
+		{name: "cancelled cannot be published", status: domain.TaskCancelled, intent: domain.IntentPublish, actor: publisher},
+		{name: "expired cannot be started", status: domain.TaskExpired, intent: domain.IntentStart, actor: agent},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := domain.NewTask("task-1", "tenant-1", "publisher-1", now.Add(time.Hour))
+			task.Status = tt.status
+			task.ClaimedBy = "agent-1"
+			before := *task
+
+			err := task.Apply(tt.intent, tt.actor, now)
+
+			if !errors.Is(err, domain.ErrStateConflict) {
+				t.Fatalf("Apply() error = %v, want %v", err, domain.ErrStateConflict)
+			}
+			if *task != before {
+				t.Fatalf("task mutated: got %+v, want %+v", *task, before)
+			}
+		})
+	}
+}
+
+func TestTaskRejectsEmptyActorIdentityWithoutMutation(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	task := domain.NewTask("task-1", "tenant-1", "publisher-1", now.Add(time.Hour))
+	before := *task
+
+	err := task.Apply(domain.IntentClaim, domain.Actor{Type: domain.ActorAgent}, now)
+
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("Apply() error = %v, want %v", err, domain.ErrForbidden)
+	}
+	if *task != before {
+		t.Fatalf("task mutated: got %+v, want %+v", *task, before)
 	}
 }
 

@@ -45,6 +45,9 @@ func NewLeasedExecution(
 	now time.Time,
 	generation int64,
 ) *Execution {
+	if id == "" || taskID == "" || tenantID == "" || agentID == "" || generation < 0 {
+		return nil
+	}
 	return &Execution{
 		ID:       id,
 		TaskID:   taskID,
@@ -59,15 +62,11 @@ func NewLeasedExecution(
 	}
 }
 
-func AcceptedExecutionFixture() *Execution {
-	return &Execution{Status: ExecutionAccepted}
-}
-
 func (e *Execution) Start(now time.Time, generation int64) error {
 	if e.Status != ExecutionLeased {
 		return ErrStateConflict
 	}
-	if generation != e.Lease.Generation || now.After(e.Lease.HardExpiry) {
+	if generation != e.Lease.Generation || !now.Before(e.Lease.HardExpiry) {
 		return ErrLeaseExpired
 	}
 	e.Status = ExecutionRunning
@@ -78,7 +77,7 @@ func (e *Execution) Heartbeat(now time.Time, generation int64) (Lease, error) {
 	if e.Status != ExecutionLeased && e.Status != ExecutionRunning {
 		return Lease{}, ErrStateConflict
 	}
-	if generation != e.Lease.Generation || now.After(e.Lease.HardExpiry) {
+	if generation != e.Lease.Generation || !now.Before(e.Lease.HardExpiry) {
 		return Lease{}, ErrLeaseExpired
 	}
 	e.Lease = RenewLease(now, generation)
@@ -89,7 +88,7 @@ func (e *Execution) Expire(now time.Time) error {
 	if e.Status != ExecutionLeased && e.Status != ExecutionRunning {
 		return ErrStateConflict
 	}
-	if !now.After(e.Lease.HardExpiry) {
+	if now.Before(e.Lease.HardExpiry) {
 		return ErrStateConflict
 	}
 	e.Status = ExecutionExpired
@@ -97,5 +96,24 @@ func (e *Execution) Expire(now time.Time) error {
 }
 
 func (e *Execution) Apply(intent Intent, actor Actor, now time.Time) error {
-	return ErrStateConflict
+	switch intent {
+	case IntentAccept:
+		return e.Accept(actor, now)
+	default:
+		return ErrStateConflict
+	}
+}
+
+func (e *Execution) Accept(actor Actor, now time.Time) error {
+	if e.Status != ExecutionRunning {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorReviewer || actor.ID == "" {
+		return ErrForbidden
+	}
+	if !now.Before(e.Lease.HardExpiry) {
+		return ErrLeaseExpired
+	}
+	e.Status = ExecutionAccepted
+	return nil
 }
