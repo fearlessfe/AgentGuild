@@ -75,6 +75,8 @@ Makefile                                  统一 build/test/verify 命令
 
 ### Task 1: 建立项目骨架与领域状态机
 
+- [ ] **Completion gate: Task 1 domain lifecycle**
+
 **Files:**
 - Create: `backend/go.mod`
 - Create: `backend/internal/domain/errors.go`
@@ -166,6 +168,8 @@ git commit -m "feat: define task and execution lifecycle"
 
 ### Task 2: 建立 PostgreSQL Schema、事务和 Repository
 
+- [ ] **Completion gate: Task 2 PostgreSQL persistence**
+
 **Files:**
 - Create: `backend/migrations/000001_task_lifecycle.up.sql`
 - Create: `backend/migrations/000001_task_lifecycle.down.sql`
@@ -256,6 +260,8 @@ git commit -m "feat: persist task lifecycle atomically"
 
 ### Task 3: 实现共享 Application Service 与授权策略
 
+- [ ] **Completion gate: Task 3 application service**
+
 **Files:**
 - Create: `backend/internal/auth/principal.go`
 - Create: `backend/internal/application/contracts.go`
@@ -340,6 +346,8 @@ git commit -m "feat: add shared task application service"
 
 ### Task 4: 实现 Claim、Lease、heartbeat 和回收器
 
+- [ ] **Completion gate: Task 4 claim and lease**
+
 **Files:**
 - Create: `backend/internal/application/claim.go`
 - Create: `backend/internal/postgres/reaper.go`
@@ -419,6 +427,8 @@ git commit -m "feat: enforce claim and lease fencing"
 
 ### Task 5: 暴露 REST API、OAuth 和 OpenAPI
 
+- [ ] **Completion gate: Task 5 REST and OAuth**
+
 **Files:**
 - Create: `backend/internal/auth/oauth.go`
 - Create: `backend/internal/transport/rest/router.go`
@@ -479,6 +489,8 @@ git commit -m "feat: expose authorized task REST API"
 ---
 
 ### Task 6: 暴露无状态 Streamable HTTP MCP 工具
+
+- [ ] **Completion gate: Task 6 MCP adapter**
 
 **Files:**
 - Create: `backend/internal/transport/mcp/server.go`
@@ -561,6 +573,8 @@ git commit -m "feat: expose task lifecycle over MCP"
 
 ### Task 7: 实现 outbox、Langfuse 成本覆盖、限流和审计查询
 
+- [ ] **Completion gate: Task 7 operations and telemetry**
+
 **Files:**
 - Create: `backend/internal/telemetry/cost.go`
 - Create: `backend/internal/telemetry/langfuse.go`
@@ -636,6 +650,8 @@ git commit -m "feat: observe execution cost asynchronously"
 ---
 
 ### Task 8: 组装服务和 React 只读观察页面
+
+- [ ] **Completion gate: Task 8 runnable observer app**
 
 **Files:**
 - Create: `backend/cmd/agentguild-api/main.go`
@@ -742,6 +758,8 @@ git commit -m "feat: add task lifecycle observer application"
 ---
 
 ### Task 9: 完成端到端、恢复和验收测试
+
+- [ ] **Completion gate: Task 9 end-to-end acceptance**
 
 **Files:**
 - Create: `backend/internal/acceptance/lifecycle_test.go`
