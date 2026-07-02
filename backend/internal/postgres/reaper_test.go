@@ -82,9 +82,18 @@ func seedReaperExecution(t *testing.T, db *pgxpool.Pool, taskID, executionID str
 	_, err := db.Exec(context.Background(), `
 		INSERT INTO tasks (tenant_id, id, publisher_agent_version_id, type, title, problem, constraints, requirements, deadline, status)
 		VALUES ('tenant-1', $1, 'publisher', 'code', 'title', 'problem', '[]', '[]', $2, 'claimed');
+		`, taskID, deadline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(context.Background(), `
 		INSERT INTO executions (tenant_id, id, task_id, agent_version_id, status, lease_secret_hash, lease_generation, lease_soft_expires_at, lease_hard_expires_at)
-		VALUES ('tenant-1', $3, $1, 'worker', 'leased', '\\x00', 1, $4 - interval '30 seconds', $4);
-		UPDATE tasks SET active_execution_id=$3 WHERE tenant_id='tenant-1' AND id=$1`, taskID, deadline, executionID, hardExpiry)
+		VALUES ('tenant-1', $1, $2, 'worker', 'leased', '\\x00', 1, $3, $4)`, executionID, taskID, hardExpiry.Add(-30*time.Second), hardExpiry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(context.Background(), `
+		UPDATE tasks SET active_execution_id=$1 WHERE tenant_id='tenant-1' AND id=$2`, executionID, taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
