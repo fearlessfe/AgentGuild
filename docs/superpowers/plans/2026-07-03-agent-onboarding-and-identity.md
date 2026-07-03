@@ -548,7 +548,7 @@ git commit -m "feat: add OIDC session and agent access token issuance"
 
 ## Task 5: 暴露 REST API（人类管理端 + Agent 激活端）
 
-- [ ] **Completion gate: Task 5 REST API**
+- [x] **Completion gate: Task 5 REST API**
 
 **Files:**
 - Create: `backend/internal/transport/rest/identity_router.go`
