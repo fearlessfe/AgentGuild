@@ -49,6 +49,8 @@ type oidcProvider interface {
 	Exchange(context.Context, string) (*auth.Session, error)
 }
 
+type socketRemoteAddrContextKey struct{}
+
 // Server 暴露任务生命周期的 REST API。
 type Server struct {
 	svc           applicationService
@@ -103,6 +105,7 @@ func NewServer(svc applicationService, verifier auth.TokenVerifier, opts ...Opti
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	r.Use(captureSocketRemoteAddr)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(jsonResponse)
@@ -145,6 +148,13 @@ func (s *Server) rateLimitHandler(next http.Handler) http.Handler {
 	return s.rateLimit(next)
 }
 
+func captureSocketRemoteAddr(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), socketRemoteAddrContextKey{}, r.RemoteAddr)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func jsonResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -172,6 +182,9 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 
 func callerSource(r *http.Request) string {
 	source := strings.TrimSpace(r.RemoteAddr)
+	if socketRemoteAddr, ok := r.Context().Value(socketRemoteAddrContextKey{}).(string); ok {
+		source = strings.TrimSpace(socketRemoteAddr)
+	}
 	if source == "" {
 		return "unknown"
 	}

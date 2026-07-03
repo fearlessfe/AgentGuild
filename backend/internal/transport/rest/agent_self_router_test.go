@@ -132,6 +132,48 @@ func TestAgentActivateRateLimitKeyIncludesAnonymousRemoteAddr(t *testing.T) {
 	require.Contains(t, limiter.keys[1], "203.0.113.11")
 }
 
+func TestAgentActivateRateLimitIgnoresSpoofedForwardedHeaders(t *testing.T) {
+	expiresAt := time.Date(2026, 7, 3, 10, 15, 0, 0, time.UTC)
+	app := &fakeIdentityApplication{
+		activate: identityapp.Envelope[identityapp.AccessTokenView]{
+			Data: identityapp.AccessTokenView{
+				Token:          "access-token-1",
+				TokenType:      "Bearer",
+				ExpiresAt:      expiresAt,
+				AgentID:        "agent-1",
+				AgentVersionID: "agent-1.v1",
+			},
+		},
+	}
+	limiter := &perKeyBudgetRateLimiter{budget: 1}
+	server := rest.NewServer(&fakeApplication{}, &tokenVerifier{},
+		rest.WithIdentityService(app),
+		rest.WithSession(testSessionSecret, false),
+		rest.WithRateLimiter(limiter),
+	).Router()
+	body := `{"activation_token":"activation-token-1","runtime":"codex","model":"gpt-5"}`
+
+	req := httptestNewPost(t, "/v1/agents/me:activate", body)
+	req.RemoteAddr = "203.0.113.10:1234"
+	req.Header.Set("X-Forwarded-For", "198.51.100.10")
+	req.Header.Set("X-Real-IP", "198.51.100.10")
+	first := httptestRecorder(server, req)
+
+	req = httptestNewPost(t, "/v1/agents/me:activate", body)
+	req.RemoteAddr = "203.0.113.10:1234"
+	req.Header.Set("X-Forwarded-For", "198.51.100.11")
+	req.Header.Set("X-Real-IP", "198.51.100.11")
+	second := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, http.StatusTooManyRequests, second.Code)
+	require.Len(t, app.calls, 1)
+	require.Len(t, limiter.keys, 2)
+	require.Equal(t, limiter.keys[0], limiter.keys[1])
+	require.Contains(t, limiter.keys[0], "203.0.113.10")
+	require.NotContains(t, limiter.keys[0], "198.51.100")
+}
+
 func newAgentSelfTestServer(identity *fakeIdentityApplication) http.Handler {
 	return rest.NewServer(&fakeApplication{}, &tokenVerifier{},
 		rest.WithIdentityService(identity),

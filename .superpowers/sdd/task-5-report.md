@@ -130,3 +130,47 @@ ok agentguild.dev/agentguild/backend/internal/transport/rest
 - `backend/internal/transport/rest/identity_router_test.go`
 - `backend/internal/transport/rest/agent_self_router_test.go`
 - `.superpowers/sdd/task-5-report.md`
+
+## Review round 2 fixes
+
+- Captured the socket `RemoteAddr` before chi `middleware.RealIP` can rewrite `Request.RemoteAddr` from client-supplied forwarded headers.
+- Changed anonymous activation rate-limit source derivation to prefer the captured socket address, so unauthenticated callers cannot mint separate limiter budgets by spoofing `X-Forwarded-For` or `X-Real-IP`.
+- Added a regression test proving two activation requests from the same socket source but with different forwarded headers share the same anonymous limiter key and the second request is rejected when the per-key budget is exhausted.
+
+## RED/GREEN evidence
+
+RED command:
+
+```bash
+cd backend && go test ./internal/transport/rest -run TestAgentActivateRateLimitIgnoresSpoofedForwardedHeaders -count=1
+```
+
+RED output summary:
+
+```text
+FAIL TestAgentActivateRateLimitIgnoresSpoofedForwardedHeaders: expected 429, actual 200
+```
+
+GREEN command:
+
+```bash
+cd backend && go test ./internal/transport/rest -run 'TestAgentActivateRateLimit(KeyIncludesAnonymousRemoteAddr|IgnoresSpoofedForwardedHeaders)' -count=1
+```
+
+GREEN output summary:
+
+```text
+ok agentguild.dev/agentguild/backend/internal/transport/rest
+```
+
+## Verification results
+
+- `cd backend && go test ./internal/transport/rest -count=1` PASS.
+- `cd backend && gofmt -w internal/transport/rest/router.go internal/transport/rest/agent_self_router_test.go` PASS.
+- `git diff --check` PASS.
+
+## Files changed
+
+- `backend/internal/transport/rest/router.go`
+- `backend/internal/transport/rest/agent_self_router_test.go`
+- `.superpowers/sdd/task-5-report.md`
