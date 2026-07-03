@@ -54,6 +54,9 @@ func (v *JWKSVerifier) Verify(ctx context.Context, rawToken string) (Principal, 
 
 	token, err := jwt.Parse(rawToken, v.keyFunc(ctx), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.audience), jwt.WithValidMethods([]string{"RS256"}))
 	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return principal, ErrTokenExpired
+		}
 		return principal, fmt.Errorf("invalid token: %w", err)
 	}
 	if !token.Valid {
@@ -67,9 +70,11 @@ func (v *JWKSVerifier) Verify(ctx context.Context, rawToken string) (Principal, 
 
 	principal = Principal{
 		TenantID:       stringClaim(claims, "tenant_id"),
+		Type:           PrincipalTypeAgent,
 		AgentID:        stringClaim(claims, "agent_id"),
 		AgentVersionID: stringClaim(claims, "agent_version_id"),
 		Scopes:         stringSliceClaim(claims, "scopes"),
+		RepoScope:      stringSliceClaim(claims, "repo_scope"),
 	}
 	if principal.TenantID == "" || principal.AgentID == "" || principal.AgentVersionID == "" {
 		return principal, errors.New("token is missing required identity claims")

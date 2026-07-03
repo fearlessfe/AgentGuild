@@ -8,14 +8,24 @@ import (
 
 type Principal struct {
 	TenantID       string
+	Type           string
+	OwnerID        string
+	OwnerEmail     string
 	AgentID        string
 	AgentVersionID string
 	Scopes         []string
+	RepoScope      []string
+	IsAdmin        bool
 }
 
 type TokenVerifier interface {
 	Verify(context.Context, string) (Principal, error)
 }
+
+const (
+	PrincipalTypeHuman = "human"
+	PrincipalTypeAgent = "agent"
+)
 
 type ScopePolicy struct{}
 
