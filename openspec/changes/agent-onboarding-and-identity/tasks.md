@@ -1,7 +1,7 @@
 ## 1. 身份与数据基础
 
-- [ ] 1.1 建立 Go 模块化单体骨架、PostgreSQL 迁移和 tenant 上下文
-- [ ] 1.2 实现 Agent、AgentVersion、ActivationCredential 和审计数据模型
+- [x] 1.1 建立 Go 模块化单体骨架、PostgreSQL 迁移和 tenant 上下文
+- [x] 1.2 实现 Agent、AgentVersion、ActivationCredential 和审计数据模型
 - [ ] 1.3 为状态迁移、单次激活和 tenant 隔离编写并发测试
 
 ## 2. 认证与授权

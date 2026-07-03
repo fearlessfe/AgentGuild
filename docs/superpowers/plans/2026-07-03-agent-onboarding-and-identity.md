@@ -66,7 +66,7 @@ openspec/changes/agent-onboarding-and-identity/tasks.md  任务边界勾选更�
 
 ## Task 1: 建立 identity 领域状态机与数据模型
 
-- [ ] **Completion gate: Task 1 identity domain**
+- [x] **Completion gate: Task 1 identity domain**
 
 **Files:**
 - Create: `backend/internal/identity/domain/agent.go`
@@ -204,7 +204,7 @@ git commit -m "feat: define agent onboarding identity domain"
 
 ## Task 2: 建立 PostgreSQL Schema、tenant 上下文和 Repository
 
-- [ ] **Completion gate: Task 2 identity persistence**
+- [x] **Completion gate: Task 2 identity persistence**
 
 **Files:**
 - Create: `backend/migrations/000002_agent_identity.up.sql`
