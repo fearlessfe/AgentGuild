@@ -284,13 +284,19 @@ func (r *credentialRepository) Save(ctx context.Context, cred *domain.Activation
 		}
 		return nil
 	}
-	_, err = r.q.Exec(ctx, `
+	tag, err := r.q.Exec(ctx, `
 		UPDATE activation_credentials
-		SET hash=$4, status=$5, expires_at=$6, consumed_at=$7
+		SET hash=$3, status=$4, expires_at=$5, consumed_at=$6
 		WHERE tenant_id=$1 AND id=$2`,
 		cred.TenantID, cred.ID, cred.Hash, cred.Status, cred.ExpiresAt, cred.ConsumedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 var _ application.AgentRepository = (*agentRepository)(nil)

@@ -87,3 +87,53 @@ ok  	agentguild.dev/agentguild/backend/internal/identity/postgres	0.694s
 - No blocking concerns.
 - I intentionally did not modify plan checkboxes, OpenSpec task checkboxes, or `openspec/changes/agent-onboarding-and-identity/.comet/subagent-progress.md`.
 - Integration tests require PostgreSQL 18.4 via `AGENTGUILD_TEST_DATABASE_URL`, local port 55432, or Docker fallback.
+
+## Review round 1 fixes
+
+- Fixed `CredentialRepository.Save` for non-consumed credentials by renumbering SQL placeholders to match the six supplied arguments.
+- Added `RowsAffected()` handling for the non-consumed update path; zero-row updates now return `domain.ErrNotFound`.
+- Added regression coverage for saving updates to a pending activation credential.
+- Did not keep optional concurrent-consumption or rollback/reapply test hardening because initial attempts exposed existing semantics outside this scoped reviewer fix.
+
+## Review round 1 RED/GREEN command evidence
+
+RED:
+
+```text
+cd backend && go test ./internal/identity/postgres -run TestCredentialSavePersistsPendingCredentialUpdates -count=1
+--- FAIL: TestCredentialSavePersistsPendingCredentialUpdates (0.08s)
+    repository_test.go:140:
+        Error Trace: /Users/pengzhen/work/AgentGuild/backend/internal/identity/postgres/repository_test.go:140
+        Error:       Received unexpected error:
+                     ERROR: could not determine data type of parameter $3 (SQLSTATE 42P18)
+        Test:        TestCredentialSavePersistsPendingCredentialUpdates
+FAIL
+FAIL	agentguild.dev/agentguild/backend/internal/identity/postgres	0.610s
+FAIL
+```
+
+GREEN focused:
+
+```text
+cd backend && go test ./internal/identity/postgres -run TestCredentialSavePersistsPendingCredentialUpdates -count=1
+ok  	agentguild.dev/agentguild/backend/internal/identity/postgres	0.606s
+```
+
+GREEN package:
+
+```text
+cd backend && go test ./internal/identity/postgres -count=1
+ok  	agentguild.dev/agentguild/backend/internal/identity/postgres	1.192s
+```
+
+## Review round 1 files changed
+
+- `backend/internal/identity/postgres/agent_repository.go`
+- `backend/internal/identity/postgres/repository_test.go`
+- `.superpowers/sdd/task-2-report.md`
+
+## Review round 1 verification results
+
+- `gofmt -w backend/internal/identity/postgres/agent_repository.go backend/internal/identity/postgres/repository_test.go`: PASS.
+- `cd backend && go test ./internal/identity/postgres -run TestCredentialSavePersistsPendingCredentialUpdates -count=1`: PASS.
+- `cd backend && go test ./internal/identity/postgres -count=1`: PASS.

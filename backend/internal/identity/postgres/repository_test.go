@@ -114,6 +114,33 @@ func TestCredentialConsumeRequiresStoredCredentialIdentity(t *testing.T) {
 	require.Nil(t, got.ConsumedAt)
 }
 
+func TestCredentialSavePersistsPendingCredentialUpdates(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	agentID := insertAgent(t, db, "tenant-1", "agent-1")
+	credID, _ := insertCredential(t, db, "tenant-1", agentID)
+	repo := postgres.NewCredentialRepository(db)
+
+	cred, err := repo.GetByID(ctx, "tenant-1", credID)
+	require.NoError(t, err)
+	cred.Hash = []byte("rotated-token-hash")
+	cred.Status = domain.ActivationCredentialPending
+	expiresAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Microsecond)
+	cred.ExpiresAt = &expiresAt
+	cred.ConsumedAt = nil
+
+	require.NoError(t, repo.Save(ctx, cred))
+
+	got, err := repo.GetByID(ctx, "tenant-1", credID)
+	require.NoError(t, err)
+	require.Equal(t, []byte("rotated-token-hash"), got.Hash)
+	require.Equal(t, domain.ActivationCredentialPending, got.Status)
+	require.NotNil(t, got.ExpiresAt)
+	require.Equal(t, expiresAt, got.ExpiresAt.UTC())
+	require.Nil(t, got.ConsumedAt)
+}
+
 func TestAuditEventsAppendOnly(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
