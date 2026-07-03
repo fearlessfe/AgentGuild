@@ -22,6 +22,7 @@ type Tx interface {
 type AgentRepository interface {
 	Insert(context.Context, *domain.Agent) error
 	GetByID(context.Context, string, string) (*domain.Agent, error)
+	List(context.Context, AgentListQuery) ([]domain.Agent, error)
 	Update(context.Context, *domain.Agent) error
 }
 
@@ -34,6 +35,8 @@ type VersionRepository interface {
 type CredentialRepository interface {
 	Insert(context.Context, *domain.ActivationCredential) error
 	GetPending(context.Context, string, string) (*domain.ActivationCredential, error)
+	GetPendingByPlaintext(context.Context, string) (*domain.ActivationCredential, error)
+	GetLatestByAgent(context.Context, string, string) (*domain.ActivationCredential, error)
 	GetByID(context.Context, string, string) (*domain.ActivationCredential, error)
 	Save(context.Context, *domain.ActivationCredential) error
 }

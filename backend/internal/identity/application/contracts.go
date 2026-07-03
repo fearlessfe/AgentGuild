@@ -118,7 +118,3 @@ type AgentListQuery struct {
 	OwnerID  string
 	Limit    int
 }
-
-type plaintextCredentialRepository interface {
-	GetPendingByPlaintext(context.Context, string) (*domain.ActivationCredential, error)
-}

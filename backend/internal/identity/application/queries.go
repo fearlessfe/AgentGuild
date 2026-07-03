@@ -20,10 +20,6 @@ type GetActivationStatus struct {
 	AgentID string
 }
 
-type agentLister interface {
-	List(context.Context, AgentListQuery) ([]domain.Agent, error)
-}
-
 func (s *IdentityService) ListAgents(ctx context.Context, principal Principal, query ListAgents) (Envelope[AgentPage], error) {
 	var result Envelope[AgentPage]
 	if principal.TenantID == "" || (principal.OwnerID == "" && principal.AgentID == "") {
@@ -34,15 +30,11 @@ func (s *IdentityService) ListAgents(ctx context.Context, principal Principal, q
 		if err != nil {
 			return err
 		}
-		lister, ok := tx.Agents().(agentLister)
-		if !ok {
-			return invalid("agent_repository")
-		}
 		ownerID := query.OwnerID
 		if !principal.IsAdmin {
 			ownerID = principal.OwnerID
 		}
-		agents, err := lister.List(ctx, AgentListQuery{TenantID: principal.TenantID, OwnerID: ownerID, Limit: query.Limit})
+		agents, err := tx.Agents().List(ctx, AgentListQuery{TenantID: principal.TenantID, OwnerID: ownerID, Limit: query.Limit})
 		if err != nil {
 			return err
 		}
@@ -105,8 +97,8 @@ func (s *IdentityService) GetActivationStatus(ctx context.Context, principal Pri
 		status := "activated"
 		var expiresAt *time.Time
 		var consumedAt *time.Time
-		if credential, err := tx.Credentials().GetPending(ctx, agent.TenantID, agent.ID); err == nil {
-			status = credential.Status
+		if credential, err := tx.Credentials().GetLatestByAgent(ctx, agent.TenantID, agent.ID); err == nil {
+			status = activationStatus(credential, now)
 			expiresAt = credential.ExpiresAt
 			consumedAt = credential.ConsumedAt
 		} else if domain.CodeOf(err) != "not_found" {
@@ -125,6 +117,16 @@ func (s *IdentityService) GetActivationStatus(ctx context.Context, principal Pri
 		return nil
 	})
 	return result, err
+}
+
+func activationStatus(credential *domain.ActivationCredential, now time.Time) string {
+	if credential.Status == domain.ActivationCredentialPending && credential.ExpiresAt != nil && !now.Before(*credential.ExpiresAt) {
+		return domain.ActivationCredentialExpired
+	}
+	if credential.Status == domain.ActivationCredentialConsumed {
+		return "activated"
+	}
+	return credential.Status
 }
 
 func agentView(agent *domain.Agent, version *domain.AgentVersion) AgentView {

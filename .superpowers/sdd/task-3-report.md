@@ -92,3 +92,79 @@ ok agentguild.dev/agentguild/backend/internal/identity/application 0.911s
 - Concern: `ListAgents` similarly uses an optional application-local list interface so the existing Task 2 `AgentRepository` contract remains source-compatible. PostgreSQL list support should be wired when REST/admin list integration is implemented.
 - No generic `set_status` surface was added; status changes are only exposed through intent-specific service methods and domain methods.
 - Existing controller coordination file `openspec/changes/agent-onboarding-and-identity/.comet/subagent-progress.md` was already modified before this task and was not touched or staged by me.
+
+## Review round 1 fixes
+
+- Promoted `AgentRepository.List`, `CredentialRepository.GetPendingByPlaintext`, and `CredentialRepository.GetLatestByAgent` into formal application ports.
+- Removed the application-local optional `agentLister` and `plaintextCredentialRepository` type assertion fallbacks.
+- Implemented PostgreSQL `AgentRepository.List`, plaintext activation credential lookup, and latest credential lookup.
+- Changed nil `TokenIssuer` behavior from successful empty-token response to `invalid_argument` on `token_issuer`.
+- Changed `GetActivationStatus` to read the latest credential and derive `pending`, `activated`, or `expired` from credential status, `expires_at`, and `consumed_at`.
+- Added behavior coverage for RegisterAgent, ActivateAgent, ListAgents, GetActivationStatus, RevokeAgent, AgentHeartbeat, and nil TokenIssuer.
+- Added PostgreSQL integration-ish coverage for formal list, postgres-backed ActivateAgent, postgres-backed ListAgents, and postgres-backed activation status paths.
+
+## Review round 1 RED/GREEN evidence
+
+RED commands:
+
+```bash
+cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/application -count=1
+cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/postgres -count=1
+```
+
+RED result summary:
+
+```text
+FAIL TestIssueAccessTokenRequiresTokenIssuer: expected invalid_argument, got nil
+FAIL TestGetActivationStatusReportsConsumedCredentialAsActivated: ActivatedAt was nil
+FAIL TestGetActivationStatusReportsExpiredPendingCredentialAsExpired: expected expired, got pending
+postgres compile failure: repo.List undefined (type application.AgentRepository has no field or method List)
+```
+
+GREEN commands:
+
+```bash
+cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/application -count=1
+cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/postgres -run '^$' -count=1
+cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/... -run '^$' -count=1
+cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./... -run '^$' -count=1
+git diff --check
+```
+
+GREEN result summary:
+
+```text
+ok agentguild.dev/agentguild/backend/internal/identity/application
+ok agentguild.dev/agentguild/backend/internal/identity/postgres [no tests to run]
+ok agentguild.dev/agentguild/backend/internal/identity/... [no tests to run]
+ok agentguild.dev/agentguild/backend/... [no tests to run]
+git diff --check: PASS
+```
+
+## Review round 1 verification results
+
+- `cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/application -count=1`
+  - PASS
+- `cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/postgres -count=1`
+  - BLOCKED in this sandbox: postgres tests call Docker/PostgreSQL via `internal/testdb`; the tool reported command/path/permission failure. Escalation was attempted and rejected because the approval service returned 503.
+- `cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/... -count=1`
+  - BLOCKED for the same Docker/PostgreSQL sandbox reason.
+- `cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./internal/identity/... -run '^$' -count=1`
+  - PASS compile-only verification for application/domain/postgres.
+- `cd backend && GOCACHE=/private/tmp/agentguild-go-cache go test ./... -run '^$' -count=1`
+  - PASS backend compile-only verification.
+- `gofmt -w` on changed Go files
+  - PASS
+- `git diff --check`
+  - PASS
+
+## Review round 1 files changed
+
+- `backend/internal/identity/application/ports.go`
+- `backend/internal/identity/application/contracts.go`
+- `backend/internal/identity/application/commands.go`
+- `backend/internal/identity/application/queries.go`
+- `backend/internal/identity/application/service_test.go`
+- `backend/internal/identity/postgres/agent_repository.go`
+- `backend/internal/identity/postgres/repository_test.go`
+- `.superpowers/sdd/task-3-report.md`

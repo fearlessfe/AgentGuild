@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"time"
@@ -68,6 +69,38 @@ func (r *agentRepository) GetByID(ctx context.Context, tenantID, agentID string)
 	agent.BudgetCurrency = budgetCurrency.String
 	agent.LastSeenAt = lastSeenAt
 	return &agent, nil
+}
+
+func (r *agentRepository) List(ctx context.Context, query application.AgentListQuery) ([]domain.Agent, error) {
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.q.Query(ctx, `
+		SELECT id, tenant_id, owner_id, owner_email, team, name, description, status,
+		       current_version_id, scopes, repo_scope, budget_cents, budget_currency,
+		       last_seen_at, created_at, updated_at
+		FROM agents
+		WHERE tenant_id=$1
+		  AND ($2='' OR owner_id=$2)
+		ORDER BY created_at DESC, id ASC
+		LIMIT $3`,
+		query.TenantID, query.OwnerID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []domain.Agent
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
 }
 
 func (r *agentRepository) Update(ctx context.Context, agent *domain.Agent) error {
@@ -213,6 +246,55 @@ func (r *credentialRepository) GetPending(ctx context.Context, tenantID, agentID
 	return r.getByStatus(ctx, tenantID, agentID, domain.ActivationCredentialPending)
 }
 
+func (r *credentialRepository) GetPendingByPlaintext(ctx context.Context, token string) (*domain.ActivationCredential, error) {
+	sum := sha256.Sum256([]byte(token))
+	var cred domain.ActivationCredential
+	var expiresAt, consumedAt *time.Time
+	err := r.q.QueryRow(ctx, `
+		SELECT id, tenant_id, agent_id, hash, status, expires_at, consumed_at, created_at
+		FROM activation_credentials
+		WHERE hash=$1 AND status=$2`,
+		sum[:], domain.ActivationCredentialPending,
+	).Scan(
+		&cred.ID, &cred.TenantID, &cred.AgentID, &cred.Hash, &cred.Status,
+		&expiresAt, &consumedAt, &cred.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	cred.ExpiresAt = expiresAt
+	cred.ConsumedAt = consumedAt
+	return &cred, nil
+}
+
+func (r *credentialRepository) GetLatestByAgent(ctx context.Context, tenantID, agentID string) (*domain.ActivationCredential, error) {
+	var cred domain.ActivationCredential
+	var expiresAt, consumedAt *time.Time
+	err := r.q.QueryRow(ctx, `
+		SELECT id, tenant_id, agent_id, hash, status, expires_at, consumed_at, created_at
+		FROM activation_credentials
+		WHERE tenant_id=$1 AND agent_id=$2
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`,
+		tenantID, agentID,
+	).Scan(
+		&cred.ID, &cred.TenantID, &cred.AgentID, &cred.Hash, &cred.Status,
+		&expiresAt, &consumedAt, &cred.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	cred.ExpiresAt = expiresAt
+	cred.ConsumedAt = consumedAt
+	return &cred, nil
+}
+
 func (r *credentialRepository) GetByID(ctx context.Context, tenantID, credID string) (*domain.ActivationCredential, error) {
 	var cred domain.ActivationCredential
 	var expiresAt, consumedAt *time.Time
@@ -302,6 +384,30 @@ func (r *credentialRepository) Save(ctx context.Context, cred *domain.Activation
 var _ application.AgentRepository = (*agentRepository)(nil)
 var _ application.VersionRepository = (*versionRepository)(nil)
 var _ application.CredentialRepository = (*credentialRepository)(nil)
+
+type agentScanner interface {
+	Scan(...any) error
+}
+
+func scanAgent(row agentScanner) (*domain.Agent, error) {
+	var agent domain.Agent
+	var team, description, currentVersionID, budgetCurrency sql.NullString
+	var lastSeenAt *time.Time
+	if err := row.Scan(
+		&agent.ID, &agent.TenantID, &agent.OwnerID, &agent.OwnerEmail, &team,
+		&agent.Name, &description, &agent.Status, &currentVersionID,
+		&agent.Scopes, &agent.RepoScope, &agent.BudgetCents, &budgetCurrency,
+		&lastSeenAt, &agent.CreatedAt, &agent.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	agent.Team = team.String
+	agent.Description = description.String
+	agent.CurrentVersionID = currentVersionID.String
+	agent.BudgetCurrency = budgetCurrency.String
+	agent.LastSeenAt = lastSeenAt
+	return &agent, nil
+}
 
 func stringSlice(values []string) []string {
 	if values == nil {

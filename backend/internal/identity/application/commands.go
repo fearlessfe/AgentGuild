@@ -123,11 +123,7 @@ func (s *IdentityService) ActivateAgent(ctx context.Context, command ActivateAge
 		if err != nil {
 			return err
 		}
-		lookup, ok := tx.Credentials().(plaintextCredentialRepository)
-		if !ok {
-			return invalid("credentials")
-		}
-		credential, err := lookup.GetPendingByPlaintext(ctx, command.Token)
+		credential, err := tx.Credentials().GetPendingByPlaintext(ctx, command.Token)
 		if err != nil {
 			return maskCredentialError(err)
 		}
@@ -278,14 +274,7 @@ func (s *IdentityService) withManagedAgent(ctx context.Context, principal Princi
 
 func (s *IdentityService) issue(ctx context.Context, agent *domain.Agent, version *domain.AgentVersion, now time.Time) (AccessTokenView, error) {
 	if s.tokenIssuer == nil {
-		return AccessTokenView{
-			TokenType:      "Bearer",
-			AgentID:        agent.ID,
-			AgentVersionID: version.ID,
-			Scopes:         append([]string(nil), agent.Scopes...),
-			RepoScope:      append([]string(nil), agent.RepoScope...),
-			ExpiresAt:      now.Add(15 * time.Minute),
-		}, nil
+		return AccessTokenView{}, invalid("token_issuer")
 	}
 	return s.tokenIssuer.IssueAccessToken(ctx, agent, version, now)
 }

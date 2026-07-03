@@ -141,6 +141,115 @@ func TestCredentialSavePersistsPendingCredentialUpdates(t *testing.T) {
 	require.Nil(t, got.ConsumedAt)
 }
 
+func TestAgentRepositoryListReturnsTenantAgentsForOwner(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	insertAgent(t, db, "tenant-1", "agent-1")
+	insertAgent(t, db, "tenant-1", "agent-2")
+	insertAgent(t, db, "tenant-2", "agent-3")
+
+	repo := postgres.NewAgentRepository(db)
+	agents, err := repo.List(ctx, application.AgentListQuery{TenantID: "tenant-1", OwnerID: "owner-1"})
+
+	require.NoError(t, err)
+	require.Len(t, agents, 2)
+	require.ElementsMatch(t, []string{"agent-1", "agent-2"}, []string{agents[0].ID, agents[1].ID})
+}
+
+func TestIdentityServiceActivatesAgentThroughPostgresStore(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	svc, err := application.NewIdentityService(postgres.NewStore(db), application.IdentityOptions{
+		NewID:       sequenceIDs("agent-1", "version-1"),
+		TokenIssuer: fixedIssuer{},
+	})
+	require.NoError(t, err)
+	registered, err := svc.RegisterAgent(ctx, application.Principal{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-1",
+		OwnerEmail: "owner@example.com",
+	}, application.RegisterAgent{
+		Name:      "Agent One",
+		Scopes:    []string{"tasks:read"},
+		RepoScope: []string{"acme/*"},
+	})
+	require.NoError(t, err)
+
+	activated, err := svc.ActivateAgent(ctx, application.ActivateAgent{
+		Token:             registered.Data.ActivationToken,
+		Runtime:           "runtime-1",
+		Model:             "model-1",
+		Capabilities:      []string{"shell"},
+		ConfigFingerprint: "fingerprint-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "signed-agent-1", activated.Data.Token)
+	got, err := postgres.NewAgentRepository(db).GetByID(ctx, "tenant-1", "agent-1")
+	require.NoError(t, err)
+	require.Equal(t, domain.AgentActive, got.Status)
+	require.Equal(t, "version-1", got.CurrentVersionID)
+}
+
+func TestIdentityServiceListAgentsThroughPostgresStore(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	svc, err := application.NewIdentityService(postgres.NewStore(db), application.IdentityOptions{
+		NewID:       sequenceIDs("agent-1", "agent-2"),
+		TokenIssuer: fixedIssuer{},
+	})
+	require.NoError(t, err)
+	_, err = svc.RegisterAgent(ctx, application.Principal{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-1",
+		OwnerEmail: "owner@example.com",
+	}, application.RegisterAgent{Name: "Agent One"})
+	require.NoError(t, err)
+	_, err = svc.RegisterAgent(ctx, application.Principal{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-1",
+		OwnerEmail: "owner@example.com",
+	}, application.RegisterAgent{Name: "Agent Two"})
+	require.NoError(t, err)
+
+	got, err := svc.ListAgents(ctx, application.Principal{TenantID: "tenant-1", OwnerID: "owner-1"}, application.ListAgents{})
+
+	require.NoError(t, err)
+	require.Len(t, got.Data.Items, 2)
+	require.ElementsMatch(t, []string{"agent-1", "agent-2"}, []string{got.Data.Items[0].ID, got.Data.Items[1].ID})
+}
+
+func TestIdentityServiceActivationStatusThroughPostgresStoreUsesConsumedCredential(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	svc, err := application.NewIdentityService(postgres.NewStore(db), application.IdentityOptions{
+		NewID:       sequenceIDs("agent-1", "version-1"),
+		TokenIssuer: fixedIssuer{},
+	})
+	require.NoError(t, err)
+	principal := application.Principal{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com"}
+	registered, err := svc.RegisterAgent(ctx, principal, application.RegisterAgent{Name: "Agent One"})
+	require.NoError(t, err)
+	_, err = svc.ActivateAgent(ctx, application.ActivateAgent{
+		Token:             registered.Data.ActivationToken,
+		Runtime:           "runtime-1",
+		Model:             "model-1",
+		Capabilities:      []string{"shell"},
+		ConfigFingerprint: "fingerprint-1",
+	})
+	require.NoError(t, err)
+
+	got, err := svc.GetActivationStatus(ctx, principal, application.GetActivationStatus{AgentID: "agent-1"})
+
+	require.NoError(t, err)
+	require.Equal(t, "activated", got.Data.ActivationStatus)
+	require.NotNil(t, got.Data.ActivatedAt)
+}
+
 func TestAuditEventsAppendOnly(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
@@ -432,4 +541,30 @@ func insertCredential(t *testing.T, db *pgxpool.Pool, tenantID, agentID string) 
 
 func ptrTime(value time.Time) *time.Time {
 	return &value
+}
+
+type fixedIssuer struct{}
+
+func (fixedIssuer) IssueAccessToken(_ context.Context, agent *domain.Agent, version *domain.AgentVersion, now time.Time) (application.AccessTokenView, error) {
+	return application.AccessTokenView{
+		Token:          "signed-" + agent.ID,
+		TokenType:      "Bearer",
+		ExpiresAt:      now.Add(15 * time.Minute),
+		AgentID:        agent.ID,
+		AgentVersionID: version.ID,
+		Scopes:         agent.Scopes,
+		RepoScope:      agent.RepoScope,
+	}, nil
+}
+
+func sequenceIDs(values ...string) func() string {
+	next := 0
+	return func() string {
+		if next >= len(values) {
+			return values[len(values)-1]
+		}
+		value := values[next]
+		next++
+		return value
+	}
 }

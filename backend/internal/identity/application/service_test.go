@@ -56,6 +56,145 @@ func TestSuspendedAgentCannotRefreshToken(t *testing.T) {
 	require.Empty(t, fixture.issuer.issued)
 }
 
+func TestRegisterAgentCreatesPendingAgentCredentialAndAudit(t *testing.T) {
+	fixture := newServiceFixture(t)
+
+	got, err := fixture.svc.RegisterAgent(context.Background(), application.Principal{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-1",
+		OwnerEmail: "owner@example.com",
+	}, application.RegisterAgent{
+		Name:           "Agent One",
+		Description:    "first agent",
+		Team:           "team-a",
+		Scopes:         []string{"tasks:read"},
+		RepoScope:      []string{"acme/*"},
+		BudgetCents:    500,
+		BudgetCurrency: "USD",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "generated-agent", got.Data.Agent.ID)
+	require.Equal(t, domain.AgentPendingActivation, got.Data.Agent.Status)
+	require.NotEmpty(t, got.Data.ActivationToken)
+	require.NotNil(t, got.Data.ActivationExpiresAt)
+	require.Len(t, fixture.store.credentials, 1)
+	require.Len(t, fixture.store.audits.eventsFor("generated-agent", "register"), 1)
+}
+
+func TestActivateAgentConsumesCredentialCreatesVersionAndIssuesSignedToken(t *testing.T) {
+	fixture := newServiceFixture(t)
+	registered, err := fixture.svc.RegisterAgent(context.Background(), application.Principal{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-1",
+		OwnerEmail: "owner@example.com",
+	}, application.RegisterAgent{Name: "Agent One"})
+	require.NoError(t, err)
+
+	got, err := fixture.svc.ActivateAgent(context.Background(), application.ActivateAgent{
+		Token:             registered.Data.ActivationToken,
+		Runtime:           "runtime-1",
+		Model:             "model-1",
+		Capabilities:      []string{"shell"},
+		ConfigFingerprint: "fingerprint-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "token-for-generated-agent", got.Data.Token)
+	require.Equal(t, domain.AgentActive, fixture.store.agents["generated-agent"].Status)
+	require.Equal(t, "generated-version", fixture.store.agents["generated-agent"].CurrentVersionID)
+	require.Equal(t, domain.ActivationCredentialConsumed, fixture.onlyCredential(t, "generated-agent").Status)
+	require.Len(t, fixture.store.audits.eventsFor("generated-agent", "activate"), 1)
+}
+
+func TestListAgentsReturnsOnlyOwnersAgentsForNonAdmin(t *testing.T) {
+	fixture := newServiceFixture(t)
+	owned := fixture.seedActiveAgent(t, "tenant-1", "agent-owned", "owner-1")
+	fixture.seedActiveAgent(t, "tenant-1", "agent-other", "owner-2")
+	fixture.seedActiveAgent(t, "tenant-2", "agent-foreign", "owner-1")
+
+	got, err := fixture.svc.ListAgents(context.Background(), fixture.owner(owned), application.ListAgents{})
+
+	require.NoError(t, err)
+	require.Len(t, got.Data.Items, 1)
+	require.Equal(t, owned.ID, got.Data.Items[0].ID)
+}
+
+func TestRevokeAgentTransitionsStatusAndWritesAudit(t *testing.T) {
+	fixture := newServiceFixture(t)
+	agent := fixture.seedActiveAgent(t, "tenant-1", "agent-1", "owner-1")
+
+	got, err := fixture.svc.RevokeAgent(context.Background(), fixture.owner(agent), application.RevokeAgent{AgentID: agent.ID, Reason: "retired"})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.AgentRevoked, got.Data.Status)
+	require.Equal(t, domain.AgentRevoked, fixture.store.agents[agent.ID].Status)
+	events := fixture.store.audits.eventsFor(agent.ID, "revoke")
+	require.Len(t, events, 1)
+	require.Equal(t, "retired", events[0].Reason)
+}
+
+func TestAgentHeartbeatUpdatesLastSeenForAgentSelf(t *testing.T) {
+	fixture := newServiceFixture(t)
+	agent := fixture.seedActiveAgent(t, "tenant-1", "agent-1", "owner-1")
+	heartbeatAt := fixture.store.now.Add(3 * time.Minute)
+	fixture.store.now = heartbeatAt
+
+	got, err := fixture.svc.AgentHeartbeat(context.Background(), fixture.agentPrincipal(agent), application.AgentHeartbeat{})
+
+	require.NoError(t, err)
+	require.NotNil(t, got.Data.LastSeenAt)
+	require.Equal(t, heartbeatAt, *got.Data.LastSeenAt)
+	require.NotNil(t, fixture.store.agents[agent.ID].LastSeenAt)
+	require.Equal(t, heartbeatAt, *fixture.store.agents[agent.ID].LastSeenAt)
+}
+
+func TestIssueAccessTokenRequiresTokenIssuer(t *testing.T) {
+	fixture := newServiceFixture(t)
+	agent := fixture.seedActiveAgent(t, "tenant-1", "agent-1", "owner-1")
+	svc, err := application.NewIdentityService(fixture.store, application.IdentityOptions{NewID: sequenceIDs("unused")})
+	require.NoError(t, err)
+
+	_, err = svc.IssueAccessToken(context.Background(), fixture.agentPrincipal(agent), application.IssueAccessToken{})
+
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+	require.Equal(t, "token_issuer", domain.FieldOf(err))
+}
+
+func TestGetActivationStatusReportsConsumedCredentialAsActivated(t *testing.T) {
+	fixture := newServiceFixture(t)
+	agent := fixture.seedPendingAgent(t, "tenant-1", "agent-1", "owner-1", time.Hour)
+	credential := fixture.onlyCredential(t, agent.ID)
+	activatedAt := fixture.store.now.Add(5 * time.Minute)
+	credential.Status = domain.ActivationCredentialConsumed
+	credential.ConsumedAt = &activatedAt
+	fixture.store.credentials[credential.ID] = credential
+
+	got, err := fixture.svc.GetActivationStatus(context.Background(), fixture.owner(agent), application.GetActivationStatus{AgentID: agent.ID})
+
+	require.NoError(t, err)
+	require.Equal(t, "activated", got.Data.ActivationStatus)
+	require.NotNil(t, got.Data.ActivatedAt)
+	require.Equal(t, activatedAt, *got.Data.ActivatedAt)
+}
+
+func TestGetActivationStatusReportsExpiredPendingCredentialAsExpired(t *testing.T) {
+	fixture := newServiceFixture(t)
+	agent := fixture.seedPendingAgent(t, "tenant-1", "agent-1", "owner-1", time.Hour)
+	credential := fixture.onlyCredential(t, agent.ID)
+	expiredAt := fixture.store.now.Add(-time.Minute)
+	credential.ExpiresAt = &expiredAt
+	fixture.store.credentials[credential.ID] = credential
+
+	got, err := fixture.svc.GetActivationStatus(context.Background(), fixture.owner(agent), application.GetActivationStatus{AgentID: agent.ID})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.ActivationCredentialExpired, got.Data.ActivationStatus)
+	require.NotNil(t, got.Data.ActivationExpiresAt)
+	require.Equal(t, expiredAt, *got.Data.ActivationExpiresAt)
+	require.Nil(t, got.Data.ActivatedAt)
+}
+
 func TestTenantBoundaryHidesForeignAgent(t *testing.T) {
 	fixture := newServiceFixture(t)
 	agent := fixture.seedActiveAgent(t, "tenant-1", "agent-1", "owner-1")
@@ -136,6 +275,32 @@ func (f *serviceFixture) seedActiveAgent(t *testing.T, tenantID, agentID, ownerI
 	f.store.agents[agent.ID] = cloneAgent(agent)
 	f.store.versions[version.ID] = cloneVersion(version)
 	return cloneAgent(agent)
+}
+
+func (f *serviceFixture) seedPendingAgent(t *testing.T, tenantID, agentID, ownerID string, ttl time.Duration) *domain.Agent {
+	t.Helper()
+	description := "seeded"
+	agent, err := domain.NewAgent(agentID, tenantID, ownerID, ownerID+"@example.com", "team-a", []string{"tasks:read"}, &description)
+	require.NoError(t, err)
+	agent.Name = agentID
+	agent.RepoScope = []string{"acme/*"}
+	credential, _, err := domain.NewActivationCredential(agent.ID, agent.TenantID, ttl)
+	require.NoError(t, err)
+	agent.Events = nil
+	f.store.agents[agent.ID] = cloneAgent(agent)
+	f.store.credentials[credential.ID] = cloneCredential(credential)
+	return cloneAgent(agent)
+}
+
+func (f *serviceFixture) onlyCredential(t *testing.T, agentID string) *domain.ActivationCredential {
+	t.Helper()
+	for _, credential := range f.store.credentials {
+		if credential.AgentID == agentID {
+			return cloneCredential(credential)
+		}
+	}
+	require.FailNow(t, "credential not found")
+	return nil
 }
 
 func (f *serviceFixture) owner(agent *domain.Agent) application.Principal {
@@ -272,6 +437,8 @@ func (r memoryVersionRepository) ListByAgent(_ context.Context, tenantID, agentI
 
 type memoryCredentialRepository struct{ store *memoryStore }
 
+var _ application.CredentialRepository = memoryCredentialRepository{}
+
 func (r memoryCredentialRepository) Insert(_ context.Context, credential *domain.ActivationCredential) error {
 	r.store.credentials[credential.ID] = cloneCredential(credential)
 	return nil
@@ -284,6 +451,22 @@ func (r memoryCredentialRepository) GetPending(_ context.Context, tenantID, agen
 		}
 	}
 	return nil, domain.ErrNotFound
+}
+
+func (r memoryCredentialRepository) GetLatestByAgent(_ context.Context, tenantID, agentID string) (*domain.ActivationCredential, error) {
+	var latest *domain.ActivationCredential
+	for _, credential := range r.store.credentials {
+		if credential.TenantID != tenantID || credential.AgentID != agentID {
+			continue
+		}
+		if latest == nil || credential.CreatedAt.After(latest.CreatedAt) {
+			latest = credential
+		}
+	}
+	if latest == nil {
+		return nil, domain.ErrNotFound
+	}
+	return cloneCredential(latest), nil
 }
 
 func (r memoryCredentialRepository) GetByID(_ context.Context, tenantID, credID string) (*domain.ActivationCredential, error) {
