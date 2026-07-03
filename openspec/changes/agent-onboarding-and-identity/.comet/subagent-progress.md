@@ -7,24 +7,24 @@ TDD mode: tdd
 
 ## Current Task
 
-Plan task: Task 2: 建立 PostgreSQL Schema、tenant 上下文和 Repository
-OpenSpec task: 1.2 实现 Agent、AgentVersion、ActivationCredential 和审计数据模型
+Plan task: Task 3: 实现 identity Application Service 与授权策略
+OpenSpec task: 1.3 为状态迁移、单次激活和 tenant 隔离编写并发测试
 Stage: done
 Review/fix round: 1
 
 ## Implementation
 
-Implementer: 019f2723-97c1-7d83-91ae-633cd2e09cb9 (Maxwell); previous 019f2715-1af3-79d1-bb33-26d0a47a6752 (Plato) errored: stream disconnected before completion
-Commit: 9f1897a feat: persist agent identity atomically
-Changed files: backend/migrations/000002_agent_identity.up.sql; backend/migrations/000002_agent_identity.down.sql; backend/internal/identity/application/ports.go; backend/internal/identity/postgres/store.go; backend/internal/identity/postgres/agent_repository.go; backend/internal/identity/postgres/audit_repository.go; backend/internal/identity/postgres/repository_test.go; backend/internal/testdb/postgres.go; .superpowers/sdd/task-2-report.md
-RED evidence: recorded in .superpowers/sdd/task-2-report.md (focused credential identity and tenant-inclusive PK/unique constraint tests)
-GREEN evidence: recorded in .superpowers/sdd/task-2-report.md (focused postgres tests, full identity/postgres package, gofmt, git diff --check)
+Implementer: 019f2751-17bb-7b53-a349-29ecd5953e03 (Boyle)
+Commit: b98f2eb feat: add shared identity application service
+Changed files: backend/internal/identity/application/contracts.go; backend/internal/identity/application/commands.go; backend/internal/identity/application/queries.go; backend/internal/identity/application/policy.go; backend/internal/identity/application/service_test.go; .superpowers/sdd/task-3-report.md
+RED evidence: recorded in .superpowers/sdd/task-3-report.md (application package failed before service/DTO/policy existed)
+GREEN evidence: recorded in .superpowers/sdd/task-3-report.md (application, identity, full backend tests, gofmt, diff check passed)
 
 ## Review
 
-Batch/thorough review: approved after round 1 fix (Goodall initial review; Kuhn re-review)
+Batch/thorough review: approved after round 1 fix (Epicurus initial review; Harvey re-review)
 Open feedback: none
-Fixer: 019f273a-59c8-7df1-a4c3-d422b961d4e7 (Leibniz)
-Fix commit: 51bc6ca fix: harden identity credential persistence
-Fix evidence: .superpowers/sdd/task-2-report.md review round 1 section; focused RED/GREEN and full identity/postgres test passed
-Completed: Task 2 checked in plan and OpenSpec tasks; SDD ledger updated
+Fixer: 019f2763-77d1-7dc0-8c3e-36d24583b051 (Poincare)
+Fix commit: 1255307 fix: wire identity application persistence paths
+Fix evidence: worker report plus controller rerun: go test ./internal/identity/application -count=1, go test ./internal/identity/postgres -count=1, go test ./internal/identity/... -count=1, git diff --check all PASS
+Completed: Task 3 checked in plan and OpenSpec tasks; SDD ledger updated

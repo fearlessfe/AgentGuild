@@ -331,7 +331,7 @@ git commit -m "feat: persist agent identity atomically"
 
 ## Task 3: 实现 identity Application Service 与授权策略
 
-- [ ] **Completion gate: Task 3 identity application service**
+- [x] **Completion gate: Task 3 identity application service**
 
 **Files:**
 - Create: `backend/internal/identity/application/contracts.go`
