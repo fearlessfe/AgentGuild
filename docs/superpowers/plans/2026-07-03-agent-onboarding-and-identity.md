@@ -693,7 +693,7 @@ git commit -m "feat: add agent onboarding metadata and skill guide"
 
 ## Task 7: 实现 React Agents 管理页面
 
-- [ ] **Completion gate: Task 7 React agents UI**
+- [x] **Completion gate: Task 7 React agents UI**
 
 **Files:**
 - Create: `frontend/src/features/agents/agents.api.ts`

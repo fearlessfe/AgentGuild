@@ -14,5 +14,5 @@
 ## 3. 接入体验
 
 - [x] 3.1 提供 `/skill.md`、well-known 元数据和激活 API
-- [ ] 3.2 实现 React Agents 列表、注册、Token 单次展示和状态管理
+- [x] 3.2 实现 React Agents 列表、注册、Token 单次展示和状态管理
 - [ ] 3.3 完成凭证泄露、重放、越权和审计验收测试

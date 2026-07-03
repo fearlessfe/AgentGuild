@@ -7,28 +7,28 @@ TDD mode: tdd
 
 ## Current Task
 
-Plan task: Task 6: 提供 Agent 接入体验（skill.md、well-known 和激活 API）
-OpenSpec task: 3.1 提供 `/skill.md`、well-known 元数据和激活 API
+Plan task: Task 7: 实现 React Agents 管理页面
+OpenSpec task: 3.2 实现 React Agents 列表、注册、Token 单次展示和状态管理
 Stage: done
 Review/fix round: 1
 
 ## Implementation
 
-Implementer: 019f28a5-eaf8-71c3-a7a8-e21cde340734 (Volta)
-Base commit: 096a08a2df90c0061109f90d37e6ddbc3fbf1939
-Brief: .superpowers/sdd/task-6-brief.md
-Report: .superpowers/sdd/task-6-report.md
-Commit: a576a51b1b26ba1c0b933540794c3e49445cd481 feat: add agent onboarding metadata and skill guide
-Changed files: skill.md; backend/internal/transport/rest/well_known.go; backend/internal/transport/rest/well_known_test.go; backend/internal/transport/rest/openapi.yaml; backend/internal/transport/rest/router.go; .superpowers/sdd/task-6-report.md
-RED evidence: recorded in .superpowers/sdd/task-6-report.md (well-known returned 404; OpenAPI missing path; skill guide missing security phrase)
-GREEN evidence: recorded in .superpowers/sdd/task-6-report.md (target REST tests, full REST package tests, diff check passed)
+Implementer: 019f28cd-681e-7810-aef5-7ee188e6c277 (Halley)
+Base commit: c0612b1b4f7562f93ad0419d1bfc575ed60f3e50
+Brief: .superpowers/sdd/task-7-brief.md
+Report: .superpowers/sdd/task-7-report.md
+Commit: 6dc6afde53c12f1c9e6db3925e4f9b32e3616936 feat: add React agents management page
+Changed files: frontend/src/features/agents/*; frontend/e2e/agent-onboarding.spec.ts; frontend/src/api/client.ts; frontend/src/api/fixtures.ts; frontend/src/app/AppShell.tsx; frontend/src/styles/tokens.css; .superpowers/sdd/task-7-report.md
+RED evidence: recorded in .superpowers/sdd/task-7-report.md (agents component imports failed before implementation)
+GREEN evidence: recorded in .superpowers/sdd/task-7-report.md (agents component tests, full frontend tests, build, diff check passed; e2e blocked by sandbox port EPERM)
 
 ## Review
 
-Batch/thorough review: approved after round 1 fix (Bohr initial review; Euler re-review)
+Batch/thorough review: 019f28db-9e4a-78d3-a709-ed387fd5e05a (Ptolemy) requested changes
 Open feedback: none
-Fixer: 019f28b6-72da-7731-aaa3-257492f39073 (Kepler)
-Fix commit: 2a730093be28f6b06f2c3f0c49d7295ed2edc658 test: tighten agent onboarding OpenAPI documentation checks
-Fix evidence: .superpowers/sdd/task-6-report.md fix record; target REST tests, full REST package tests, and diff check passed
-Round 1 re-review: 019f28bf-57f2-7ca1-897d-499bdda10382 (Euler) approved; original Important finding closed
-Completed: Task 6 checked in plan and OpenSpec tasks; SDD ledger updated
+Fixer: 019f28e0-d8dc-7f80-955c-7c6d2d7c681e (Ampere)
+Fix commit: 850af479720e11c49bbf93552f12c103d8fba1b3 fix: align React agents UI with identity REST contract
+Fix evidence: .superpowers/sdd/task-7-report.md review round 1; agents component tests, full frontend tests, build, diff check passed
+Round 1 re-review: 019f28e8-7cd8-7b50-ac65-c37d93a4a6b6 (Hooke) approved; original Critical/Important findings closed
+Completed: Task 7 checked in plan and OpenSpec tasks; SDD ledger updated
