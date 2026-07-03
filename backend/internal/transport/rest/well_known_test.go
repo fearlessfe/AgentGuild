@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
@@ -37,12 +38,21 @@ func TestWellKnownExposesActivationMetadata(t *testing.T) {
 
 func TestWellKnownDocumentedInOpenAPI(t *testing.T) {
 	spec := mustReadFile(t, "openapi.yaml")
+	wellKnownSection := mustPathSection(t, spec, "/.well-known/agentguild")
+	activateSection := mustPathSection(t, spec, "/v1/agents/me:activate")
 
-	require.Contains(t, spec, "/.well-known/agentguild:")
-	require.Contains(t, spec, "operationId: getAgentWellKnown")
-	require.Contains(t, spec, "summary: 获取 Agent 接入元数据")
-	require.Contains(t, spec, "example: https://api.agentguild.dev/v1/agents/me:activate")
-	require.Contains(t, spec, "example: https://api.agentguild.dev/v1/agents/me:refresh")
+	require.Contains(t, wellKnownSection, "operationId: getAgentWellKnown")
+	require.Contains(t, wellKnownSection, "summary: 获取 Agent 接入元数据")
+	require.Contains(t, wellKnownSection, "$ref: '#/components/schemas/AgentWellKnown'")
+
+	require.Contains(t, activateSection, "operationId: activateAgent")
+	require.Contains(t, activateSection, "$ref: '#/components/schemas/ActivateAgentRequest'")
+	require.Contains(t, activateSection, "examples:")
+	require.Contains(t, activateSection, "summary: Codex Agent 激活示例")
+	require.Contains(t, activateSection, "activation_token: agt_act_123")
+	require.Contains(t, activateSection, "token: access-token-1")
+	require.Contains(t, activateSection, "token_type: Bearer")
+	require.Contains(t, activateSection, "expires_at: '2026-07-03T10:15:00Z'")
 }
 
 func TestSkillGuideIncludesActivationFlow(t *testing.T) {
@@ -68,4 +78,19 @@ func mustReadFile(t *testing.T, path string) string {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(data)
+}
+
+func mustPathSection(t *testing.T, spec string, path string) string {
+	t.Helper()
+
+	anchor := "\n  " + path + ":\n"
+	start := strings.Index(spec, anchor)
+	require.NotEqualf(t, -1, start, "expected path %s in OpenAPI spec", path)
+
+	section := spec[start+1:]
+	if next := strings.Index(section, "\n  /"); next >= 0 {
+		section = section[:next]
+	}
+
+	return section
 }

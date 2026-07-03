@@ -105,3 +105,53 @@ git diff --check
 ## Concerns
 
 无额外功能性顾虑。实现使用固定公开 URL `https://api.agentguild.dev/...`，与任务 brief 给出的 contract 保持一致。
+
+## Task 6 Fix Record
+
+### Reviewer issue
+
+- `backend/internal/transport/rest/well_known_test.go` 原有 OpenAPI 断言只在全文件范围检查字符串包含，不能证明 `/v1/agents/me:activate` path 节点自身仍保留了激活请求与 access-token 响应示例。
+
+### RED
+
+先将 `TestWellKnownDocumentedInOpenAPI` 收紧为 path-section 级别断言：
+
+- 截取 `/.well-known/agentguild` section，保留 well-known path 自身存在性和 schema 引用检查
+- 截取 `/v1/agents/me:activate` section，要求该 section 内同时包含：
+  - `ActivateAgentRequest` request schema
+  - request example
+  - access-token response example
+
+为证明新测试能抓住 reviewer 提到的缺口，临时从工作树中的 `backend/internal/transport/rest/openapi.yaml` 删除 activate path 下的 request/response examples 后运行：
+
+```bash
+cd backend && go test ./internal/transport/rest -run TestWellKnownDocumentedInOpenAPI -count=1
+```
+
+失败摘要：
+
+- `TestWellKnownDocumentedInOpenAPI` 在 `/v1/agents/me:activate` section 内未找到 `examples:`
+- 失败输出只展示 activate path section，证明断言已限定在目标 path 节点，而非全文件误命中
+
+临时改动随后已还原，未纳入提交。
+
+### GREEN
+
+还原 `openapi.yaml` 后运行：
+
+```bash
+cd backend && go test ./internal/transport/rest -run 'TestWellKnown|TestSkill' -count=1
+cd backend && go test ./internal/transport/rest -count=1
+git diff --check
+```
+
+结果摘要：
+
+- 目标测试通过
+- `rest` 包全量测试通过
+- `git diff --check` 无输出
+
+### Fix summary
+
+- 将 OpenAPI 文档测试改为按 path section 定向断言，避免 `AgentWellKnown` schema 或其他 section 中的同名字符串掩盖 `/v1/agents/me:activate` 自身缺失示例的问题
+- 未修改生产代码，也未修改 `openapi.yaml`，因为现有文档字段完整，问题仅在测试覆盖力度不足
