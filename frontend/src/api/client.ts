@@ -69,6 +69,26 @@ export type TaskView = {
   state_version: number;
 };
 
+type ApiRequestInit = Omit<RequestInit, "body"> & {
+  body?: unknown;
+};
+
+type DemoAgent = {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  team?: string;
+  owner_email: string;
+  scopes: string[];
+  repo_scope?: string[];
+  budget_cents?: number;
+  budget_currency?: string;
+  last_seen_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
 const base = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 function apiToken(): string | undefined {
@@ -78,7 +98,7 @@ function apiToken(): string | undefined {
   if (typeof window === "undefined") {
     return undefined;
   }
-  const globalToken = (window as any).AG_TOKEN as string | undefined;
+  const globalToken = (window as Window & { AG_TOKEN?: string }).AG_TOKEN;
   if (globalToken) {
     return globalToken;
   }
@@ -86,15 +106,40 @@ function apiToken(): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined;
 }
 
-async function request<T>(path: string): Promise<Envelope<T>> {
-  if (import.meta.env.VITE_DEMO_MODE === "true") return demo(path) as Envelope<T>;
+export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<Envelope<T>> {
+  if (import.meta.env.VITE_DEMO_MODE === "true") {
+    return demo(path, init) as Envelope<T>;
+  }
+
   const headers: Record<string, string> = {};
+  if (init.headers instanceof Headers) {
+    init.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+  } else if (Array.isArray(init.headers)) {
+    init.headers.forEach(([key, value]) => {
+      headers[key] = value;
+    });
+  } else if (init.headers) {
+    Object.assign(headers, init.headers);
+  }
   const token = apiToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const response = await fetch(base + path, { headers });
-  if (!response.ok) throw new Error(`API request failed (${response.status})`);
+
+  let body: BodyInit | undefined;
+  if (init.body instanceof FormData) {
+    body = init.body;
+  } else if (init.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(init.body);
+  }
+
+  const response = await fetch(base + path, { ...init, headers, body });
+  if (!response.ok) {
+    throw new Error(`API request failed (${response.status})`);
+  }
   return response.json() as Promise<Envelope<T>>;
 }
 
@@ -112,11 +157,11 @@ export async function listTasks(filters: {
   if (filters.publisherAgentVersionId) params.set("publisher_agent_version_id", filters.publisherAgentVersionId);
   if (filters.cursor) params.set("cursor", filters.cursor);
   const query = params.toString();
-  return request<TaskPage>(`/v1/tasks${query ? `?${query}` : ""}`);
+  return apiRequest<TaskPage>(`/v1/tasks${query ? `?${query}` : ""}`);
 }
 
-export const getTask = (id: string) => request<TaskView>(`/v1/tasks/${encodeURIComponent(id)}`);
-export const getExecution = (id: string) => request<ExecutionView>(`/v1/executions/${encodeURIComponent(id)}`);
+export const getTask = (id: string) => apiRequest<TaskView>(`/v1/tasks/${encodeURIComponent(id)}`);
+export const getExecution = (id: string) => apiRequest<ExecutionView>(`/v1/executions/${encodeURIComponent(id)}`);
 export const pollInterval = (seconds?: number) => (seconds && seconds > 0 ? seconds * 1000 : false);
 
 const demoTasks: TaskView[] = [
@@ -156,13 +201,118 @@ const demoTasks: TaskView[] = [
   claimed_by: status !== "open" ? "Atlas v12" : undefined,
 }));
 
-function demo(path: string): Envelope<unknown> {
-  const meta = { server_time: "2026-07-02T14:00:00Z", resource_version: 12, poll_after_seconds: 30 };
-  if (path.startsWith("/v1/tasks?")) return { data: { items: demoTasks }, meta };
-  if (path.startsWith("/v1/executions/")) {
-    return {
+const demoMeta = {
+  server_time: "2026-07-02T14:00:00Z",
+  resource_version: 12,
+  poll_after_seconds: 30,
+};
+
+let demoAgentCounter = 4;
+let demoAgents: DemoAgent[] = createDemoAgents();
+
+function createDemoAgents(): DemoAgent[] {
+  return [
+    {
+      id: "agent-active",
+      name: "Atlas v12",
+      description: "Primary merge queue worker",
+      status: "active",
+      team: "Platform",
+      owner_email: "atlas@example.com",
+      scopes: ["tasks:read", "tasks:write", "executions:read"],
+      repo_scope: ["billing-service", "event-gateway"],
+      budget_cents: 8000,
+      budget_currency: "USD",
+      last_seen_at: "2026-07-02T13:54:00Z",
+      created_at: "2026-07-01T09:00:00Z",
+      updated_at: "2026-07-02T13:54:00Z",
+    },
+    {
+      id: "agent-suspended",
+      name: "Suspended Worker",
+      description: "Budget guardrail exceeded",
+      status: "suspended",
+      team: "Ops",
+      owner_email: "ops@example.com",
+      scopes: ["tasks:read"],
+      repo_scope: ["infra"],
+      budget_cents: 3000,
+      budget_currency: "USD",
+      last_seen_at: "2026-07-01T23:40:00Z",
+      created_at: "2026-06-30T08:00:00Z",
+      updated_at: "2026-07-01T23:40:00Z",
+    },
+    {
+      id: "agent-revoked",
+      name: "Legacy Runner",
+      description: "Credential rotation pending",
+      status: "revoked",
+      team: "Security",
+      owner_email: "security@example.com",
+      scopes: ["tasks:read", "tasks:write"],
+      repo_scope: ["legacy-monolith"],
+      budget_cents: 0,
+      budget_currency: "USD",
+      created_at: "2026-06-25T08:00:00Z",
+      updated_at: "2026-07-01T20:10:00Z",
+    },
+    {
+      id: "agent-pending",
+      name: "Review Draft",
+      description: "Waiting for activation",
+      status: "pending_activation",
+      team: "Code Quality",
+      owner_email: "review@example.com",
+      scopes: ["tasks:read", "tasks:write"],
+      repo_scope: ["frontend", "api"],
+      budget_cents: 2000,
+      budget_currency: "USD",
+      created_at: "2026-07-02T10:00:00Z",
+      updated_at: "2026-07-02T10:00:00Z",
+    },
+  ];
+}
+
+function parseDemoBody(body: unknown): Record<string, unknown> {
+  if (typeof body !== "string") {
+    return {};
+  }
+  try {
+    return JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
+  const url = new URL(path, "http://demo.local");
+  const method = (init.method ?? "GET").toUpperCase();
+
+  if (url.pathname === "/v1/tasks" && method === "GET") {
+    const statuses = url.searchParams.getAll("status");
+    const type = url.searchParams.get("type");
+    const publisher = url.searchParams.get("publisher_agent_version_id");
+    let items = demoTasks;
+    if (statuses.length > 0) {
+      items = items.filter((task) => statuses.includes(task.status));
+    }
+    if (type) {
+      items = items.filter((task) => task.type === type);
+    }
+    if (publisher) {
+      items = items.filter((task) => task.publisher_agent_version_id.includes(publisher));
+    }
+    return clone({ data: { items }, meta: demoMeta });
+  }
+
+  if (url.pathname.startsWith("/v1/executions/") && method === "GET") {
+    return clone({
       data: {
-        id: path.split("/").pop(),
+        id: url.pathname.split("/").pop(),
         task_id: "AG-188",
         tenant_id: "billing-platform",
         agent_version_id: "Atlas v12",
@@ -175,9 +325,79 @@ function demo(path: string): Envelope<unknown> {
         cost: { observed_cost: "0.067", self_reported_cost: "0.070", coverage: "partial", provider: "langfuse" },
         audit_summary: "Atlas v12 heartbeat · running",
       },
-      meta,
-    };
+      meta: demoMeta,
+    });
   }
-  const id = decodeURIComponent(path.split("/").pop() ?? "AG-192");
-  return { data: demoTasks.find((task) => task.id === id) ?? demoTasks[0], meta };
+
+  if (url.pathname.startsWith("/v1/tasks/") && method === "GET") {
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "AG-192");
+    return clone({ data: demoTasks.find((task) => task.id === id) ?? demoTasks[0], meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/agents" && method === "GET") {
+    const status = url.searchParams.get("status");
+    const items = status ? demoAgents.filter((agent) => agent.status === status) : demoAgents;
+    return clone({ data: { items }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/agents" && method === "POST") {
+    const body = parseDemoBody(init.body);
+    demoAgentCounter += 1;
+    const now = "2026-07-02T14:00:00Z";
+    const agent = {
+      id: `agent-${demoAgentCounter}`,
+      name: String(body.name ?? `Agent ${demoAgentCounter}`),
+      description: typeof body.description === "string" && body.description.trim() ? body.description : undefined,
+      status: "pending_activation",
+      team: typeof body.team === "string" && body.team.trim() ? body.team : undefined,
+      owner_email: String(body.owner_email ?? "owner@example.com"),
+      scopes: Array.isArray(body.scopes) && body.scopes.length > 0 ? body.scopes : ["tasks:read"],
+      repo_scope: Array.isArray(body.repo_scope) ? body.repo_scope : [],
+      budget_cents: typeof body.budget_cents === "number" ? body.budget_cents : undefined,
+      budget_currency: typeof body.budget_currency === "string" ? body.budget_currency : undefined,
+      created_at: now,
+      updated_at: now,
+    };
+    demoAgents = [agent, ...demoAgents];
+    return clone({
+      data: {
+        agent,
+        token: `agtok_${agent.id}_once`,
+        expires_at: "2026-07-09T14:00:00Z",
+      },
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname.startsWith("/v1/agents/") && method === "GET") {
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+    const agent = demoAgents.find((item) => item.id === id);
+    if (!agent) {
+      throw new Error(`Demo agent not found: ${id}`);
+    }
+    return clone({ data: agent, meta: demoMeta });
+  }
+
+  const agentActionMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/(suspend|resume|revoke)$/);
+  if (agentActionMatch && method === "POST") {
+    const [, rawId, action] = agentActionMatch;
+    const id = decodeURIComponent(rawId);
+    let updatedAgent: (typeof demoAgents)[number] | undefined;
+    demoAgents = demoAgents.map((agent) => {
+      if (agent.id !== id) return agent;
+      updatedAgent = {
+        ...agent,
+        status:
+          action === "suspend" ? "suspended" : action === "resume" ? "active" : "revoked",
+        updated_at: "2026-07-02T14:00:00Z",
+      };
+      return updatedAgent;
+    });
+    if (!updatedAgent) {
+      throw new Error(`Demo agent not found: ${id}`);
+    }
+    return clone({ data: updatedAgent, meta: demoMeta });
+  }
+
+  throw new Error(`Unsupported demo route: ${method} ${url.pathname}`);
 }

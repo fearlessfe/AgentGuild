@@ -1,4 +1,5 @@
 import type { Envelope, ExecutionView, TaskPage, TaskView } from "./client";
+import type { AccessTokenView, AgentPage, AgentView } from "../features/agents/agents.types";
 
 export const defaultMeta = {
   server_time: "2026-07-02T02:00:00Z",
@@ -58,4 +59,36 @@ export function executionViewFixture(overrides?: Partial<ExecutionView>): Execut
 
 export function taskPageFixture(items: TaskView[]): TaskPage {
   return { items };
+}
+
+export function agentViewFixture(overrides?: Partial<AgentView>): AgentView {
+  return {
+    id: "agent-1",
+    name: "Atlas v12",
+    description: "Primary code review agent",
+    status: "active",
+    team: "Platform",
+    owner_email: "atlas@example.com",
+    scopes: ["tasks:read", "tasks:write"],
+    repo_scope: ["billing-service"],
+    budget_cents: 5000,
+    budget_currency: "USD",
+    last_seen_at: "2026-07-02T02:00:00Z",
+    created_at: "2026-07-02T01:00:00Z",
+    updated_at: "2026-07-02T02:00:00Z",
+    ...overrides,
+  };
+}
+
+export function agentPageFixture(items: AgentView[]): AgentPage {
+  return { items };
+}
+
+export function accessTokenFixture(overrides?: Partial<AccessTokenView>): AccessTokenView {
+  return {
+    agent: agentViewFixture(),
+    token: "agtok_once_only",
+    expires_at: "2026-07-09T02:00:00Z",
+    ...overrides,
+  };
 }
