@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -475,6 +476,13 @@ type IdentityAuditEvent struct {
 	Intent string `json:"intent"`
 }
 
+type ActivationCredentialRecord struct {
+	Status             string
+	Hash               []byte
+	HashBase64         string
+	HasPlaintextColumn bool
+}
+
 type IdentityClient struct {
 	t             *testing.T
 	handler       http.Handler
@@ -484,6 +492,11 @@ type IdentityClient struct {
 
 func (c *IdentityClient) LastBody() string {
 	return c.lastBody
+}
+
+func (c *IdentityClient) DecodeLastBody(dst any) {
+	c.t.Helper()
+	require.NoError(c.t, json.Unmarshal([]byte(c.lastBody), dst))
 }
 
 func (c *IdentityClient) RegisterAgent(cookie *http.Cookie, req RegisterAgentRequest) identityapp.RegisterAgentResponse {
@@ -503,6 +516,23 @@ func (c *IdentityClient) RegisterAgent(cookie *http.Cookie, req RegisterAgentReq
 	}
 	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
 	return envelope.Data
+}
+
+func (c *IdentityClient) ListAgents(cookie *http.Cookie) identityapp.AgentPage {
+	c.t.Helper()
+	res := c.doJSON(http.MethodGet, "/v1/agents", nil, "", cookie)
+	require.Equal(c.t, http.StatusOK, res.Code, "list agents failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AgentPage `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) GetAgentCode(cookie *http.Cookie, agentID string) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodGet, "/v1/agents/"+agentID, nil, "", cookie)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
 }
 
 func (c *IdentityClient) ActivateAgent(token string, req ActivateAgentRequest) identityapp.AccessTokenView {
@@ -590,6 +620,12 @@ func (c *IdentityClient) SuspendAgent(cookie *http.Cookie, agentID, reason strin
 	return envelope.Data
 }
 
+func (c *IdentityClient) SuspendAgentCode(cookie *http.Cookie, agentID, reason string) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/"+agentID+":suspend", map[string]any{"reason": reason}, "", cookie)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
+}
+
 func (c *IdentityClient) ResumeAgent(cookie *http.Cookie, agentID string) identityapp.AgentView {
 	c.t.Helper()
 	res := c.doJSON(http.MethodPost, "/v1/agents/"+agentID+":resume", map[string]any{}, "", cookie)
@@ -610,6 +646,12 @@ func (c *IdentityClient) RevokeAgent(cookie *http.Cookie, agentID, reason string
 	}
 	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
 	return envelope.Data
+}
+
+func (c *IdentityClient) RevokeAgentCode(cookie *http.Cookie, agentID, reason string) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/"+agentID+":revoke", map[string]any{"reason": reason}, "", cookie)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
 }
 
 func (c *IdentityClient) GetActivationStatus(cookie *http.Cookie, agentID string) identityapp.ActivationStatusView {
@@ -694,10 +736,14 @@ func ownerSession() *http.Cookie {
 }
 
 func otherOwnerSession() *http.Cookie {
+	return tenantOwnerSession("tenant-1", "owner-2")
+}
+
+func tenantOwnerSession(tenantID, ownerID string) *http.Cookie {
 	cookie, err := auth.NewSessionCookie(auth.Session{
-		TenantID:   "tenant-1",
-		OwnerID:    "owner-2",
-		OwnerEmail: "owner-2@example.com",
+		TenantID:   tenantID,
+		OwnerID:    ownerID,
+		OwnerEmail: ownerID + "@example.com",
 		IsAdmin:    false,
 		ExpiresAt:  time.Now().Add(time.Hour),
 	}, "acceptance-session-secret-0123456789abcdef", false)
@@ -726,6 +772,51 @@ func (env *Env) IdentityAuditEvents(agentID string) ([]IdentityAuditEvent, error
 		events = append(events, event)
 	}
 	return events, rows.Err()
+}
+
+func (env *Env) IdentityAuditEventsForTenant(tenantID, agentID string) ([]IdentityAuditEvent, error) {
+	rows, err := env.DB.Query(context.Background(), `
+		SELECT intent
+		FROM identity_events
+		WHERE tenant_id = $1 AND agent_id = $2
+		ORDER BY created_at ASC, id ASC`, tenantID, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []IdentityAuditEvent
+	for rows.Next() {
+		var event IdentityAuditEvent
+		if err := rows.Scan(&event.Intent); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+func (env *Env) ActivationCredentialRecord(tenantID, agentID string) ActivationCredentialRecord {
+	env.T.Helper()
+	var record ActivationCredentialRecord
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT hash, status
+		FROM activation_credentials
+		WHERE tenant_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1`, tenantID, agentID).Scan(&record.Hash, &record.Status)
+	require.NoError(env.T, err)
+	record.HashBase64 = base64.RawURLEncoding.EncodeToString(record.Hash)
+
+	err = env.DB.QueryRow(context.Background(), `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = 'activation_credentials'
+			  AND column_name IN ('token', 'plaintext', 'plaintext_token', 'activation_token')
+		)`).Scan(&record.HasPlaintextColumn)
+	require.NoError(env.T, err)
+	return record
 }
 
 type acceptanceFixedIssuer struct{ issuer *auth.TokenIssuer }

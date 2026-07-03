@@ -1,7 +1,8 @@
 package acceptance
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"testing"
 
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
@@ -76,8 +77,30 @@ func TestCredentialHashNotLeakedAndUnauthorizedRequestsAreRejected(t *testing.T)
 	status := env.Identity.GetActivationStatus(ownerSession(), registered.Agent.ID)
 	require.Equal(t, identitydomain.AgentPendingActivation, status.Status)
 	require.Equal(t, identitydomain.ActivationCredentialPending, status.ActivationStatus)
+	var decoded struct {
+		Data struct {
+			AgentID          string
+			Status           string
+			ActivationStatus string
+		} `json:"data"`
+	}
+	env.Identity.DecodeLastBody(&decoded)
+	require.Equal(t, registered.Agent.ID, decoded.Data.AgentID)
+	require.Equal(t, identitydomain.AgentPendingActivation, decoded.Data.Status)
+	require.Equal(t, identitydomain.ActivationCredentialPending, decoded.Data.ActivationStatus)
 	require.NotContains(t, env.Identity.LastBody(), registered.ActivationToken)
-	require.NotContains(t, env.Identity.LastBody(), "hash")
+
+	stored := env.ActivationCredentialRecord(registered.Agent.TenantID, registered.Agent.ID)
+	require.Equal(t, identitydomain.ActivationCredentialPending, stored.Status)
+	require.NotEmpty(t, stored.HashBase64)
+	require.Len(t, stored.Hash, 32)
+	require.NotEqual(t, registered.ActivationToken, stored.HashBase64)
+	tokenBytes, err := base64.RawURLEncoding.DecodeString(registered.ActivationToken)
+	require.NoError(t, err)
+	require.NotEqual(t, tokenBytes, stored.Hash)
+	wantHash := sha256.Sum256([]byte(registered.ActivationToken))
+	require.Equal(t, wantHash[:], stored.Hash)
+	require.False(t, stored.HasPlaintextColumn)
 
 	require.Equal(t, "UNAUTHORIZED", env.Identity.ListAgentsCode())
 	require.Equal(t, "NOT_FOUND", env.Identity.GetActivationStatusCode(otherOwnerSession(), registered.Agent.ID))
@@ -114,14 +137,37 @@ func TestIdentityAuditTrailIncludesLifecycleTransitions(t *testing.T) {
 
 func TestIdentityAuditEventsQueryUsesIsolatedTenantScope(t *testing.T) {
 	env := Start(t)
-	registered := env.Identity.RegisterAgent(ownerSession(), RegisterAgentRequest{Name: "Audit Bot"})
+	tenant1Agent := env.Identity.RegisterAgent(ownerSession(), RegisterAgentRequest{Name: "Tenant 1 Audit Bot"})
+	tenant2Agent := env.Identity.RegisterAgent(tenantOwnerSession("tenant-2", "owner-2"), RegisterAgentRequest{Name: "Tenant 2 Audit Bot"})
 
-	events, err := env.IdentityAuditEvents(registered.Agent.ID)
-	require.NoError(t, err)
-	require.NotEmpty(t, events)
+	require.Equal(t, "NOT_FOUND", env.Identity.GetAgentCode(ownerSession(), tenant2Agent.Agent.ID))
+	require.Equal(t, "NOT_FOUND", env.Identity.GetAgentCode(tenantOwnerSession("tenant-2", "owner-2"), tenant1Agent.Agent.ID))
+	require.Equal(t, "NOT_FOUND", env.Identity.GetActivationStatusCode(ownerSession(), tenant2Agent.Agent.ID))
+	require.Equal(t, "NOT_FOUND", env.Identity.GetActivationStatusCode(tenantOwnerSession("tenant-2", "owner-2"), tenant1Agent.Agent.ID))
+	require.Equal(t, "NOT_FOUND", env.Identity.SuspendAgentCode(ownerSession(), tenant2Agent.Agent.ID, "wrong tenant"))
+	require.Equal(t, "NOT_FOUND", env.Identity.RevokeAgentCode(tenantOwnerSession("tenant-2", "owner-2"), tenant1Agent.Agent.ID, "wrong tenant"))
 
-	foreign, err := env.DB.Query(context.Background(), `SELECT intent FROM identity_events WHERE tenant_id = $1 AND agent_id = $2`, "tenant-2", registered.Agent.ID)
+	tenant1Agents := env.Identity.ListAgents(ownerSession())
+	require.Len(t, tenant1Agents.Items, 1)
+	require.Equal(t, tenant1Agent.Agent.ID, tenant1Agents.Items[0].ID)
+
+	tenant2Agents := env.Identity.ListAgents(tenantOwnerSession("tenant-2", "owner-2"))
+	require.Len(t, tenant2Agents.Items, 1)
+	require.Equal(t, tenant2Agent.Agent.ID, tenant2Agents.Items[0].ID)
+
+	tenant1Events, err := env.IdentityAuditEventsForTenant("tenant-1", tenant1Agent.Agent.ID)
 	require.NoError(t, err)
-	defer foreign.Close()
-	require.False(t, foreign.Next())
+	require.NotEmpty(t, tenant1Events)
+
+	tenant2Events, err := env.IdentityAuditEventsForTenant("tenant-2", tenant2Agent.Agent.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, tenant2Events)
+
+	tenant2CrossEvents, err := env.IdentityAuditEventsForTenant("tenant-2", tenant1Agent.Agent.ID)
+	require.NoError(t, err)
+	require.Empty(t, tenant2CrossEvents)
+
+	tenant1CrossEvents, err := env.IdentityAuditEventsForTenant("tenant-1", tenant2Agent.Agent.ID)
+	require.NoError(t, err)
+	require.Empty(t, tenant1CrossEvents)
 }
