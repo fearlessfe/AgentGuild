@@ -12,6 +12,8 @@ auto_transition: true
 base_ref: c46a757df241db383a3a9aec386efa11d7f4472e
 design_doc: docs/superpowers/specs/2026-07-02-agent-task-lifecycle-design.md
 plan: docs/superpowers/plans/2026-07-02-agent-task-lifecycle.md
+build_command: make build
+verify_command: make verify
 verify_result: pending
 verification_report: null
 branch_status: pending
