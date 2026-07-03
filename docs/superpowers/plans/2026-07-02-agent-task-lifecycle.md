@@ -680,7 +680,7 @@ git commit -m "feat: observe execution cost asynchronously"
 
 ### Task 8: 组装服务和 React 只读观察页面
 
-- [ ] **Completion gate: Task 8 runnable observer app**
+- [x] **Completion gate: Task 8 runnable observer app**
 
 **Files:**
 - Create: `backend/cmd/agentguild-api/main.go`
@@ -701,11 +701,11 @@ git commit -m "feat: observe execution cost asynchronously"
 - Consumes: REST `Envelope<TaskView>`、`Envelope<TaskPage>`、`Envelope<ExecutionView>`
 - Produces: `/tasks` 列表和 `/tasks/:id` 详情
 
-- [ ] **Step 1: 确认设计稿实现 brief**
+- [x] **Step 1: 确认设计稿实现 brief**
 
 执行 Product Design `get-context`，明确以 `docs/assets/agentguild-tasks.png` 为主参考：桌面端深色高密度布局，左侧 60px 图标导航，双层顶部上下文区，中间分组表格，右侧约 320px 详情面板；随后使用 `image-to-code` 指引实现。移动端将详情面板改为抽屉，表格改为横向可滚动列表，不新增设计稿中超出本 change 范围的 mutation 控件。
 
-- [ ] **Step 2: 写轮询、cursor、deadline 和只读行为测试**
+- [x] **Step 2: 写轮询、cursor、deadline 和只读行为测试**
 
 ```tsx
 it("renders lease and cost coverage without mutation controls", async () => {
@@ -716,13 +716,13 @@ it("renders lease and cost coverage without mutation controls", async () => {
 });
 ```
 
-- [ ] **Step 3: 初始化 React 工具链并确认组件测试失败**
+- [x] **Step 3: 初始化 React 工具链并确认组件测试失败**
 
 Run: `cd frontend && npm install && npm test -- --run`
 
 Expected: FAIL，任务组件尚未实现。
 
-- [ ] **Step 4: 实现类型化 REST 客户端和安全轮询**
+- [x] **Step 4: 实现类型化 REST 客户端和安全轮询**
 
 ```ts
 export type Envelope<T> = {
@@ -738,7 +738,7 @@ export type Envelope<T> = {
 
 TanStack Query 使用 `poll_after_seconds` 设置下一次轮询，不根据浏览器时间改变状态；cursor 原样传回服务端，不在前端解码。
 
-- [ ] **Step 5: 实现设计稿对应的 Shell、主题和任务工作台**
+- [x] **Step 5: 实现设计稿对应的 Shell、主题和任务工作台**
 
 在 `tokens.css` 定义设计 token：
 
@@ -761,15 +761,15 @@ TanStack Query 使用 `poll_after_seconds` 设置下一次轮询，不根据浏�
 
 列表支持 status、type 和 cursor；详情展示 Task/Execution 状态、stage、progress、deadline、lease soft/hard expiry、成本 coverage 和审计摘要，不提供通用状态按钮。复用设计稿的状态点、进度条、分组标题和详情键值排版。
 
-- [ ] **Step 6: 组装 Go 服务和功能开关**
+- [x] **Step 6: 组装 Go 服务和功能开关**
 
 `main.go` 组合 PostgreSQL Store、Application Service、REST、MCP、reaper、outbox 和 Langfuse adapter；`MCP_ENABLED`、`WEB_ENABLED`、`LANGFUSE_ENABLED` 分别控制适配层，关闭时不影响领域服务。
 
-- [ ] **Step 7: 执行视觉截图比对**
+- [x] **Step 7: 执行视觉截图比对**
 
 以 1512×1064 viewport 截取 `/tasks`，与 `docs/assets/agentguild-tasks.png` 对照，验证信息层级、主列宽、右侧详情栏、状态色、密度和对齐；允许因当前只读范围缺少 mutation 按钮，但不得改变整体布局结构。移动端另以 390×844 验证详情抽屉、横向滚动和键盘焦点。
 
-- [ ] **Step 8: 运行前后端构建和组件测试**
+- [x] **Step 8: 运行前后端构建和组件测试**
 
 Run: `cd backend && go test ./... -count=1 && go build ./cmd/agentguild-api`
 
@@ -777,7 +777,7 @@ Run: `cd frontend && npm test -- --run && npm run build`
 
 Expected: 所有命令 PASS。
 
-- [ ] **Step 9: 提交可运行应用**
+- [x] **Step 9: 提交可运行应用**
 
 ```bash
 git add backend/cmd backend/internal/config frontend
@@ -788,7 +788,7 @@ git commit -m "feat: add task lifecycle observer application"
 
 ### Task 9: 完成端到端、恢复和验收测试
 
-- [ ] **Completion gate: Task 9 end-to-end acceptance**
+- [x] **Completion gate: Task 9 end-to-end acceptance**
 
 **Files:**
 - Create: `backend/internal/acceptance/lifecycle_test.go`
@@ -800,7 +800,7 @@ git commit -m "feat: add task lifecycle observer application"
 **Interfaces:**
 - Verifies: Agent 轮询、断线重试、幂等恢复、非法迁移、deadline 和 REST/MCP 等价性
 
-- [ ] **Step 1: 写完整 Agent 断线恢复验收**
+- [x] **Step 1: 写完整 Agent 断线恢复验收**
 
 ```go
 func TestAgentRecoversAfterHeartbeatResponseLoss(t *testing.T) {
@@ -813,11 +813,11 @@ func TestAgentRecoversAfterHeartbeatResponseLoss(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 添加 deadline、非法状态和 100 并发客户端场景**
+- [x] **Step 2: 添加 deadline、非法状态和 100 并发客户端场景**
 
 测试必须断言：deadline 后 heartbeat 返回 `DEADLINE_EXCEEDED`；非持有者只收到安全的 `FORBIDDEN/NOT_FOUND`；100 个 Claim 仅一个成功；宽限期内不能重领；旧 generation 被拒绝。
 
-- [ ] **Step 3: 添加 Playwright 只读观察页验收**
+- [x] **Step 3: 添加 Playwright 只读观察页验收**
 
 ```ts
 test("observer follows server polling metadata", async ({ page }) => {
@@ -828,7 +828,7 @@ test("observer follows server polling metadata", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 4: 配置统一验证命令**
+- [x] **Step 4: 配置统一验证命令**
 
 ```make
 build:
@@ -843,17 +843,17 @@ verify: build test
 	cd frontend && npm run test:e2e
 ```
 
-- [ ] **Step 5: 运行完整验证**
+- [x] **Step 5: 运行完整验证**
 
 Run: `docker compose up -d postgres && make verify`
 
 Expected: Go race tests、PostgreSQL 集成测试、React/Vitest、Playwright 和两种 transport 契约全部 PASS。
 
-- [ ] **Step 6: 对照 OpenSpec 勾选 12 项任务**
+- [x] **Step 6: 对照 OpenSpec 勾选 12 项任务**
 
 逐项核对 `tasks.md`：每个勾选项必须有对应测试或构建证据；不得仅因代码文件存在而勾选。
 
-- [ ] **Step 7: 提交验收闭环**
+- [x] **Step 7: 提交验收闭环**
 
 ```bash
 git add backend/internal/acceptance frontend/e2e Makefile openspec/changes/agent-task-lifecycle/tasks.md
