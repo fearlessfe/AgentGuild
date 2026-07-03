@@ -2,6 +2,8 @@ package acceptance
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +15,9 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
 	transportmcp "agentguild.dev/agentguild/backend/internal/transport/mcp"
@@ -24,11 +29,12 @@ import (
 
 // Env 是端到端验收测试的共享 harness，包含真实 PostgreSQL、应用服务与两个 transport。
 type Env struct {
-	T         *testing.T
-	DB        *pgxpool.Pool
-	Service   *application.Service
-	MCP       *MCPClient
-	REST      *RESTClient
+	T          *testing.T
+	DB         *pgxpool.Pool
+	Service    *application.Service
+	MCP        *MCPClient
+	REST       *RESTClient
+	Identity   *IdentityClient
 	publishSeq int64
 }
 
@@ -43,10 +49,18 @@ func Start(t *testing.T) *Env {
 		CursorTTL:    15 * time.Minute,
 	})
 	require.NoError(t, err)
+	verifier, tokenIssuer := newAcceptanceIdentityRuntime(t)
+	identitySvc, err := identityapp.NewIdentityService(identitypostgres.NewStore(db), identityapp.IdentityOptions{
+		NewID:       acceptanceSequenceIDs("agent-1", "version-1", "agent-2", "version-2", "agent-3", "version-3"),
+		TokenIssuer: tokenIssuer,
+	})
+	require.NoError(t, err)
 
-	verifier := fakeVerifier{}
 	mcpHandler := transportmcp.NewServer(svc, verifier).Handler()
-	restHandler := rest.NewServer(svc, verifier).Router()
+	restHandler := rest.NewServer(svc, verifier,
+		rest.WithIdentityService(identitySvc),
+		rest.WithSession("acceptance-session-secret-0123456789abcdef", false),
+	).Router()
 
 	return &Env{
 		T:       t,
@@ -54,6 +68,11 @@ func Start(t *testing.T) *Env {
 		Service: svc,
 		MCP:     &MCPClient{t: t, handler: mcpHandler, db: db, token: "token-agent"},
 		REST:    &RESTClient{t: t, handler: restHandler, db: db, token: "token-agent"},
+		Identity: &IdentityClient{
+			t:             t,
+			handler:       restHandler,
+			sessionSecret: "acceptance-session-secret-0123456789abcdef",
+		},
 	}
 }
 
@@ -111,9 +130,29 @@ func (env *Env) AsAgent(token string) *MCPClient {
 
 // --- fake verifier ---
 
-type fakeVerifier struct{}
+type fakeVerifier struct {
+	fallback auth.TokenVerifier
+}
 
-func (fakeVerifier) Verify(_ context.Context, rawToken string) (auth.Principal, error) {
+func newAcceptanceIdentityRuntime(t *testing.T) (fakeVerifier, acceptanceFixedIssuer) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	issuer, err := auth.NewRS256TokenIssuer(key, auth.TokenIssuerConfig{
+		Issuer:   "agentguild-acceptance",
+		Audience: "agentguild-agents",
+		KeyID:    "acceptance",
+	})
+	require.NoError(t, err)
+	return fakeVerifier{
+		fallback: auth.NewRS256Verifier(&key.PublicKey, auth.TokenVerifierConfig{
+			Issuer:   "agentguild-acceptance",
+			Audience: "agentguild-agents",
+		}),
+	}, acceptanceFixedIssuer{issuer: issuer}
+}
+
+func (v fakeVerifier) Verify(ctx context.Context, rawToken string) (auth.Principal, error) {
 	switch {
 	case rawToken == "token-publisher":
 		return publisherPrincipal(), nil
@@ -126,6 +165,9 @@ func (fakeVerifier) Verify(_ context.Context, rawToken string) (auth.Principal, 
 		if _, err := fmt.Sscanf(rawToken, "token-agent-%d", &i); err == nil {
 			return agentPrincipal(i), nil
 		}
+	}
+	if v.fallback != nil {
+		return v.fallback.Verify(ctx, rawToken)
 	}
 	return auth.Principal{}, fmt.Errorf("unknown token")
 }
@@ -410,4 +452,308 @@ func (c *RESTClient) post(path, requestID string, body map[string]any) restResul
 	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
 	c.lastMeta = envelope.Meta
 	return restResult{Execution: envelope.Data, Meta: envelope.Meta}
+}
+
+type RegisterAgentRequest struct {
+	Name           string
+	Description    string
+	Team           string
+	Scopes         []string
+	RepoScope      []string
+	BudgetCents    int64
+	BudgetCurrency string
+}
+
+type ActivateAgentRequest struct {
+	Runtime           string
+	Model             string
+	Capabilities      []string
+	ConfigFingerprint string
+}
+
+type IdentityAuditEvent struct {
+	Intent string `json:"intent"`
+}
+
+type IdentityClient struct {
+	t             *testing.T
+	handler       http.Handler
+	sessionSecret string
+	lastBody      string
+}
+
+func (c *IdentityClient) LastBody() string {
+	return c.lastBody
+}
+
+func (c *IdentityClient) RegisterAgent(cookie *http.Cookie, req RegisterAgentRequest) identityapp.RegisterAgentResponse {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents", map[string]any{
+		"name":            req.Name,
+		"description":     req.Description,
+		"team":            req.Team,
+		"scopes":          req.Scopes,
+		"repo_scope":      req.RepoScope,
+		"budget_cents":    req.BudgetCents,
+		"budget_currency": req.BudgetCurrency,
+	}, "", cookie)
+	require.Equal(c.t, http.StatusCreated, res.Code, "register failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.RegisterAgentResponse `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) ActivateAgent(token string, req ActivateAgentRequest) identityapp.AccessTokenView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/me:activate", map[string]any{
+		"activation_token":   token,
+		"runtime":            req.Runtime,
+		"model":              req.Model,
+		"capabilities":       req.Capabilities,
+		"config_fingerprint": req.ConfigFingerprint,
+	}, "", nil)
+	require.Equal(c.t, http.StatusOK, res.Code, "activate failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AccessTokenView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) ActivateAgentCode(token string, req ActivateAgentRequest) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/me:activate", map[string]any{
+		"activation_token":   token,
+		"runtime":            req.Runtime,
+		"model":              req.Model,
+		"capabilities":       req.Capabilities,
+		"config_fingerprint": req.ConfigFingerprint,
+	}, "", nil)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
+}
+
+func (c *IdentityClient) RefreshToken(token string) identityapp.AccessTokenView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/me:refresh", map[string]any{}, token, nil)
+	require.Equal(c.t, http.StatusOK, res.Code, "refresh failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AccessTokenView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) RefreshTokenCode(token string) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/me:refresh", map[string]any{}, token, nil)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
+}
+
+func (c *IdentityClient) Heartbeat(token string) identityapp.AgentView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/me:heartbeat", map[string]any{}, token, nil)
+	require.Equal(c.t, http.StatusOK, res.Code, "heartbeat failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AgentView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) HeartbeatCode(token string) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/me:heartbeat", map[string]any{}, token, nil)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
+}
+
+func (c *IdentityClient) GetSelf(token string) identityapp.AgentView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodGet, "/v1/agents/me", nil, token, nil)
+	require.Equal(c.t, http.StatusOK, res.Code, "get self failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AgentView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) SuspendAgent(cookie *http.Cookie, agentID, reason string) identityapp.AgentView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/"+agentID+":suspend", map[string]any{"reason": reason}, "", cookie)
+	require.Equal(c.t, http.StatusOK, res.Code, "suspend failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AgentView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) ResumeAgent(cookie *http.Cookie, agentID string) identityapp.AgentView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/"+agentID+":resume", map[string]any{}, "", cookie)
+	require.Equal(c.t, http.StatusOK, res.Code, "resume failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AgentView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) RevokeAgent(cookie *http.Cookie, agentID, reason string) identityapp.AgentView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodPost, "/v1/agents/"+agentID+":revoke", map[string]any{"reason": reason}, "", cookie)
+	require.Equal(c.t, http.StatusOK, res.Code, "revoke failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.AgentView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) GetActivationStatus(cookie *http.Cookie, agentID string) identityapp.ActivationStatusView {
+	c.t.Helper()
+	res := c.doJSON(http.MethodGet, "/v1/agents/"+agentID+":token", nil, "", cookie)
+	require.Equal(c.t, http.StatusOK, res.Code, "status failed: %s", res.Body)
+	var envelope struct {
+		Data identityapp.ActivationStatusView `json:"data"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(res.Body), &envelope))
+	return envelope.Data
+}
+
+func (c *IdentityClient) GetActivationStatusCode(cookie *http.Cookie, agentID string) string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodGet, "/v1/agents/"+agentID+":token", nil, "", cookie)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
+}
+
+func (c *IdentityClient) ListAgentsCode() string {
+	c.t.Helper()
+	res := c.doJSON(http.MethodGet, "/v1/agents", nil, "", nil)
+	return errorCodeFromJSON(c.t, res.Code, res.Body)
+}
+
+func (c *IdentityClient) doJSON(method, path string, body map[string]any, bearer string, cookie *http.Cookie) httpResult {
+	c.t.Helper()
+	var reader *strings.Reader
+	if body == nil {
+		reader = strings.NewReader("")
+	} else {
+		raw, err := json.Marshal(body)
+		require.NoError(c.t, err)
+		reader = strings.NewReader(string(raw))
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+	c.lastBody = rec.Body.String()
+	return httpResult{Code: rec.Code, Body: rec.Body.String()}
+}
+
+type httpResult struct {
+	Code int
+	Body string
+}
+
+func errorCodeFromJSON(t *testing.T, statusCode int, body string) string {
+	t.Helper()
+	require.NotEqual(t, http.StatusOK, statusCode)
+	require.NotEqual(t, http.StatusCreated, statusCode)
+	var resp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &resp))
+	return resp.Error.Code
+}
+
+func ownerSession() *http.Cookie {
+	cookie, err := auth.NewSessionCookie(auth.Session{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-1",
+		OwnerEmail: "owner-1@example.com",
+		IsAdmin:    false,
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}, "acceptance-session-secret-0123456789abcdef", false)
+	if err != nil {
+		panic(err)
+	}
+	return cookie
+}
+
+func otherOwnerSession() *http.Cookie {
+	cookie, err := auth.NewSessionCookie(auth.Session{
+		TenantID:   "tenant-1",
+		OwnerID:    "owner-2",
+		OwnerEmail: "owner-2@example.com",
+		IsAdmin:    false,
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}, "acceptance-session-secret-0123456789abcdef", false)
+	if err != nil {
+		panic(err)
+	}
+	return cookie
+}
+
+func (env *Env) IdentityAuditEvents(agentID string) ([]IdentityAuditEvent, error) {
+	rows, err := env.DB.Query(context.Background(), `
+		SELECT intent
+		FROM identity_events
+		WHERE tenant_id = $1 AND agent_id = $2
+		ORDER BY created_at ASC, id ASC`, "tenant-1", agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []IdentityAuditEvent
+	for rows.Next() {
+		var event IdentityAuditEvent
+		if err := rows.Scan(&event.Intent); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+type acceptanceFixedIssuer struct{ issuer *auth.TokenIssuer }
+
+func (i acceptanceFixedIssuer) IssueAccessToken(_ context.Context, agent *identitydomain.Agent, version *identitydomain.AgentVersion, now time.Time) (identityapp.AccessTokenView, error) {
+	token, err := i.issuer.Issue(agent, version, now)
+	if err != nil {
+		return identityapp.AccessTokenView{}, err
+	}
+	return identityapp.AccessTokenView{
+		Token:          token,
+		TokenType:      "Bearer",
+		ExpiresAt:      now.Add(15 * time.Minute),
+		AgentID:        agent.ID,
+		AgentVersionID: version.ID,
+		Scopes:         append([]string(nil), agent.Scopes...),
+		RepoScope:      append([]string(nil), agent.RepoScope...),
+	}, nil
+}
+
+func acceptanceSequenceIDs(values ...string) func() string {
+	index := 0
+	return func() string {
+		if index >= len(values) {
+			return values[len(values)-1]
+		}
+		value := values[index]
+		index++
+		return value
+	}
 }

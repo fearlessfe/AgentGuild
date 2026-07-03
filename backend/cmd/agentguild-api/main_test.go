@@ -2,9 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"agentguild.dev/agentguild/backend/internal/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRepeatContinuesAfterPanic(t *testing.T) {
@@ -62,4 +71,45 @@ func TestWaitWorkersReturnsFalseOnTimeout(t *testing.T) {
 	if waitWorkers(&wg, 20*time.Millisecond) {
 		t.Fatal("waitWorkers returned true despite timeout")
 	}
+}
+
+func TestLoadAgentRSAPrivateKeyFromPEM(t *testing.T) {
+	privateKey := newRSAPrivateKeyForTest(t)
+	cfg := config.Config{AgentRSAPrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	}))}
+
+	got, err := loadAgentRSAPrivateKey(cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, privateKey.N, got.N)
+}
+
+func TestLoadAgentRSAPrivateKeyFromPath(t *testing.T) {
+	privateKey := newRSAPrivateKeyForTest(t)
+	path := filepath.Join(t.TempDir(), "agent-private-key.pem")
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	}), 0o600))
+	cfg := config.Config{AgentRSAPrivateKeyPath: path}
+
+	got, err := loadAgentRSAPrivateKey(cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, privateKey.N, got.N)
+}
+
+func TestLoadAgentRSAPrivateKeyRejectsInvalidPEM(t *testing.T) {
+	_, err := loadAgentRSAPrivateKey(config.Config{AgentRSAPrivateKeyPEM: "not a pem"})
+
+	require.Error(t, err)
+}
+
+func newRSAPrivateKeyForTest(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	return privateKey
 }

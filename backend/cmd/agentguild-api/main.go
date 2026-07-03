@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +18,9 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/config"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
 	mcptransport "agentguild.dev/agentguild/backend/internal/transport/mcp"
@@ -48,8 +55,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	verifier := auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil)
-	restHandler := resttransport.NewServer(service, verifier).Router()
+	verifier, identityService, oidcProvider, err := buildIdentityRuntime(cfg, pool)
+	if err != nil {
+		return err
+	}
+	restOptions := make([]resttransport.Option, 0, 3)
+	if identityService != nil {
+		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
+	}
+	if oidcProvider != nil {
+		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
+	}
+	restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
 	mcpHandler := mcptransport.NewServer(service, verifier).Handler()
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: adapterHandler(cfg.WebEnabled, cfg.MCPEnabled, restHandler, mcpHandler), ReadHeaderTimeout: 5 * time.Second}
 
@@ -90,6 +107,136 @@ func costProvider(enabled bool, cfg config.Config) telemetry.TraceCostProvider {
 		return disabledCostProvider{}
 	}
 	return telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{BaseURL: cfg.LangfuseBaseURL, PublicKey: cfg.LangfusePublicKey, SecretKey: cfg.LangfuseSecretKey, Mode: cfg.LangfuseMode, SupportsCost: cfg.LangfuseSupportsCost, MetricsPath: cfg.LangfuseMetricsPath, CompleteCoverageTag: cfg.LangfuseCompleteTag}, &http.Client{Timeout: 10 * time.Second})
+}
+
+func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVerifier, *identityapp.IdentityService, *auth.OIDCProvider, error) {
+	externalVerifier := auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil)
+	if !cfg.WebEnabled {
+		return externalVerifier, nil, nil, nil
+	}
+
+	privateKey, err := loadAgentRSAPrivateKey(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tokenTTL := 15 * time.Minute
+	tokenIssuer, err := auth.NewRS256TokenIssuer(privateKey, auth.TokenIssuerConfig{
+		Issuer:   cfg.OAuthIssuer,
+		Audience: cfg.OAuthAudience,
+		KeyID:    "agentguild-api",
+		TTL:      tokenTTL,
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	identityService, err := identityapp.NewIdentityService(identitypostgres.NewStore(pool), identityapp.IdentityOptions{
+		TokenIssuer: rs256IdentityTokenIssuer{issuer: tokenIssuer, ttl: tokenTTL},
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	oidcProvider, err := auth.NewOIDCProvider(auth.OIDCConfig{
+		TenantID:     cfg.OIDCTenantID,
+		Issuer:       cfg.OIDCIssuer,
+		ClientID:     cfg.OIDCClientID,
+		ClientSecret: cfg.OIDCClientSecret,
+		RedirectURI:  cfg.OIDCRedirectURI,
+		AuthURL:      cfg.OIDCAuthURL,
+		TokenURL:     cfg.OIDCTokenURL,
+		JWKSURL:      cfg.OIDCJWKSURL,
+		AdminClaim:   cfg.OIDCAdminClaim,
+		AdminEmails:  append([]string(nil), cfg.OIDCAdminEmails...),
+	}, nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	localVerifier := auth.NewRS256Verifier(&privateKey.PublicKey, auth.TokenVerifierConfig{
+		Issuer:   cfg.OAuthIssuer,
+		Audience: cfg.OAuthAudience,
+	})
+	return chainedTokenVerifier{verifiers: []auth.TokenVerifier{localVerifier, externalVerifier}}, identityService, oidcProvider, nil
+}
+
+func loadAgentRSAPrivateKey(cfg config.Config) (*rsa.PrivateKey, error) {
+	if cfg.AgentRSAPrivateKeyPEM != "" {
+		return parseAgentRSAPrivateKey([]byte(cfg.AgentRSAPrivateKeyPEM))
+	}
+	if cfg.AgentRSAPrivateKeyPath == "" {
+		return nil, errors.New("agent rsa private key is required")
+	}
+	body, err := os.ReadFile(cfg.AgentRSAPrivateKeyPath)
+	if err != nil {
+		return nil, err
+	}
+	return parseAgentRSAPrivateKey(body)
+}
+
+func parseAgentRSAPrivateKey(body []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(body)
+	if block == nil {
+		return nil, errors.New("decode agent rsa private key pem")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse agent rsa private key: %w", err)
+	}
+	privateKey, ok := key.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("agent rsa private key is not rsa")
+	}
+	return privateKey, nil
+}
+
+type rs256IdentityTokenIssuer struct {
+	issuer *auth.TokenIssuer
+	ttl    time.Duration
+}
+
+func (i rs256IdentityTokenIssuer) IssueAccessToken(_ context.Context, agent *identitydomain.Agent, version *identitydomain.AgentVersion, now time.Time) (identityapp.AccessTokenView, error) {
+	token, err := i.issuer.Issue(agent, version, now)
+	if err != nil {
+		return identityapp.AccessTokenView{}, err
+	}
+	return identityapp.AccessTokenView{
+		Token:          token,
+		TokenType:      "Bearer",
+		ExpiresAt:      now.Add(i.ttl),
+		AgentID:        agent.ID,
+		AgentVersionID: version.ID,
+		Scopes:         append([]string(nil), agent.Scopes...),
+		RepoScope:      append([]string(nil), agent.RepoScope...),
+	}, nil
+}
+
+type chainedTokenVerifier struct {
+	verifiers []auth.TokenVerifier
+}
+
+func (c chainedTokenVerifier) Verify(ctx context.Context, rawToken string) (auth.Principal, error) {
+	var firstErr error
+	var sawExpired bool
+	for _, verifier := range c.verifiers {
+		principal, err := verifier.Verify(ctx, rawToken)
+		if err == nil {
+			return principal, nil
+		}
+		if errors.Is(err, auth.ErrTokenExpired) {
+			sawExpired = true
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if sawExpired {
+		return auth.Principal{}, auth.ErrTokenExpired
+	}
+	if firstErr == nil {
+		firstErr = errors.New("no token verifier configured")
+	}
+	return auth.Principal{}, firstErr
 }
 
 type disabledCostProvider struct{}

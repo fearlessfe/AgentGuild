@@ -1,6 +1,10 @@
 package config_test
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 	"time"
@@ -10,18 +14,12 @@ import (
 )
 
 func TestLoadAppliesAdapterSwitchesAndWorkerDefaults(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL":     "postgres://agentguild:test@localhost/agentguild",
-		"CURSOR_SECRET":    strings.Repeat("s", 32),
-		"OAUTH_ISSUER":     "https://issuer.example",
-		"OAUTH_AUDIENCE":   "agentguild",
-		"OAUTH_JWKS_URL":   "https://issuer.example/.well-known/jwks.json",
-		"MCP_ENABLED":      "false",
-		"WEB_ENABLED":      "true",
-		"LANGFUSE_ENABLED": "false",
-		"REAPER_INTERVAL":  "7s",
-		"OUTBOX_INTERVAL":  "11s",
-	}
+	env := validEnv()
+	env["MCP_ENABLED"] = "false"
+	env["WEB_ENABLED"] = "true"
+	env["LANGFUSE_ENABLED"] = "false"
+	env["REAPER_INTERVAL"] = "7s"
+	env["OUTBOX_INTERVAL"] = "11s"
 
 	cfg, err := config.Load(func(key string) string { return env[key] })
 	require.NoError(t, err)
@@ -52,12 +50,77 @@ func TestLoadRequiresLangfuseCredentialsOnlyWhenEnabled(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestLoadRequiresIdentityRuntimeConfigurationWhenWebEnabled(t *testing.T) {
+	env := validEnv()
+	env["SESSION_COOKIE_SECRET"] = ""
+
+	_, err := config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "SESSION_COOKIE_SECRET")
+
+	env = validEnv()
+	env["OIDC_TENANT_ID"] = ""
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "OIDC_TENANT_ID")
+
+	env = validEnv()
+	env["OIDC_CLIENT_ID"] = ""
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "OIDC_CLIENT_ID")
+
+	env = validEnv()
+	env["OIDC_REDIRECT_URI"] = ""
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "OIDC_REDIRECT_URI")
+
+	env = validEnv()
+	env["AGENT_RSA_PRIVATE_KEY_PEM"] = ""
+	env["AGENT_RSA_PRIVATE_KEY_PATH"] = ""
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "AGENT_RSA_PRIVATE_KEY_PEM")
+}
+
+func TestLoadParsesIdentityRuntimeConfiguration(t *testing.T) {
+	env := validEnv()
+	env["OIDC_ADMIN_EMAILS"] = "admin@example.com, owner@example.com "
+	env["SESSION_COOKIE_SECURE"] = "true"
+
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "tenant-1", cfg.OIDCTenantID)
+	require.Equal(t, "client-1", cfg.OIDCClientID)
+	require.Equal(t, "https://issuer.example/callback", cfg.OIDCRedirectURI)
+	require.Equal(t, []string{"admin@example.com", "owner@example.com"}, cfg.OIDCAdminEmails)
+	require.Equal(t, "agentguild_admin", cfg.OIDCAdminClaim)
+	require.Equal(t, "-----BEGIN RSA PRIVATE KEY-----", cfg.AgentRSAPrivateKeyPEM[:31])
+	require.True(t, cfg.SessionCookieSecure)
+}
+
 func validEnv() map[string]string {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
 	return map[string]string{
-		"DATABASE_URL":   "postgres://agentguild:test@localhost/agentguild",
-		"CURSOR_SECRET":  strings.Repeat("s", 32),
-		"OAUTH_ISSUER":   "https://issuer.example",
-		"OAUTH_AUDIENCE": "agentguild",
-		"OAUTH_JWKS_URL": "https://issuer.example/.well-known/jwks.json",
+		"DATABASE_URL":              "postgres://agentguild:test@localhost/agentguild",
+		"CURSOR_SECRET":             strings.Repeat("s", 32),
+		"OAUTH_ISSUER":              "https://issuer.example",
+		"OAUTH_AUDIENCE":            "agentguild",
+		"OAUTH_JWKS_URL":            "https://issuer.example/.well-known/jwks.json",
+		"SESSION_COOKIE_SECRET":     strings.Repeat("c", 32),
+		"OIDC_TENANT_ID":            "tenant-1",
+		"OIDC_ISSUER":               "https://issuer.example",
+		"OIDC_CLIENT_ID":            "client-1",
+		"OIDC_CLIENT_SECRET":        "secret-1",
+		"OIDC_REDIRECT_URI":         "https://issuer.example/callback",
+		"OIDC_AUTH_URL":             "https://issuer.example/oauth/authorize",
+		"OIDC_TOKEN_URL":            "https://issuer.example/oauth/token",
+		"OIDC_JWKS_URL":             "https://issuer.example/.well-known/openid-jwks.json",
+		"OIDC_ADMIN_CLAIM":          "agentguild_admin",
+		"OIDC_ADMIN_EMAILS":         "admin@example.com",
+		"AGENT_RSA_PRIVATE_KEY_PEM": string(privateKeyPEM),
 	}
 }
