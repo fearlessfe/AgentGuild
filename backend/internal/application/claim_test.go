@@ -139,7 +139,7 @@ func TestHeartbeatAtTaskDeadlineIsRejected(t *testing.T) {
 	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionRunning, Lease: domain.Lease{Generation: 1, SoftExpiry: fixtureNow.Add(10 * time.Minute), HardExpiry: fixtureNow.Add(10*time.Minute + 30*time.Second)}}
 
 	_, err := svc.HeartbeatExecution(context.Background(), principal("tenant", "worker", "tasks:execute"), application.HeartbeatExecution{RequestID: "beat", ExecutionID: "execution", LeaseGeneration: 1})
-	assertDomainError(t, err, "lease_expired", "")
+	assertDomainError(t, err, "deadline_exceeded", "")
 }
 
 func TestGetExecutionIsTenantScoped(t *testing.T) {

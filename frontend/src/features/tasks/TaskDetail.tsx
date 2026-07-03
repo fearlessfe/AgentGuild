@@ -13,11 +13,36 @@ const statusLabel: Record<string, string> = {
   expired: "已过期",
 };
 
+const executionStatusLabel: Record<string, string> = {
+  leased: "Leased",
+  running: "Running",
+  submitted: "Submitted",
+  validating: "Validating",
+  reviewing: "Reviewing",
+  revision_requested: "Revision requested",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  expired: "Expired",
+  cancelled: "Cancelled",
+};
+
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+function formatLeaseDuration(serverTime: string, softExpiresAt: string): string {
+  const remaining = new Date(softExpiresAt).getTime() - new Date(serverTime).getTime();
+  if (Number.isNaN(remaining)) return "lease unknown";
+  if (remaining <= 0) return "expired";
+  const totalMinutes = Math.round(remaining / 60_000);
+  if (totalMinutes < 1) return "<1m lease";
+  if (totalMinutes < 60) return `${totalMinutes}m lease`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours}h ${minutes}m lease` : `${hours}h lease`;
 }
 
 function useMobile() {
@@ -52,7 +77,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose?: () =
 
   return (
     <DetailShell onClose={onClose}>
-      <TaskDetailContent task={task.data.data} execution={execution.data?.data} />
+      <TaskDetailContent task={task.data.data} execution={execution.data?.data} serverTime={task.data.meta.server_time} />
     </DetailShell>
   );
 }
@@ -130,9 +155,11 @@ function MobileDrawer({
 function TaskDetailContent({
   task,
   execution,
+  serverTime,
 }: {
   task: import("../../api/client").TaskView;
   execution?: import("../../api/client").ExecutionView;
+  serverTime: string;
 }) {
   const leaseActive =
     execution && ["leased", "running"].includes(execution.status);
@@ -196,7 +223,7 @@ function TaskDetailContent({
           <h3>Execution</h3>
           <div className="execution-line">
             <b>{execution.agent_version_id}</b>
-            <span>{execution.status}</span>
+            <span>{executionStatusLabel[execution.status] ?? execution.status}</span>
           </div>
           {execution.stage && (
             <>
@@ -209,7 +236,7 @@ function TaskDetailContent({
               </p>
             </>
           )}
-          <p>Lease: {leaseActive ? "active" : "inactive"}</p>
+          <p>{leaseActive ? formatLeaseDuration(serverTime, execution.lease_soft_expires_at) : "expired"}</p>
           <small>
             Soft {formatDateTime(execution.lease_soft_expires_at)} · Hard{" "}
             {formatDateTime(execution.lease_hard_expires_at)}

@@ -33,7 +33,8 @@ describe("TaskDetail", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Lease: active")).toBeVisible();
+    expect(await screen.findByText("Running")).toBeVisible();
+    expect(screen.getByText("10m lease")).toBeVisible();
     expect(screen.getByText("Cost coverage: partial")).toBeVisible();
     expect(screen.getByText("运行测试")).toBeVisible();
     expect(screen.getByText(/Observed cost: \$0\.067/)).toBeVisible();

@@ -8,7 +8,8 @@
 ## Completed Tasks
 
 - Task 1 domain lifecycle, Task 2 postgres persistence, Task 3 application service, Task 4 claim/lease, Task 5 REST/OAuth, Task 6 MCP adapter, Task 7 operations/telemetry — all checked off (plan gates + steps).
-- OpenSpec 1.1/1.2/1.3/1.4/2.1/2.2/2.3/2.4/2.5/3.2 completed.
+- OpenSpec 1.1/1.2/1.3/1.4/2.1/2.2/2.3/2.4/2.5/3.1/3.2 completed.
+- Task 8 round-2 review APPROVED; implementation `79021ab` + backend fixes `0aaf1b8` + frontend fixes `53c1bc8` + round-2 fixes `bfa5b0f`.
 - Task 4 round-1 review APPROVED by fresh re-reviewer; fixes `169ccb5`.
 - Task 5 round-2 review APPROVED; implementation `638c7b8` + fixes `3a7e329`.
 - Task 6 round-2 review APPROVED; implementation `607ed78` + fixes `f2b90cf`.
@@ -24,23 +25,10 @@
 
 ## Current Task
 
-- Plan task: `Completion gate: Task 8 runnable observer app`
-- OpenSpec mapping: `3.1 React task list, filters and read-only detail`
-- Phase: `scope-decision`（Task 8 review round 1）
-- Implementer status: `DONE_WITH_CONCERNS`
-- Implementation base/head: `63c64c8..79021ab`
-- Implementation commit: `79021ab`
-- Brief: `.superpowers/sdd/task-8-brief.md`
-- Report: `.superpowers/sdd/task-8-report.md`
-- RED/GREEN: backend config/main、frontend TaskList/TaskDetail 证据完整
-- Verification: backend full + build + vet PASS；frontend tests + build PASS；Playwright desktop/mobile 2/2 PASS；diff-check PASS
-- Visual: `93/100 pass`，无 blocker；截图 `/private/tmp/agentguild-task8/{desktop-1512x1064,mobile-390x844}.png`
-- Concern: in-app Browser unavailable，已降级为 Playwright + headless Chrome
-- Review round 1: `Needs fixes`（0 Critical、10 Important、2 Minor；desktop 1 major、mobile 2 major）
-- Review report: `.superpowers/sdd/task-8-review-1.md`
-- Scope expansion: 需要扩展正式 read DTO/query、REST filters/polling、usage/audit read model、runtime serving/auth、worker shutdown/disabled Langfuse semantics
-- Decision status: `CONTINUE_IN_CHANGE`（范围扩展留在当前 change 内完成；由 fix subagent 处理 Task 8 review round-1 的 10 Important + 2 Minor findings）
-- Confirmed technical baseline: `React 19; TypeScript; Vite; TanStack Query; Vitest; Playwright; Go 1.26.4`
-- Visual reference: `docs/assets/agentguild-tasks.png` at desktop `1512x1064`; mobile `390x844`
-- Review mode: `thorough` — UI/backend assembly is a cross-module high-risk boundary
-- Review/fix round: `1/2`
+- Plan task: `Completion gate: Task 9 end-to-end acceptance`
+- OpenSpec mapping: `3.3 Agent polling, disconnection recovery, and illegal state transition acceptance tests`
+- Phase: `verify`
+- Implementer status: `completed`
+- Brief: `.superpowers/sdd/task-9-brief.md`
+- Review mode: `thorough`
+- Verification: `make verify` PASS; backend race tests, PostgreSQL integration tests, React/Vitest, Playwright e2e and REST/MCP contract tests all green.

@@ -15,6 +15,7 @@
 
 ## 3. 观察与运行
 
-- [ ] 3.1 实现 React 任务列表、筛选和只读详情
+- [x] 3.1 实现 React 任务列表、筛选和只读详情
 - [x] 3.2 实现 Lease 回收调度、Langfuse TraceCostProvider、成本覆盖指标、限流和审计查询
-- [ ] 3.3 完成 Agent 端轮询、断线恢复和非法状态迁移验收测试
+- [x] 3.3 完成 Agent 端轮询、断线恢复和非法状态迁移验收测试
+  - 证据：`backend/internal/acceptance/lifecycle_test.go`、`mcp_recovery_test.go` 覆盖 10m lease、deadline、并发 claim、宽限期、旧 generation、非法迁移、REST/MCP 等价；`frontend/e2e/task-observer.spec.ts` 覆盖只读观察页轮询元数据；`make verify` 全绿。

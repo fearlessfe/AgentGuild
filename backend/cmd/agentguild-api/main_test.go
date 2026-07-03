@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,13 +39,13 @@ func TestDisabledLangfuseKeepsOutboxProviderAvailable(t *testing.T) {
 func TestShutdownJoinsWorkersBeforePoolClose(t *testing.T) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
-	workerRan := false
+	var workerRan atomic.Bool
 	runWorker(ctx, &wg, time.Millisecond, "test", func(ctx context.Context) error {
-		workerRan = true
+		workerRan.Store(true)
 		return nil
 	})
 	time.Sleep(5 * time.Millisecond)
-	require.True(t, workerRan, "worker should have run")
+	require.True(t, workerRan.Load(), "worker should have run")
 	cancel()
 	wg.Wait()
 }

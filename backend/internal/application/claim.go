@@ -139,7 +139,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 			return err
 		}
 		if !now.Before(taskRecord.Deadline) {
-			return domain.ErrLeaseExpired
+			return &domain.Error{Code: "deadline_exceeded", Message: "task deadline has passed"}
 		}
 		from := execution.Status
 		if err := mutate(execution, now, generation); err != nil {
