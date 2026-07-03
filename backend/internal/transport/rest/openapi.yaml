@@ -14,6 +14,314 @@ security:
   - bearerAuth: []
 
 paths:
+  /oauth/oidc/login:
+    get:
+      operationId: oidcLogin
+      summary: 发起 OIDC 登录
+      security: []
+      responses:
+        '302':
+          description: 重定向到 OIDC Provider
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /oauth/oidc/callback:
+    get:
+      operationId: oidcCallback
+      summary: 完成 OIDC 回调并写入 session cookie
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 已创建 session
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/agents:
+    post:
+      operationId: registerAgent
+      summary: 注册 Agent
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterAgentRequest'
+      responses:
+        '201':
+          description: Agent 已注册，返回一次性 Activation Token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRegisterAgent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    get:
+      operationId: listAgents
+      summary: Agent 列表
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: owner_id
+          in: query
+          description: 管理员可按 owner 过滤；非管理员会被服务端限制为自己
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Agent 列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgentList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}:
+    get:
+      operationId: getAgent
+      summary: 读取 Agent 详情
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+      responses:
+        '200':
+          description: Agent 详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}:suspend:
+    post:
+      operationId: suspendAgent
+      summary: 暂停 Agent
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentStateRequest'
+      responses:
+        '200':
+          description: Agent 已暂停
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}:resume:
+    post:
+      operationId: resumeAgent
+      summary: 恢复 Agent
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+      responses:
+        '200':
+          description: Agent 已恢复
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}:revoke:
+    post:
+      operationId: revokeAgent
+      summary: 撤销 Agent
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentStateRequest'
+      responses:
+        '200':
+          description: Agent 已撤销
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}:token:
+    get:
+      operationId: getAgentToken
+      summary: 查看 Agent activation token 状态
+      description: 只返回状态，不暴露 activation token 明文。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+      responses:
+        '200':
+          description: Token 状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeActivationStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me:activate:
+    post:
+      operationId: activateAgent
+      summary: 激活当前 Agent
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateAgentRequest'
+      responses:
+        '200':
+          description: 激活成功并返回 Access Token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAccessToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me:refresh:
+    post:
+      operationId: refreshAgentToken
+      summary: 刷新当前 Agent Access Token
+      responses:
+        '200':
+          description: 新 Access Token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAccessToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me:heartbeat:
+    post:
+      operationId: agentHeartbeat
+      summary: 当前 Agent 心跳
+      responses:
+        '200':
+          description: 心跳成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me:
+    get:
+      operationId: getSelfAgent
+      summary: 当前 Agent 详情
+      responses:
+        '200':
+          description: 当前 Agent 详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /v1/tasks:
     post:
       operationId: publishTask
@@ -307,6 +615,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: OAuth 2.1 Agent Access Token
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: agentguild_session
+      description: 人类管理端 OIDC session cookie
 
   parameters:
     IdempotencyKey:
@@ -314,6 +627,13 @@ components:
       in: header
       required: true
       description: 写操作的幂等键，映射为底层 request_id
+      schema:
+        type: string
+        minLength: 1
+    AgentID:
+      name: id
+      in: path
+      required: true
       schema:
         type: string
         minLength: 1
@@ -358,6 +678,136 @@ components:
         - rejected
         - expired
         - cancelled
+
+    AgentStatus:
+      type: string
+      enum:
+        - pending_activation
+        - active
+        - suspended
+        - revoked
+
+    ActivationStatus:
+      type: string
+      enum:
+        - pending
+        - consumed
+        - expired
+        - activated
+
+    AgentVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        agent_id:
+          type: string
+        version_number:
+          type: integer
+        runtime:
+          type: string
+        model:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        config_fingerprint:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        team:
+          type: string
+        owner_id:
+          type: string
+        owner_email:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        repo_scope:
+          type: array
+          items:
+            type: string
+        current_version:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/AgentVersion'
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        budget_cents:
+          type: integer
+          format: int64
+        budget_currency:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AccessToken:
+      type: object
+      properties:
+        token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_at:
+          type: string
+          format: date-time
+        agent_id:
+          type: string
+        agent_version_id:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        repo_scope:
+          type: array
+          items:
+            type: string
+
+    ActivationStatusView:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+        activation_status:
+          $ref: '#/components/schemas/ActivationStatus'
+        activation_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        activated_at:
+          type: string
+          format: date-time
+          nullable: true
 
     Task:
       type: object
@@ -500,6 +950,116 @@ components:
         meta:
           $ref: '#/components/schemas/Meta'
 
+    EnvelopeAgent:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Agent'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    AgentList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+
+    EnvelopeAgentList:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/AgentList'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    RegisterAgentResponse:
+      type: object
+      properties:
+        agent:
+          $ref: '#/components/schemas/Agent'
+        activation_token:
+          type: string
+          description: 只在注册响应中返回一次
+        activation_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    EnvelopeRegisterAgent:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RegisterAgentResponse'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeAccessToken:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/AccessToken'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeActivationStatus:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ActivationStatusView'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    RegisterAgentRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        team:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        repo_scope:
+          type: array
+          items:
+            type: string
+        budget_cents:
+          type: integer
+          format: int64
+        budget_currency:
+          type: string
+
+    ActivateAgentRequest:
+      type: object
+      required:
+        - activation_token
+      properties:
+        activation_token:
+          type: string
+        runtime:
+          type: string
+        model:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        config_fingerprint:
+          type: string
+
+    AgentStateRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
     PublishTaskRequest:
       type: object
       required:
@@ -618,6 +1178,13 @@ components:
         Retry-After:
           schema:
             type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    InternalError:
+      description: 内部错误
       content:
         application/json:
           schema:

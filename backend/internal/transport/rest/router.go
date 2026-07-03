@@ -13,6 +13,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -29,11 +30,33 @@ type applicationService interface {
 	GetExecution(ctx context.Context, principal auth.Principal, query application.GetExecution) (application.Envelope[application.ExecutionView], error)
 }
 
+type identityService interface {
+	RegisterAgent(context.Context, identityapp.Principal, identityapp.RegisterAgent) (identityapp.Envelope[identityapp.RegisterAgentResponse], error)
+	ListAgents(context.Context, identityapp.Principal, identityapp.ListAgents) (identityapp.Envelope[identityapp.AgentPage], error)
+	GetAgent(context.Context, identityapp.Principal, identityapp.GetAgent) (identityapp.Envelope[identityapp.AgentView], error)
+	SuspendAgent(context.Context, identityapp.Principal, identityapp.SuspendAgent) (identityapp.Envelope[identityapp.AgentView], error)
+	ResumeAgent(context.Context, identityapp.Principal, identityapp.ResumeAgent) (identityapp.Envelope[identityapp.AgentView], error)
+	RevokeAgent(context.Context, identityapp.Principal, identityapp.RevokeAgent) (identityapp.Envelope[identityapp.AgentView], error)
+	GetActivationStatus(context.Context, identityapp.Principal, identityapp.GetActivationStatus) (identityapp.Envelope[identityapp.ActivationStatusView], error)
+	ActivateAgent(context.Context, identityapp.ActivateAgent) (identityapp.Envelope[identityapp.AccessTokenView], error)
+	IssueAccessToken(context.Context, identityapp.Principal, identityapp.IssueAccessToken) (identityapp.Envelope[identityapp.AccessTokenView], error)
+	AgentHeartbeat(context.Context, identityapp.Principal, identityapp.AgentHeartbeat) (identityapp.Envelope[identityapp.AgentView], error)
+}
+
+type oidcProvider interface {
+	BeginAuthURL(state string) string
+	Exchange(context.Context, string) (*auth.Session, error)
+}
+
 // Server 暴露任务生命周期的 REST API。
 type Server struct {
-	svc      applicationService
-	verifier auth.TokenVerifier
-	limiter  RateLimiter
+	svc           applicationService
+	identity      identityService
+	verifier      auth.TokenVerifier
+	limiter       RateLimiter
+	sessionSecret string
+	sessionSecure bool
+	oidc          oidcProvider
 }
 
 // Option 配置 Server。
@@ -42,6 +65,24 @@ type Option func(*Server)
 // WithRateLimiter 替换默认的无限流实现。
 func WithRateLimiter(l RateLimiter) Option {
 	return func(s *Server) { s.limiter = l }
+}
+
+// WithIdentityService 挂载 Agent 身份管理与自服务 REST API。
+func WithIdentityService(identity identityService) Option {
+	return func(s *Server) { s.identity = identity }
+}
+
+// WithSession 配置人类管理端的签名 session cookie。
+func WithSession(secret string, secure bool) Option {
+	return func(s *Server) {
+		s.sessionSecret = secret
+		s.sessionSecure = secure
+	}
+}
+
+// WithOIDCProvider 挂载 OIDC login/callback 路由。
+func WithOIDCProvider(provider oidcProvider) Option {
+	return func(s *Server) { s.oidc = provider }
 }
 
 // NewServer 创建 REST server；svc 通常是 *application.Service。
@@ -64,21 +105,43 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(jsonResponse)
-	r.Use(s.authenticate)
-	r.Use(s.rateLimit)
+
+	if s.oidc != nil {
+		r.Get("/oauth/oidc/login", s.oidcLogin)
+		r.Get("/oauth/oidc/callback", s.oidcCallback)
+	}
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Post("/tasks", s.publishTask)
-		r.Get("/tasks", s.listTasks)
-		r.Get("/tasks/{id}", s.getTask)
-		r.Post("/tasks/{id}:claim", s.claimTask)
-		r.Post("/tasks/{id}:cancel", s.cancelTask)
+		if s.identity != nil {
+			r.Post("/agents/me:activate", s.rateLimitHandler(http.HandlerFunc(s.activateAgent)).ServeHTTP)
+			r.With(s.authenticate, s.rateLimit).Post("/agents/me:refresh", s.refreshAgentToken)
+			r.With(s.authenticate, s.rateLimit).Post("/agents/me:heartbeat", s.agentHeartbeat)
+			r.With(s.authenticate, s.rateLimit).Get("/agents/me", s.getSelfAgent)
 
-		r.Get("/executions/{id}", s.getExecution)
-		r.Post("/executions/{id}:start", s.startExecution)
-		r.Post("/executions/{id}:heartbeat", s.heartbeatExecution)
+			r.With(s.requireSession, s.rateLimit).Post("/agents", s.registerAgent)
+			r.With(s.requireSession, s.rateLimit).Get("/agents", s.listAgents)
+			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}", s.getAgent)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}:suspend", s.suspendAgent)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}:resume", s.resumeAgent)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}:revoke", s.revokeAgent)
+			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}:token", s.getAgentToken)
+		}
+
+		r.With(s.authenticate, s.rateLimit).Post("/tasks", s.publishTask)
+		r.With(s.authenticate, s.rateLimit).Get("/tasks", s.listTasks)
+		r.With(s.authenticate, s.rateLimit).Get("/tasks/{id}", s.getTask)
+		r.With(s.authenticate, s.rateLimit).Post("/tasks/{id}:claim", s.claimTask)
+		r.With(s.authenticate, s.rateLimit).Post("/tasks/{id}:cancel", s.cancelTask)
+
+		r.With(s.authenticate, s.rateLimit).Get("/executions/{id}", s.getExecution)
+		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:start", s.startExecution)
+		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:heartbeat", s.heartbeatExecution)
 	})
 	return r
+}
+
+func (s *Server) rateLimitHandler(next http.Handler) http.Handler {
+	return s.rateLimit(next)
 }
 
 func jsonResponse(next http.Handler) http.Handler {
@@ -114,6 +177,10 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		}
 		principal, err := s.verifier.Verify(r.Context(), parts[1])
 		if err != nil {
+			if errors.Is(err, auth.ErrTokenExpired) {
+				writeError(w, http.StatusUnauthorized, "TOKEN_EXPIRED", "token expired")
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "token verification failed")
 			return
 		}

@@ -10,6 +10,8 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 )
 
 // ErrorResponse 是 REST 暴露的稳定错误结构；code 为全大写领域错误码。
@@ -106,6 +108,40 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusConflict, "DEADLINE_EXCEEDED", err.Error())
 	case "rate_limited":
 		writeRateLimited(w, err.Error(), retryAfterSeconds(domain.RetryAfterOf(err)))
+	default:
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusServiceUnavailable, "TEMPORARILY_UNAVAILABLE", "request timed out")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+	}
+}
+
+func mapIdentityError(w http.ResponseWriter, err error, principal identityapp.Principal) {
+	code := identitydomain.CodeOf(err)
+	switch code {
+	case "invalid_argument":
+		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), identitydomain.FieldOf(err))
+	case "forbidden":
+		if principal.IsAdmin {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+	case "not_found":
+		if principal.IsAdmin {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+			return
+		}
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+	case "state_conflict":
+		writeError(w, http.StatusConflict, "STATE_CONFLICT", err.Error())
+	case "token_expired":
+		writeError(w, http.StatusUnauthorized, "TOKEN_EXPIRED", err.Error())
+	case "token_revoked":
+		writeError(w, http.StatusUnauthorized, "TOKEN_REVOKED", err.Error())
+	case "rate_limited":
+		writeRateLimited(w, err.Error(), retryAfterSeconds(identitydomain.RetryAfterOf(err)))
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(w, http.StatusServiceUnavailable, "TEMPORARILY_UNAVAILABLE", "request timed out")
