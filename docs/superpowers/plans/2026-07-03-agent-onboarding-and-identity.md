@@ -627,7 +627,7 @@ git commit -m "feat: expose agent identity REST API"
 
 ## Task 6: 提供 Agent 接入体验（skill.md、well-known 和激活 API）
 
-- [ ] **Completion gate: Task 6 agent onboarding experience**
+- [x] **Completion gate: Task 6 agent onboarding experience**
 
 **Files:**
 - Create: `/skill.md`
