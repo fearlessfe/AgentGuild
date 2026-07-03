@@ -123,17 +123,20 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	t.Cleanup(db.Close)
 
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
+	applyMigration(t, db, "000002_agent_identity.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000002_agent_identity.down.sql")
 	applyMigration(t, db, "000001_task_lifecycle.down.sql")
 }
 
 func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
+	applyMigration(t, db, "000002_agent_identity.up.sql")
 }
 
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
