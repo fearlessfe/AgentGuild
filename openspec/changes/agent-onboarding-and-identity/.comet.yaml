@@ -20,3 +20,4 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/agent-onboarding-and-identity/.comet/handoff/design-context.json
 handoff_hash: 6d3ad99c69bfd8df6b27927c0f4e1ced3b50cd492b114e87b3f3f0e8841db9da
+build_command: make build

@@ -7,28 +7,29 @@ TDD mode: tdd
 
 ## Current Task
 
-Plan task: Task 7: 实现 React Agents 管理页面
-OpenSpec task: 3.2 实现 React Agents 列表、注册、Token 单次展示和状态管理
+Plan task: Task 8: 组装服务、配置与端到端验收
+OpenSpec task: 3.3 完成凭证泄露、重放、越权和审计验收测试
 Stage: done
 Review/fix round: 1
 
 ## Implementation
 
-Implementer: 019f28cd-681e-7810-aef5-7ee188e6c277 (Halley)
-Base commit: c0612b1b4f7562f93ad0419d1bfc575ed60f3e50
-Brief: .superpowers/sdd/task-7-brief.md
-Report: .superpowers/sdd/task-7-report.md
-Commit: 6dc6afde53c12f1c9e6db3925e4f9b32e3616936 feat: add React agents management page
-Changed files: frontend/src/features/agents/*; frontend/e2e/agent-onboarding.spec.ts; frontend/src/api/client.ts; frontend/src/api/fixtures.ts; frontend/src/app/AppShell.tsx; frontend/src/styles/tokens.css; .superpowers/sdd/task-7-report.md
-RED evidence: recorded in .superpowers/sdd/task-7-report.md (agents component imports failed before implementation)
-GREEN evidence: recorded in .superpowers/sdd/task-7-report.md (agents component tests, full frontend tests, build, diff check passed; e2e blocked by sandbox port EPERM)
+Implementer: 019f28f0-c180-7f71-b665-8e1c1fda5d86 (Chandrasekhar)
+Base commit: 23b2f2f
+Brief: .superpowers/sdd/task-8-brief.md
+Report: .superpowers/sdd/task-8-report.md
+Changed files: pending
+Commit: b9c261d test: verify agent onboarding and identity end to end
+Changed files: backend/cmd/agentguild-api/main.go; backend/cmd/agentguild-api/main_test.go; backend/internal/config/config.go; backend/internal/config/config_test.go; backend/internal/acceptance/env.go; backend/internal/acceptance/identity_test.go; .superpowers/sdd/task-8-report.md
+RED evidence: recorded in .superpowers/sdd/task-8-report.md (missing identity/OIDC/session/RSA config and acceptance harness)
+GREEN evidence: recorded in .superpowers/sdd/task-8-report.md (target identity runtime/config/acceptance tests, identity/rest packages, backend build, diff check passed; full make verify blocked by sandbox)
 
 ## Review
 
-Batch/thorough review: 019f28db-9e4a-78d3-a709-ed387fd5e05a (Ptolemy) requested changes
-Open feedback: none
-Fixer: 019f28e0-d8dc-7f80-955c-7c6d2d7c681e (Ampere)
-Fix commit: 850af479720e11c49bbf93552f12c103d8fba1b3 fix: align React agents UI with identity REST contract
-Fix evidence: .superpowers/sdd/task-7-report.md review round 1; agents component tests, full frontend tests, build, diff check passed
-Round 1 re-review: 019f28e8-7cd8-7b50-ac65-c37d93a4a6b6 (Hooke) approved; original Critical/Important findings closed
-Completed: Task 7 checked in plan and OpenSpec tasks; SDD ledger updated
+Batch/thorough review: 019f2902-72ac-7aa2-b9f0-f7e8f587e648 (Linnaeus) requested changes
+Open feedback: Important - tenant isolation acceptance test must create real cross-tenant data/request; Minor - credential leakage assertion should decode response and inspect persisted credential shape; Minor - report targeted GREEN should not imply cmd tests ran when filter reports no tests.
+Fixer: 019f290b-af00-7770-b003-aa261f164b9c (Averroes)
+Fix commit: 9b18437 fix: strengthen identity onboarding acceptance coverage
+Review package: .superpowers/sdd/review-23b2f2f..9b18437.diff
+Re-review: 019f2917-3182-74f1-966c-0b214759acba (Confucius) found no Critical/Important/Minor issues; diagnostics service unavailable with 503.
+Coordinator verification: acceptance focus, identity/auth/rest/acceptance regression, original targeted command, backend race suite, frontend Vitest, make build, and git diff check passed locally. Playwright E2E blocked by sandbox local listener EPERM; escalated Playwright and Docker/PostgreSQL attempts rejected by approval service 503.

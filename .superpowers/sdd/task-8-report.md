@@ -63,7 +63,7 @@ Result: PASS.
 
 ### Verification Limits
 
-Full `make verify` was not re-run in this fix round. The earlier Task 8 full-project verification remained environment-limited by Docker socket/local listener/Playwright constraints in this sandbox; this repair therefore records targeted backend acceptance, backend regression, build, and diff-check evidence only.
+Full `make verify` was attempted during coordinator checkoff. `make build`, backend race tests, frontend Vitest, and focused Task 8 acceptance/regression tests passed. The Playwright step failed before test execution because Vite could not bind the local web server (`listen EPERM: operation not permitted ::1:5173`). Escalated rerun for Playwright and Docker/PostgreSQL startup was requested but rejected by the approval service with `503 Service Unavailable`; no workaround was attempted.
 
 ## Scope Delivered
 
@@ -125,6 +125,28 @@ Result:
 - `internal/identity/postgres`: PASS
 - `internal/transport/rest`: PASS
 - `internal/acceptance`: PASS
+
+Coordinator checkoff verification:
+
+```bash
+cd backend && go test ./internal/acceptance -run 'CredentialHash|Tenant|IdentityAudit|ActivationToken|AgentActivation' -count=1
+cd backend && go test ./internal/auth ./internal/identity/... ./internal/transport/rest ./internal/acceptance -count=1
+cd backend && go test ./cmd/agentguild-api ./internal/config ./internal/acceptance -run 'Identity|AgentActivation|ActivationToken|Credential' -count=1
+cd backend && go test -race ./... -count=1
+cd frontend && npm test -- --run
+make build
+git diff --check
+```
+
+Result: PASS. The filtered `cmd/agentguild-api` package still reported `[no tests to run]`; `internal/config` and `internal/acceptance` passed under that command.
+
+Playwright verification:
+
+```bash
+cd frontend && npm run test:e2e
+```
+
+Result: blocked before test execution by local listener sandbox (`listen EPERM: operation not permitted ::1:5173`). Escalated rerun was rejected by the approval service with `503 Service Unavailable`.
 
 Build and diff checks:
 
