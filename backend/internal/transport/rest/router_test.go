@@ -344,6 +344,11 @@ func TestExecutionEndpointsMapToService(t *testing.T) {
 	res = postJSON(t, server, "/v1/executions/exe-1:heartbeat", `{"lease_generation":2}`, "token-agent-1", "Idempotency-Key", "req-h")
 	require.Equal(t, http.StatusOK, res.Code)
 	require.Equal(t, "req-h", app.calls[2].payload.(application.HeartbeatExecution).RequestID)
+
+	res = postJSON(t, server, "/v1/executions/exe-1:heartbeat", `{"lease_generation":2,"stage":"testing","progress":0.75}`, "token-agent-1", "Idempotency-Key", "req-h2")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Equal(t, "testing", *app.calls[3].payload.(application.HeartbeatExecution).Stage)
+	require.Equal(t, 0.75, *app.calls[3].payload.(application.HeartbeatExecution).Progress)
 }
 
 func TestCancelTask(t *testing.T) {

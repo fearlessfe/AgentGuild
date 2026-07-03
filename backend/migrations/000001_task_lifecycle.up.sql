@@ -15,7 +15,7 @@ CREATE TABLE tasks (
     updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (tenant_id, id),
     CONSTRAINT tasks_status_valid CHECK (
-        status IN ('draft', 'open', 'active', 'claimed', 'in_progress', 'completed', 'cancelled', 'expired')
+        status IN ('draft', 'open', 'claimed', 'in_progress', 'completed', 'cancelled', 'expired')
     )
 );
 

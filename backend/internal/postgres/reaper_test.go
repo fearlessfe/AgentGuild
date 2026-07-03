@@ -27,6 +27,39 @@ func TestReaperReopensHardExpiredTaskAndIsIdempotent(t *testing.T) {
 	assertReapedState(t, db, "task-1", "execution-1", "open", "expired", 1)
 }
 
+func TestReaperSkipsInconsistentTaskRowAndContinues(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedReaperExecution(t, db, "task-1", "execution-1", time.Now().Add(time.Hour), time.Now().Add(-time.Second))
+	seedReaperExecution(t, db, "task-2", "execution-2", time.Now().Add(time.Hour), time.Now().Add(-time.Second))
+
+	// Simulate a concurrent state change that makes the task row inconsistent.
+	if _, err := db.Exec(context.Background(), `
+		UPDATE tasks SET status='open', active_execution_id=NULL
+		WHERE tenant_id='tenant-1' AND id='task-1'`); err != nil {
+		t.Fatal(err)
+	}
+
+	reaper := postgres.NewReaper(db)
+	count, err := reaper.RunBatch(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RunBatch() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("RunBatch()=%d, want 1", count)
+	}
+
+	var events, outbox int
+	if err := db.QueryRow(context.Background(), `
+		SELECT
+			(SELECT count(*) FROM task_events WHERE task_id='task-2' AND intent='expire'),
+			(SELECT count(*) FROM outbox_events WHERE aggregate_id='task-2')`).Scan(&events, &outbox); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || outbox != 1 {
+		t.Fatalf("task-2 events=%d outbox=%d", events, outbox)
+	}
+}
+
 func TestReaperExpiresTaskAtDeadlineEvenWithFutureLease(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	seedReaperExecution(t, db, "task-1", "execution-1", time.Now().Add(-time.Second), time.Now().Add(time.Hour))

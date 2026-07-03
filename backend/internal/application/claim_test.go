@@ -89,6 +89,35 @@ func TestStartAndHeartbeatFenceOwnerGenerationAndHardExpiry(t *testing.T) {
 	}
 }
 
+func TestStartAndHeartbeatReportStageAndProgress(t *testing.T) {
+	svc, tx := newServiceFixture()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskClaimed, ClaimedBy: "worker", ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{ID: "execution", TaskID: "task", TenantID: "tenant", AgentID: "worker", Status: domain.ExecutionLeased, Lease: domain.Lease{Generation: 1, SoftExpiry: fixtureNow.Add(10 * time.Minute), HardExpiry: fixtureNow.Add(10*time.Minute + 30*time.Second)}}
+
+	stage := "planning"
+	progress := 0.25
+	got, err := svc.StartExecution(context.Background(), principal("tenant", "worker", "tasks:execute"), application.StartExecution{RequestID: "start", ExecutionID: "execution", LeaseGeneration: 1, Stage: &stage, Progress: &progress})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.Stage != stage || got.Data.Progress != progress {
+		t.Fatalf("start did not report stage/progress: %#v", got.Data)
+	}
+
+	stage = "testing"
+	progress = 0.75
+	got, err = svc.HeartbeatExecution(context.Background(), principal("tenant", "worker", "tasks:execute"), application.HeartbeatExecution{RequestID: "beat", ExecutionID: "execution", LeaseGeneration: 1, Stage: &stage, Progress: &progress})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.Stage != stage || got.Data.Progress != progress {
+		t.Fatalf("heartbeat did not report stage/progress: %#v", got.Data)
+	}
+	if tx.executions["execution"].Stage != stage || tx.executions["execution"].Progress != progress {
+		t.Fatalf("stage/progress not persisted: %#v", tx.executions["execution"])
+	}
+}
+
 func TestHeartbeatInGraceRenewsAndIncrementsGeneration(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.now = fixtureNow.Add(20 * time.Second)

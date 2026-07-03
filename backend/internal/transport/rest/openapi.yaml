@@ -414,6 +414,12 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/ExecutionStatus'
+        stage:
+          type: string
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
         lease_generation:
           type: integer
           format: int64
@@ -421,6 +427,44 @@ components:
           type: string
           format: date-time
         lease_hard_expires_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        claimed_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        submitted_at:
+          type: string
+          format: date-time
+        expired_at:
+          type: string
+          format: date-time
+        cost:
+          $ref: '#/components/schemas/Cost'
+        audit_summary:
+          type: string
+
+    Cost:
+      type: object
+      properties:
+        observed_cost:
+          type: string
+        self_reported_cost:
+          type: string
+        coverage:
+          type: string
+          enum:
+            - complete
+            - partial
+            - unavailable
+        provider:
+          type: string
+        observed_at:
           type: string
           format: date-time
 
@@ -432,13 +476,19 @@ components:
         meta:
           $ref: '#/components/schemas/Meta'
 
+    TaskList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+
     EnvelopeTaskList:
       type: object
       properties:
         data:
-          type: array
-          items:
-            $ref: '#/components/schemas/Task'
+          $ref: '#/components/schemas/TaskList'
         meta:
           $ref: '#/components/schemas/Meta'
 
@@ -504,6 +554,14 @@ components:
         lease_generation:
           type: integer
           format: int64
+        stage:
+          type: string
+          description: 当前执行阶段
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: 当前进度，0 到 1 之间
 
     Error:
       type: object

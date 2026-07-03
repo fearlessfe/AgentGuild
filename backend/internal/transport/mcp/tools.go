@@ -52,16 +52,20 @@ type CancelTaskInput struct {
 
 // StartExecutionInput 是 execution_start 工具的输入。
 type StartExecutionInput struct {
-	RequestID       string `json:"request_id" jsonschema:"unique mutation request id"`
-	ExecutionID     string `json:"execution_id" jsonschema:"execution identifier"`
-	LeaseGeneration int64  `json:"lease_generation" jsonschema:"current lease generation"`
+	RequestID       string   `json:"request_id" jsonschema:"unique mutation request id"`
+	ExecutionID     string   `json:"execution_id" jsonschema:"execution identifier"`
+	LeaseGeneration int64    `json:"lease_generation" jsonschema:"current lease generation"`
+	Stage           *string  `json:"stage,omitempty" jsonschema:"optional execution stage"`
+	Progress        *float64 `json:"progress,omitempty" jsonschema:"optional progress between 0 and 1"`
 }
 
 // HeartbeatInput 是 execution_heartbeat 工具的输入。
 type HeartbeatInput struct {
-	RequestID       string `json:"request_id" jsonschema:"unique mutation request id"`
-	ExecutionID     string `json:"execution_id" jsonschema:"execution identifier"`
-	LeaseGeneration int64  `json:"lease_generation" jsonschema:"current lease generation"`
+	RequestID       string   `json:"request_id" jsonschema:"unique mutation request id"`
+	ExecutionID     string   `json:"execution_id" jsonschema:"execution identifier"`
+	LeaseGeneration int64    `json:"lease_generation" jsonschema:"current lease generation"`
+	Stage           *string  `json:"stage,omitempty" jsonschema:"optional execution stage"`
+	Progress        *float64 `json:"progress,omitempty" jsonschema:"optional progress between 0 and 1"`
 }
 
 // GetExecutionInput 是 execution_get 工具的输入。
@@ -162,6 +166,8 @@ func registerTools(server *mcp.Server, svc applicationService, principal auth.Pr
 			RequestID:       input.RequestID,
 			ExecutionID:     input.ExecutionID,
 			LeaseGeneration: input.LeaseGeneration,
+			Stage:           input.Stage,
+			Progress:        input.Progress,
 		})
 		if err != nil {
 			return mapDomainError(err, principal), nil, nil
@@ -177,6 +183,8 @@ func registerTools(server *mcp.Server, svc applicationService, principal auth.Pr
 			RequestID:       input.RequestID,
 			ExecutionID:     input.ExecutionID,
 			LeaseGeneration: input.LeaseGeneration,
+			Stage:           input.Stage,
+			Progress:        input.Progress,
 		})
 		if err != nil {
 			return mapDomainError(err, principal), nil, nil

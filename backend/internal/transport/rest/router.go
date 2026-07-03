@@ -257,8 +257,10 @@ func (s *Server) getExecution(w http.ResponseWriter, r *http.Request) {
 func (s *Server) startExecution(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
 	var body struct {
-		RequestID       string `json:"request_id"`
-		LeaseGeneration int64  `json:"lease_generation"`
+		RequestID       string   `json:"request_id"`
+		LeaseGeneration int64    `json:"lease_generation"`
+		Stage           *string  `json:"stage,omitempty"`
+		Progress        *float64 `json:"progress,omitempty"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -272,6 +274,8 @@ func (s *Server) startExecution(w http.ResponseWriter, r *http.Request) {
 		RequestID:       idempotencyKey,
 		ExecutionID:     chi.URLParam(r, "id"),
 		LeaseGeneration: body.LeaseGeneration,
+		Stage:           body.Stage,
+		Progress:        body.Progress,
 	})
 	if err != nil {
 		mapDomainError(w, err, principal)
@@ -283,8 +287,10 @@ func (s *Server) startExecution(w http.ResponseWriter, r *http.Request) {
 func (s *Server) heartbeatExecution(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
 	var body struct {
-		RequestID       string `json:"request_id"`
-		LeaseGeneration int64  `json:"lease_generation"`
+		RequestID       string   `json:"request_id"`
+		LeaseGeneration int64    `json:"lease_generation"`
+		Stage           *string  `json:"stage,omitempty"`
+		Progress        *float64 `json:"progress,omitempty"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -298,6 +304,8 @@ func (s *Server) heartbeatExecution(w http.ResponseWriter, r *http.Request) {
 		RequestID:       idempotencyKey,
 		ExecutionID:     chi.URLParam(r, "id"),
 		LeaseGeneration: body.LeaseGeneration,
+		Stage:           body.Stage,
+		Progress:        body.Progress,
 	})
 	if err != nil {
 		mapDomainError(w, err, principal)

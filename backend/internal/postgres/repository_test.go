@@ -25,7 +25,7 @@ func TestTaskPersistenceRecordRoundTripsWithoutInventedContent(t *testing.T) {
 		Constraints:  []byte(`{"network":"offline","max_minutes":15}`),
 		Requirements: []byte(`{"language":"go","tests":true}`),
 		Deadline:     time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond),
-		Status:       domain.TaskStatus("active"),
+		Status:       domain.TaskOpen,
 	}
 
 	if err := store.WithTx(context.Background(), func(tx application.Tx) error {
@@ -269,6 +269,34 @@ func fixtureTime(minute int) time.Time {
 	return time.Date(2026, 7, 2, 10, minute, 0, 0, time.UTC)
 }
 
+func TestTaskListFiltersByPublisherAgentVersionID(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-a", "task-pub-a")
+	seedTask(t, db, "tenant-a", "task-pub-b")
+	if _, err := db.Exec(context.Background(), `
+		UPDATE tasks SET publisher_agent_version_id='publisher-a' WHERE tenant_id='tenant-a' AND id='task-pub-a'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(context.Background(), `
+		UPDATE tasks SET publisher_agent_version_id='publisher-b' WHERE tenant_id='tenant-a' AND id='task-pub-b'`); err != nil {
+		t.Fatal(err)
+	}
+	store := postgres.NewStore(db)
+	err := store.WithTx(context.Background(), func(tx application.Tx) error {
+		records, err := tx.ListTaskRecords(context.Background(), application.TaskListQuery{TenantID: "tenant-a", PublisherAgentVersionID: "publisher-a", Limit: 10})
+		if err != nil {
+			return err
+		}
+		if len(records) != 1 || records[0].ID != "task-pub-a" {
+			t.Fatalf("filter by publisher returned %#v", records)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExecutionRepositoryIsTenantScoped(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	seedTask(t, db, "tenant-a", "task")
@@ -359,7 +387,7 @@ func TestTransactionRollsBackTaskIdempotencyAuditAndOutbox(t *testing.T) {
 		event := application.TaskEvent{
 			TenantID: "tenant-1", TaskID: "task-1", ExecutionID: "exe-1",
 			ActorType: "agent", ActorID: "agent-1", Intent: "claim",
-			FromState: "open", ToState: "active", Payload: []byte(`{}`), CreatedAt: now,
+			FromState: "open", ToState: "claimed", Payload: []byte(`{}`), CreatedAt: now,
 		}
 		if err := tx.AppendTaskEvent(context.Background(), event); err != nil {
 			return err

@@ -71,9 +71,29 @@ export type TaskView = {
 
 const base = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+function apiToken(): string | undefined {
+  if (import.meta.env.DEV && import.meta.env.VITE_API_TOKEN) {
+    return import.meta.env.VITE_API_TOKEN as string;
+  }
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  const globalToken = (window as any).AG_TOKEN as string | undefined;
+  if (globalToken) {
+    return globalToken;
+  }
+  const match = document.cookie.match(/(?:^|; )ag_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 async function request<T>(path: string): Promise<Envelope<T>> {
   if (import.meta.env.VITE_DEMO_MODE === "true") return demo(path) as Envelope<T>;
-  const response = await fetch(base + path);
+  const headers: Record<string, string> = {};
+  const token = apiToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(base + path, { headers });
   if (!response.ok) throw new Error(`API request failed (${response.status})`);
   return response.json() as Promise<Envelope<T>>;
 }

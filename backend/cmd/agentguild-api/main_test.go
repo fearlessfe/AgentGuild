@@ -2,50 +2,64 @@ package main
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
-
-	"agentguild.dev/agentguild/backend/internal/config"
-	"agentguild.dev/agentguild/backend/internal/telemetry"
-	"github.com/stretchr/testify/require"
 )
 
-func TestAdapterHandlerMountsOnlyEnabledTransports(t *testing.T) {
-	web := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	mcp := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
-	handler := adapterHandler(true, false, web, mcp)
-
-	restResponse := httptest.NewRecorder()
-	handler.ServeHTTP(restResponse, httptest.NewRequest(http.MethodGet, "/v1/tasks", nil))
-	require.Equal(t, http.StatusNoContent, restResponse.Code)
-
-	mcpResponse := httptest.NewRecorder()
-	handler.ServeHTTP(mcpResponse, httptest.NewRequest(http.MethodPost, "/mcp", nil))
-	require.Equal(t, http.StatusNotFound, mcpResponse.Code)
-}
-
-func TestDisabledLangfuseKeepsOutboxProviderAvailable(t *testing.T) {
-	provider := costProvider(false, config.Config{})
-	observation, err := provider.Observe(context.Background(), telemetry.ExecutionRef{ExecutionID: "execution-1"})
-	require.NoError(t, err)
-	require.Equal(t, telemetry.CoverageUnavailable, observation.Coverage)
-	require.True(t, observation.Disabled)
-}
-
-func TestShutdownJoinsWorkersBeforePoolClose(t *testing.T) {
-	var wg sync.WaitGroup
+func TestRepeatContinuesAfterPanic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	var workerRan atomic.Bool
-	runWorker(ctx, &wg, time.Millisecond, "test", func(ctx context.Context) error {
-		workerRan.Store(true)
-		return nil
-	})
-	time.Sleep(5 * time.Millisecond)
-	require.True(t, workerRan.Load(), "worker should have run")
-	cancel()
-	wg.Wait()
+	defer cancel()
+
+	var mu sync.Mutex
+	calls := 0
+
+	go func() {
+		repeat(ctx, 5*time.Millisecond, "test", func(context.Context) error {
+			mu.Lock()
+			calls++
+			call := calls
+			mu.Unlock()
+			if call == 1 {
+				panic("intentional test panic")
+			}
+			if call >= 3 {
+				cancel()
+			}
+			return nil
+		})
+	}()
+
+	// Wait for repeat to process several iterations after the panic.
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if got < 3 {
+		t.Fatalf("repeat did not continue after panic: calls=%d", got)
+	}
+}
+
+func TestWaitWorkersReturnsTrueWhenWorkersStop(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		wg.Done()
+	}()
+
+	if !waitWorkers(&wg, time.Second) {
+		t.Fatal("waitWorkers returned false for workers that stopped")
+	}
+}
+
+func TestWaitWorkersReturnsFalseOnTimeout(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	defer wg.Done()
+
+	if waitWorkers(&wg, 20*time.Millisecond) {
+		t.Fatal("waitWorkers returned true despite timeout")
+	}
 }

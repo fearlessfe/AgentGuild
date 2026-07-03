@@ -87,26 +87,45 @@ func NewLeasedExecution(
 	}, nil
 }
 
-func (e *Execution) Start(now time.Time, generation int64) error {
+func (e *Execution) Start(now time.Time, generation int64, stage *string, progress *float64) error {
 	if e.Status != ExecutionLeased {
 		return ErrStateConflict
 	}
 	if generation != e.Lease.Generation || !now.Before(e.Lease.HardExpiry) {
 		return ErrLeaseExpired
 	}
+	if err := applyStageProgress(e, stage, progress); err != nil {
+		return err
+	}
 	e.Status = ExecutionRunning
 	return nil
 }
 
-func (e *Execution) Heartbeat(now time.Time, generation int64) (Lease, error) {
+func (e *Execution) Heartbeat(now time.Time, generation int64, stage *string, progress *float64) (Lease, error) {
 	if e.Status != ExecutionLeased && e.Status != ExecutionRunning {
 		return Lease{}, ErrStateConflict
 	}
 	if generation != e.Lease.Generation || !now.Before(e.Lease.HardExpiry) {
 		return Lease{}, ErrLeaseExpired
 	}
+	if err := applyStageProgress(e, stage, progress); err != nil {
+		return Lease{}, err
+	}
 	e.Lease = RenewLease(now, generation)
 	return e.Lease, nil
+}
+
+func applyStageProgress(e *Execution, stage *string, progress *float64) error {
+	if stage != nil {
+		e.Stage = *stage
+	}
+	if progress != nil {
+		if *progress < 0 || *progress > 1 {
+			return invalidArgument("progress")
+		}
+		e.Progress = *progress
+	}
+	return nil
 }
 
 func (e *Execution) Expire(now time.Time) error {

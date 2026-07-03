@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
@@ -94,7 +95,8 @@ func (r *Reaper) RunBatch(ctx context.Context, limit int) (int, error) {
 			return 0, err
 		}
 		if tag.RowsAffected() != 1 {
-			return 0, &domain.Error{Code: "state_conflict", Message: "task changed while reaping execution"}
+			slog.Warn("reaper skipped inconsistent task row", "tenant", item.tenantID, "task", item.taskID, "execution", item.executionID)
+			continue
 		}
 		payload, err := json.Marshal(map[string]string{"task_id": item.taskID, "execution_id": item.executionID})
 		if err != nil {

@@ -50,12 +50,16 @@ type StartExecution struct {
 	RequestID       string
 	ExecutionID     string
 	LeaseGeneration int64
+	Stage           *string
+	Progress        *float64
 }
 
 type HeartbeatExecution struct {
 	RequestID       string
 	ExecutionID     string
 	LeaseGeneration int64
+	Stage           *string
+	Progress        *float64
 }
 
 type GetExecution struct{ ExecutionID string }

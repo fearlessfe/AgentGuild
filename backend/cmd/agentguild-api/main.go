@@ -72,12 +72,12 @@ func run() error {
 		defer shutdownCancel()
 		slog.Info("shutting down workers")
 		cancelWorkers()
-		wg.Wait()
+		waitWorkers(&wg, cfg.ShutdownTimeout)
 		slog.Info("workers stopped, shutting down server")
 		return server.Shutdown(shutdown)
 	case err := <-errCh:
 		cancelWorkers()
-		wg.Wait()
+		waitWorkers(&wg, cfg.ShutdownTimeout)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -119,13 +119,37 @@ func runWorker(ctx context.Context, wg *sync.WaitGroup, interval time.Duration, 
 	}()
 }
 
+func waitWorkers(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		slog.Warn("worker shutdown timed out", "timeout", timeout)
+		return false
+	}
+}
+
 func repeat(ctx context.Context, interval time.Duration, name string, fn func(context.Context) error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		if err := fn(ctx); err != nil && ctx.Err() == nil {
-			slog.Error(name+" iteration failed", "error", err)
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if ctx.Err() == nil {
+						slog.Error(name+" iteration panicked", "panic", r)
+					}
+				}
+			}()
+			if err := fn(ctx); err != nil && ctx.Err() == nil {
+				slog.Error(name+" iteration failed", "error", err)
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			return

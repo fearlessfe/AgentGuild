@@ -83,7 +83,7 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 		return result, err
 	}
 	return s.mutateExecution(ctx, principal, "execution_start", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "start", func(execution *domain.Execution, now time.Time, generation int64) error {
-		return execution.Start(now, generation)
+		return execution.Start(now, generation, command.Stage, command.Progress)
 	})
 }
 
@@ -97,7 +97,7 @@ func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Princip
 		return result, err
 	}
 	return s.mutateExecution(ctx, principal, "execution_heartbeat", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "heartbeat", func(execution *domain.Execution, now time.Time, generation int64) error {
-		_, err := execution.Heartbeat(now, generation)
+		_, err := execution.Heartbeat(now, generation, command.Stage, command.Progress)
 		return err
 	})
 }

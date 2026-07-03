@@ -152,6 +152,10 @@ func TestToolCallsMapToApplicationService(t *testing.T) {
 			Data: application.ExecutionView{ID: "exe-1", TaskID: "task-1", Status: domain.ExecutionLeased},
 			Meta: application.Meta{ServerTime: now, ResourceVersion: 1},
 		},
+		start: application.Envelope[application.ExecutionView]{
+			Data: application.ExecutionView{ID: "exe-1", TaskID: "task-1", Status: domain.ExecutionRunning, Stage: "planning", Progress: 0.25},
+			Meta: application.Meta{ServerTime: now, ResourceVersion: 2},
+		},
 	}
 	server := newMCPServerWithApp(t, app)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -177,6 +181,26 @@ func TestToolCallsMapToApplicationService(t *testing.T) {
 	require.Equal(t, "ClaimTask", app.calls[0].method)
 	require.Equal(t, "req-1", app.calls[0].payload.(application.ClaimTask).RequestID)
 	require.Equal(t, "task-1", app.calls[0].payload.(application.ClaimTask).TaskID)
+
+	res, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "execution_start",
+		Arguments: map[string]any{
+			"request_id":     "req-2",
+			"execution_id":   "exe-1",
+			"lease_generation": int64(1),
+			"stage":          "planning",
+			"progress":       0.25,
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, app.calls, 2)
+	require.Equal(t, "StartExecution", app.calls[1].method)
+	require.Equal(t, "exe-1", app.calls[1].payload.(application.StartExecution).ExecutionID)
+	require.NotNil(t, app.calls[1].payload.(application.StartExecution).Stage)
+	require.Equal(t, "planning", *app.calls[1].payload.(application.StartExecution).Stage)
+	require.NotNil(t, app.calls[1].payload.(application.StartExecution).Progress)
+	require.InDelta(t, 0.25, *app.calls[1].payload.(application.StartExecution).Progress, 0.001)
 }
 
 func TestDomainErrorsMapToStableMCPCodes(t *testing.T) {
@@ -325,13 +349,13 @@ func TestMutationToolsRequireRequestID(t *testing.T) {
 	}
 }
 
-func TestHeartbeatSchemaHasNoLeaseToken(t *testing.T) {
+func TestHeartbeatSchemaExposesStageAndProgress(t *testing.T) {
 	schema := toolSchema(t, newMCPServer(t), "execution_heartbeat")
 	properties, ok := schema["properties"].(map[string]any)
 	require.True(t, ok, "schema properties should be a map")
 	require.NotContains(t, properties, "lease_token", "execution_heartbeat schema should not expose lease_token")
-	require.NotContains(t, properties, "stage", "execution_heartbeat schema should not expose stage")
-	require.NotContains(t, properties, "progress", "execution_heartbeat schema should not expose progress")
+	require.Contains(t, properties, "stage", "execution_heartbeat schema should expose stage")
+	require.Contains(t, properties, "progress", "execution_heartbeat schema should expose progress")
 }
 
 func TestSchemaValidationReturnsInvalidArgument(t *testing.T) {

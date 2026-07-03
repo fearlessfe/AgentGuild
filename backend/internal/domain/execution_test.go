@@ -19,7 +19,7 @@ func TestHeartbeatRejectsStaleGeneration(t *testing.T) {
 		3,
 	)
 
-	_, err := execution.Heartbeat(now.Add(time.Minute), 2)
+	_, err := execution.Heartbeat(now.Add(time.Minute), 2, nil, nil)
 
 	if !errors.Is(err, domain.ErrLeaseExpired) {
 		t.Fatalf("Heartbeat() error = %v, want %v", err, domain.ErrLeaseExpired)
@@ -48,11 +48,25 @@ func TestExecutionStartsWithCurrentLease(t *testing.T) {
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
-	if err := execution.Start(now.Add(time.Minute), 3); err != nil {
+	if err := execution.Start(now.Add(time.Minute), 3, nil, nil); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	if execution.Status != domain.ExecutionRunning {
 		t.Fatalf("status = %q, want %q", execution.Status, domain.ExecutionRunning)
+	}
+}
+
+func TestStartUpdatesOptionalStageAndProgress(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 3)
+	stage := "compiling"
+	progress := 0.25
+
+	if err := execution.Start(now.Add(time.Minute), 3, &stage, &progress); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if execution.Status != domain.ExecutionRunning || execution.Stage != stage || execution.Progress != progress {
+		t.Fatalf("execution = %+v, want running with stage/progress", execution)
 	}
 }
 
@@ -63,7 +77,7 @@ func TestHeartbeatRenewsCurrentLease(t *testing.T) {
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
-	lease, err := execution.Heartbeat(heartbeatAt, 3)
+	lease, err := execution.Heartbeat(heartbeatAt, 3, nil, nil)
 
 	if err != nil {
 		t.Fatalf("Heartbeat() error = %v", err)
@@ -76,6 +90,51 @@ func TestHeartbeatRenewsCurrentLease(t *testing.T) {
 	}
 }
 
+func TestHeartbeatUpdatesOptionalStageAndProgress(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 3)
+	if err := execution.Start(now.Add(time.Minute), 3, nil, nil); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	stage := "testing"
+	progress := 0.75
+
+	if _, err := execution.Heartbeat(now.Add(2*time.Minute), 3, &stage, &progress); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	if execution.Stage != stage || execution.Progress != progress {
+		t.Fatalf("stage/progress not updated: %+v", execution)
+	}
+}
+
+func TestStageAndProgressArePreservedWhenOmitted(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 3)
+	stage := "planning"
+	progress := 0.5
+	if err := execution.Start(now.Add(time.Minute), 3, &stage, &progress); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if _, err := execution.Heartbeat(now.Add(2*time.Minute), 3, nil, nil); err != nil {
+		t.Fatalf("Heartbeat() error = %v", err)
+	}
+	if execution.Stage != stage || execution.Progress != progress {
+		t.Fatalf("stage/progress changed when omitted: %+v", execution)
+	}
+}
+
+func TestProgressOutOfRangeIsInvalidArgument(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	execution := mustNewExecution(t, "exe-1", "task-1", "tenant-1", "agent-1", now, 3)
+	bad := 1.1
+	if err := execution.Start(now.Add(time.Minute), 3, nil, &bad); err == nil {
+		t.Fatal("expected error for out-of-range progress")
+	} else {
+		assertInvalidArgument(t, err, "progress")
+	}
+}
+
 func TestExecutionRejectsOperationsAfterHardExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
 	execution := mustNewExecution(t,
@@ -83,10 +142,10 @@ func TestExecutionRejectsOperationsAfterHardExpiry(t *testing.T) {
 	)
 	afterHardExpiry := execution.Lease.HardExpiry
 
-	if err := execution.Start(afterHardExpiry, 3); !errors.Is(err, domain.ErrLeaseExpired) {
+	if err := execution.Start(afterHardExpiry, 3, nil, nil); !errors.Is(err, domain.ErrLeaseExpired) {
 		t.Fatalf("Start() error = %v, want %v", err, domain.ErrLeaseExpired)
 	}
-	if _, err := execution.Heartbeat(afterHardExpiry, 3); !errors.Is(err, domain.ErrLeaseExpired) {
+	if _, err := execution.Heartbeat(afterHardExpiry, 3, nil, nil); !errors.Is(err, domain.ErrLeaseExpired) {
 		t.Fatalf("Heartbeat() error = %v, want %v", err, domain.ErrLeaseExpired)
 	}
 	if execution.Status != domain.ExecutionLeased {
@@ -118,7 +177,7 @@ func TestExecutionAcceptRequiresRunningStateAndReviewer(t *testing.T) {
 	if err := execution.Apply(domain.IntentAccept, reviewer, now.Add(time.Minute)); !errors.Is(err, domain.ErrStateConflict) {
 		t.Fatalf("Apply(accept leased) error = %v, want %v", err, domain.ErrStateConflict)
 	}
-	if err := execution.Start(now.Add(time.Minute), 3); err != nil {
+	if err := execution.Start(now.Add(time.Minute), 3, nil, nil); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	if err := execution.Apply(
@@ -151,7 +210,7 @@ func TestExecutionExplicitOperationMatrix(t *testing.T) {
 		{
 			name: "start",
 			transition: func(execution *domain.Execution) error {
-				return execution.Start(now.Add(time.Minute), 3)
+				return execution.Start(now.Add(time.Minute), 3, nil, nil)
 			},
 			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
 				domain.ExecutionLeased: domain.ExecutionRunning,
@@ -160,7 +219,7 @@ func TestExecutionExplicitOperationMatrix(t *testing.T) {
 		{
 			name: "heartbeat",
 			transition: func(execution *domain.Execution) error {
-				_, err := execution.Heartbeat(now.Add(time.Minute), 3)
+				_, err := execution.Heartbeat(now.Add(time.Minute), 3, nil, nil)
 				return err
 			},
 			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
@@ -272,9 +331,9 @@ func FuzzExecutionNeverReturnsFromTerminal(f *testing.F) {
 		for step := 0; step < 4; step++ {
 			switch (sequence >> (step * 2)) & 0x3 {
 			case 0:
-				_ = execution.Start(now.Add(time.Minute), generation)
+				_ = execution.Start(now.Add(time.Minute), generation, nil, nil)
 			case 1:
-				if lease, err := execution.Heartbeat(now.Add(time.Minute), generation); err == nil {
+				if lease, err := execution.Heartbeat(now.Add(time.Minute), generation, nil, nil); err == nil {
 					generation = lease.Generation
 				}
 			case 2:
@@ -285,8 +344,8 @@ func FuzzExecutionNeverReturnsFromTerminal(f *testing.F) {
 
 			if execution.Status == domain.ExecutionAccepted || execution.Status == domain.ExecutionExpired {
 				terminal := execution.Status
-				_ = execution.Start(now.Add(time.Minute), generation)
-				_, _ = execution.Heartbeat(now.Add(time.Minute), generation)
+				_ = execution.Start(now.Add(time.Minute), generation, nil, nil)
+				_, _ = execution.Heartbeat(now.Add(time.Minute), generation, nil, nil)
 				_ = execution.Apply(domain.IntentAccept, reviewer, now.Add(time.Minute))
 				_ = execution.Expire(execution.Lease.HardExpiry)
 				if execution.Status != terminal {
@@ -306,7 +365,7 @@ func TestExecutionCancelIsTerminal(t *testing.T) {
 	if execution.Status != domain.ExecutionCancelled {
 		t.Fatalf("status = %q, want %q", execution.Status, domain.ExecutionCancelled)
 	}
-	if err := execution.Start(now, execution.Lease.Generation); err != domain.ErrStateConflict {
+	if err := execution.Start(now, execution.Lease.Generation, nil, nil); err != domain.ErrStateConflict {
 		t.Fatalf("Start() after cancel error = %v, want state conflict", err)
 	}
 }
