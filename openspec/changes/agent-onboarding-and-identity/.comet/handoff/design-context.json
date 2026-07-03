@@ -1,0 +1,16 @@
+{
+  "change": "agent-onboarding-and-identity",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "6d3ad99c69bfd8df6b27927c0f4e1ced3b50cd492b114e87b3f3f0e8841db9da",
+  "files": [
+    { "path": "openspec/changes/agent-onboarding-and-identity/proposal.md", "sha256": "380a1f1790d20c09878aaa834ed0bed222dcc2199c6a9c130bfb4ff292a49241" },
+    { "path": "openspec/changes/agent-onboarding-and-identity/design.md", "sha256": "115171ee835352a2ee538b9a91bc67a449592b99130c272843401d7eeb069448" },
+    { "path": "openspec/changes/agent-onboarding-and-identity/tasks.md", "sha256": "f7c39d52056fed13b4aa1baaee82a217ab61e0e400921b8a373481bdeac8c9af" },
+    { "path": "openspec/changes/agent-onboarding-and-identity/specs/agent-access-control/spec.md", "sha256": "dfec2e19ae5494768ed65060ce6f2f60063dfa9e62d6c2e42f71c76129de3503" },
+    { "path": "openspec/changes/agent-onboarding-and-identity/specs/agent-activation/spec.md", "sha256": "95f3646e38b862ee7e3519a12bc79ca4256ddd589e828a646efe9721bef32ad1" },
+    { "path": "openspec/changes/agent-onboarding-and-identity/specs/agent-identity/spec.md", "sha256": "abb1b11ae423b4da0317bc12633b0a9ffd4630ed83a14b621311c8a13deb2c40" }
+  ]
+}

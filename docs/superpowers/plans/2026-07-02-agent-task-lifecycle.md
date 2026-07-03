@@ -2,6 +2,7 @@
 change: agent-task-lifecycle
 design-doc: docs/superpowers/specs/2026-07-02-agent-task-lifecycle-design.md
 base-ref: c46a757df241db383a3a9aec386efa11d7f4472e
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 # Agent Task Lifecycle Implementation Plan
@@ -74,6 +75,7 @@ docker-compose.yml                        本地 PostgreSQL
 Makefile                                  统一 build/test/verify 命令
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 1: 建立项目骨架与领域状态机
@@ -185,6 +187,7 @@ git add backend/go.mod backend/internal/domain Makefile docker-compose.yml
 git commit -m "feat: define task and execution lifecycle"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 2: 建立 PostgreSQL Schema、事务和 Repository
@@ -280,6 +283,7 @@ git add backend/migrations backend/internal/postgres
 git commit -m "feat: persist task lifecycle atomically"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 3: 实现共享 Application Service 与授权策略
@@ -370,6 +374,7 @@ git add backend/internal/application backend/internal/auth
 git commit -m "feat: add shared task application service"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 4: 实现 Claim、Lease、heartbeat 和回收器
@@ -451,6 +456,7 @@ git add backend/internal/application/claim.go backend/internal/postgres/reaper.g
 git commit -m "feat: enforce claim and lease fencing"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 5: 暴露 REST API、OAuth 和 OpenAPI
@@ -514,6 +520,7 @@ git add backend/internal/auth/oauth.go backend/internal/transport/rest
 git commit -m "feat: expose authorized task REST API"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 6: 暴露无状态 Streamable HTTP MCP 工具
@@ -597,6 +604,7 @@ git add backend/go.mod backend/go.sum backend/internal/transport/mcp backend/int
 git commit -m "feat: expose task lifecycle over MCP"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 7: 实现 outbox、Langfuse 成本覆盖、限流和审计查询
@@ -676,6 +684,7 @@ git add backend/internal/telemetry backend/internal/worker backend/internal/rate
 git commit -m "feat: observe execution cost asynchronously"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 8: 组装服务和 React 只读观察页面
@@ -784,6 +793,7 @@ git add backend/cmd backend/internal/config frontend
 git commit -m "feat: add task lifecycle observer application"
 ```
 
+archived-with: 2026-07-03-agent-task-lifecycle
 ---
 
 ### Task 9: 完成端到端、恢复和验收测试

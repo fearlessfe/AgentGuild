@@ -2,6 +2,8 @@
 comet_change: agent-task-lifecycle
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-03-agent-task-lifecycle
+status: final
 ---
 
 # Agent Task Lifecycle 技术设计
