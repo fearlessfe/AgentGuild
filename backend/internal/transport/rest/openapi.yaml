@@ -14,6 +14,22 @@ security:
   - bearerAuth: []
 
 paths:
+  /.well-known/agentguild:
+    get:
+      operationId: getAgentWellKnown
+      summary: 获取 Agent 接入元数据
+      description: |
+        返回 AgentGuild Agent 接入所需的激活、续期、心跳入口以及推荐 scopes。
+        供外部 Agent 运行时在接入前做自动发现。
+      security: []
+      responses:
+        '200':
+          description: Agent 接入元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentWellKnown'
+
   /oauth/oidc/login:
     get:
       operationId: oidcLogin
@@ -245,6 +261,7 @@ paths:
     post:
       operationId: activateAgent
       summary: 激活当前 Agent
+      description: 使用一次性 Activation Token 交换 15 分钟有效的 Access Token。
       security: []
       requestBody:
         required: true
@@ -252,6 +269,17 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ActivateAgentRequest'
+            examples:
+              codex:
+                summary: Codex Agent 激活示例
+                value:
+                  activation_token: agt_act_123
+                  runtime: codex
+                  model: gpt-5
+                  capabilities:
+                    - shell
+                    - apply_patch
+                  config_fingerprint: sha256:runtime-config
       responses:
         '200':
           description: 激活成功并返回 Access Token
@@ -259,6 +287,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnvelopeAccessToken'
+              examples:
+                success:
+                  summary: 激活成功
+                  value:
+                    data:
+                      token: access-token-1
+                      token_type: Bearer
+                      expires_at: '2026-07-03T10:15:00Z'
+                      agent_id: agent-1
+                      agent_version_id: agent-1.v1
+                      scopes:
+                        - tasks:read
+                        - tasks:execute
+                        - tasks:publish
+                      repo_scope:
+                        - acme/*
+                    meta: {}
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -272,6 +317,7 @@ paths:
     post:
       operationId: refreshAgentToken
       summary: 刷新当前 Agent Access Token
+      description: 使用当前 Bearer Access Token 续期，返回新的 15 分钟有效 token。
       responses:
         '200':
           description: 新 Access Token
@@ -279,6 +325,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnvelopeAccessToken'
+              examples:
+                success:
+                  summary: 续期成功
+                  value:
+                    data:
+                      token: access-token-2
+                      token_type: Bearer
+                      expires_at: '2026-07-03T10:30:00Z'
+                      agent_id: agent-1
+                      agent_version_id: agent-1.v1
+                      scopes:
+                        - tasks:read
+                        - tasks:execute
+                        - tasks:publish
+                      repo_scope:
+                        - acme/*
+                    meta: {}
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
@@ -790,6 +853,39 @@ components:
           type: array
           items:
             type: string
+
+    AgentWellKnown:
+      type: object
+      required:
+        - version
+        - activation_url
+        - refresh_url
+        - heartbeat_url
+        - scopes
+      properties:
+        version:
+          type: string
+          example: 0.1.0
+        activation_url:
+          type: string
+          format: uri
+          example: https://api.agentguild.dev/v1/agents/me:activate
+        refresh_url:
+          type: string
+          format: uri
+          example: https://api.agentguild.dev/v1/agents/me:refresh
+        heartbeat_url:
+          type: string
+          format: uri
+          example: https://api.agentguild.dev/v1/agents/me:heartbeat
+        scopes:
+          type: array
+          items:
+            type: string
+          example:
+            - tasks:read
+            - tasks:execute
+            - tasks:publish
 
     ActivationStatusView:
       type: object

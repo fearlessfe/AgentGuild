@@ -114,6 +114,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/oauth/oidc/login", s.oidcLogin)
 		r.Get("/oauth/oidc/callback", s.oidcCallback)
 	}
+	r.Get("/.well-known/agentguild", s.getAgentWellKnown)
 
 	r.Route("/v1", func(r chi.Router) {
 		if s.identity != nil {
