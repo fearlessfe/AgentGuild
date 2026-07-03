@@ -15,20 +15,24 @@
 - Task 6 round-2 review APPROVED; implementation `607ed78` + fixes `f2b90cf`.
 - Task 7 round-2 review APPROVED; implementation `21bf114` + fixes `b0eedbc`, `42db957`; coordinator focused 6-package verification PASS.
 
-## Deferred to FINAL review
+## Deferred Items (accepted or out of scope)
 
-- (a) Task 3 minor: fake `ListTaskRecords` lacks `PublisherAgentVersionID` filter regression coverage.
-- (b) `reaper.go` batch-abort on single-row anomaly — re-evaluate when submit/accept/complete flows land (currently unreachable, MINOR).
-- (c) design doc §4.1 says "Active" but impl uses "claimed" — informational, pre-Task-4 naming.
+- (d) JWKS cache never evicts stale keys; production TTL/eviction deferred.
+- (e) `splitScopeString` accepts both space and comma separators; comma support not a formal requirement, could be revisited.
+
+- Task 9 review APPROVED; implementation `68a9670`; `make verify` PASS.
+
+## Final Whole-Branch Review
+
+- Round 1 verdict: `With fixes`.
+- Fixes implemented in `4048a32 fix(agent-task-lifecycle): address final whole-branch review findings`.
+- Re-review verdict: `Approved`.
+
+## Deferred Items (accepted or out of scope)
+
 - (d) JWKS cache never evicts stale keys; production TTL/eviction deferred.
 - (e) `splitScopeString` accepts both space and comma separators; comma support not a formal requirement, could be revisited.
 
 ## Current Task
 
-- Plan task: `Completion gate: Task 9 end-to-end acceptance`
-- OpenSpec mapping: `3.3 Agent polling, disconnection recovery, and illegal state transition acceptance tests`
-- Phase: `verify`
-- Implementer status: `completed`
-- Brief: `.superpowers/sdd/task-9-brief.md`
-- Review mode: `thorough`
-- Verification: `make verify` PASS; backend race tests, PostgreSQL integration tests, React/Vitest, Playwright e2e and REST/MCP contract tests all green.
+- All plan tasks complete. Ready to run build-phase guard and transition to verify phase.
