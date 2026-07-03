@@ -10,7 +10,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/identity/domain"
 )
 
-func manifest(t *testing.T) *domain.AgentVersion {
+func manifest(t *testing.T, now time.Time) *domain.AgentVersion {
 	t.Helper()
 	version, err := domain.NewAgentVersion(
 		"agent-1.v1",
@@ -21,6 +21,7 @@ func manifest(t *testing.T) *domain.AgentVersion {
 		"gpt-4o",
 		[]string{"tasks:read", "tasks:execute"},
 		"sha256:abc123",
+		now,
 	)
 	require.NoError(t, err)
 	return version
@@ -33,8 +34,8 @@ func TestAgentCannotActivateTwice(t *testing.T) {
 	cred, token, err := domain.NewActivationCredential(agent.ID, agent.TenantID, time.Hour)
 	require.NoError(t, err)
 
-	require.NoError(t, agent.Activate(cred, manifest(t), token, time.Now()))
-	require.ErrorIs(t, agent.Activate(cred, manifest(t), token, time.Now()), domain.ErrStateConflict)
+	require.NoError(t, agent.Activate(cred, manifest(t, time.Now()), token, time.Now()))
+	require.ErrorIs(t, agent.Activate(cred, manifest(t, time.Now()), token, time.Now()), domain.ErrStateConflict)
 }
 
 func TestRevokedAgentCannotResume(t *testing.T) {
@@ -117,7 +118,7 @@ func TestAgentActivateRequiresMatchingTenant(t *testing.T) {
 	cred, token, err := domain.NewActivationCredential(agent.ID, "tenant-2", time.Hour)
 	require.NoError(t, err)
 
-	err = agent.Activate(cred, manifest(t), token, time.Now())
+	err = agent.Activate(cred, manifest(t, time.Now()), token, time.Now())
 	require.ErrorIs(t, err, domain.ErrForbidden)
 }
 
@@ -128,7 +129,7 @@ func TestAgentHeartbeatUpdatesLastSeen(t *testing.T) {
 
 	cred, token, err := domain.NewActivationCredential(agent.ID, agent.TenantID, time.Hour)
 	require.NoError(t, err)
-	require.NoError(t, agent.Activate(cred, manifest(t), token, now))
+	require.NoError(t, agent.Activate(cred, manifest(t, time.Now()), token, now))
 
 	heartbeatAt := now.Add(time.Minute)
 	require.NoError(t, agent.Heartbeat(heartbeatAt))
@@ -168,7 +169,7 @@ func TestAgentSuspendResumeRequireActor(t *testing.T) {
 
 	cred, token, err := domain.NewActivationCredential(agent.ID, agent.TenantID, time.Hour)
 	require.NoError(t, err)
-	require.NoError(t, agent.Activate(cred, manifest(t), token, now))
+	require.NoError(t, agent.Activate(cred, manifest(t, time.Now()), token, now))
 
 	require.ErrorIs(t, agent.Suspend("", now), domain.ErrForbidden)
 	require.NoError(t, agent.Suspend("admin-1", now))
@@ -201,12 +202,12 @@ func agentInState(t *testing.T, status string, now time.Time) *domain.Agent {
 	case domain.AgentActive:
 		cred, token, err := domain.NewActivationCredential(agent.ID, agent.TenantID, time.Hour)
 		require.NoError(t, err)
-		require.NoError(t, agent.Activate(cred, manifest(t), token, now))
+		require.NoError(t, agent.Activate(cred, manifest(t, time.Now()), token, now))
 		return agent
 	case domain.AgentSuspended:
 		cred, token, err := domain.NewActivationCredential(agent.ID, agent.TenantID, time.Hour)
 		require.NoError(t, err)
-		require.NoError(t, agent.Activate(cred, manifest(t), token, now))
+		require.NoError(t, agent.Activate(cred, manifest(t, time.Now()), token, now))
 		require.NoError(t, agent.Suspend("admin-1", now))
 		return agent
 	case domain.AgentRevoked:
@@ -224,7 +225,7 @@ func applyIntent(t *testing.T, agent *domain.Agent, intent string, now time.Time
 	case "activate":
 		cred, token, err := domain.NewActivationCredential(agent.ID, agent.TenantID, time.Hour)
 		require.NoError(t, err)
-		return agent.Activate(cred, manifest(t), token, now)
+		return agent.Activate(cred, manifest(t, time.Now()), token, now)
 	case "suspend":
 		return agent.Suspend("admin-1", now)
 	case "resume":

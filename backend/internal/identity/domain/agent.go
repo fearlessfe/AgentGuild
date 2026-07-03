@@ -77,8 +77,7 @@ func (a *Agent) Register() error {
 		return ErrStateConflict
 	}
 	a.Status = AgentPendingActivation
-	a.UpdatedAt = time.Now()
-	a.recordEvent(ActorSystem, "system", "register", "", AgentPendingActivation, "", nil)
+	a.recordEvent(ActorSystem, "system", "register", "", AgentPendingActivation, "", nil, a.UpdatedAt)
 	return nil
 }
 
@@ -110,7 +109,7 @@ func (a *Agent) Activate(cred *ActivationCredential, version *AgentVersion, toke
 	a.UpdatedAt = now
 	a.recordEvent(ActorAgent, a.ID, "activate", AgentPendingActivation, AgentActive, "", map[string]any{
 		"version_id": version.ID,
-	})
+	}, now)
 	return nil
 }
 
@@ -123,7 +122,7 @@ func (a *Agent) Suspend(actorID string, now time.Time) error {
 	}
 	a.Status = AgentSuspended
 	a.UpdatedAt = now
-	a.recordEvent(ActorHuman, actorID, "suspend", AgentActive, AgentSuspended, "", nil)
+	a.recordEvent(ActorHuman, actorID, "suspend", AgentActive, AgentSuspended, "", nil, now)
 	return nil
 }
 
@@ -136,7 +135,7 @@ func (a *Agent) Resume(actorID string, now time.Time) error {
 	}
 	a.Status = AgentActive
 	a.UpdatedAt = now
-	a.recordEvent(ActorHuman, actorID, "resume", AgentSuspended, AgentActive, "", nil)
+	a.recordEvent(ActorHuman, actorID, "resume", AgentSuspended, AgentActive, "", nil, now)
 	return nil
 }
 
@@ -150,7 +149,7 @@ func (a *Agent) Revoke(actorID, reason string, now time.Time) error {
 	from := a.Status
 	a.Status = AgentRevoked
 	a.UpdatedAt = now
-	a.recordEvent(ActorHuman, actorID, "revoke", from, AgentRevoked, reason, nil)
+	a.recordEvent(ActorHuman, actorID, "revoke", from, AgentRevoked, reason, nil, now)
 	return nil
 }
 
@@ -165,7 +164,7 @@ func (a *Agent) Heartbeat(now time.Time) error {
 	}
 }
 
-func (a *Agent) recordEvent(actorType ActorType, actorID, intent, fromState, toState, reason string, payload map[string]any) {
+func (a *Agent) recordEvent(actorType ActorType, actorID, intent, fromState, toState, reason string, payload map[string]any, now time.Time) {
 	a.Events = append(a.Events, NewIdentityEvent(
 		a.TenantID,
 		a.ID,
@@ -176,6 +175,6 @@ func (a *Agent) recordEvent(actorType ActorType, actorID, intent, fromState, toS
 		toState,
 		reason,
 		payload,
-		time.Now(),
+		now,
 	))
 }

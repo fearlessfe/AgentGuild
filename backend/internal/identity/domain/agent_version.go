@@ -20,6 +20,7 @@ func NewAgentVersion(
 	runtime, model string,
 	capabilities []string,
 	configFingerprint string,
+	now time.Time,
 ) (*AgentVersion, error) {
 	if id == "" {
 		return nil, invalidArgument("id")
@@ -48,6 +49,6 @@ func NewAgentVersion(
 		Model:             model,
 		Capabilities:      capabilities,
 		ConfigFingerprint: configFingerprint,
-		CreatedAt:         time.Now(),
+		CreatedAt:         now,
 	}, nil
 }
