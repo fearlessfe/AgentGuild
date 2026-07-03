@@ -2,8 +2,11 @@ package auth_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +18,7 @@ import (
 func TestOIDCProviderBeginAuthURLIncludesStateAndScopes(t *testing.T) {
 	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
 		TenantID:     "tenant-1",
+		Issuer:       "https://issuer.example.com",
 		ClientID:     "client-1",
 		ClientSecret: "secret-1",
 		RedirectURI:  "https://app.example.com/oauth/callback",
@@ -37,6 +41,7 @@ func TestOIDCProviderBeginAuthURLIncludesStateAndScopes(t *testing.T) {
 func TestOIDCProviderExchangeCreatesSessionWithAdminClaim(t *testing.T) {
 	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
 		TenantID:     "tenant-1",
+		Issuer:       "https://issuer.example.com",
 		ClientID:     "client-1",
 		ClientSecret: "secret-1",
 		RedirectURI:  "https://app.example.com/oauth/callback",
@@ -62,6 +67,7 @@ func TestOIDCProviderExchangeCreatesSessionWithAdminClaim(t *testing.T) {
 func TestOIDCProviderExchangeCreatesAdminSessionForConfiguredEmail(t *testing.T) {
 	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
 		TenantID:     "tenant-1",
+		Issuer:       "https://issuer.example.com",
 		ClientID:     "client-1",
 		ClientSecret: "secret-1",
 		RedirectURI:  "https://app.example.com/oauth/callback",
@@ -83,12 +89,112 @@ func TestOIDCProviderExchangeCreatesAdminSessionForConfiguredEmail(t *testing.T)
 func TestOIDCProviderExchangeRejectsMissingIdentityClaims(t *testing.T) {
 	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
 		TenantID:     "tenant-1",
+		Issuer:       "https://issuer.example.com",
 		ClientID:     "client-1",
 		ClientSecret: "secret-1",
 		RedirectURI:  "https://app.example.com/oauth/callback",
 		AuthURL:      "https://issuer.example.com/oauth/authorize",
 		TokenURL:     "https://issuer.example.com/oauth/token",
 	}, fakeOIDCExchanger{claims: auth.OIDCClaims{"email": "owner@example.com"}})
+	require.NoError(t, err)
+
+	_, err = provider.Exchange(context.Background(), "code-1")
+
+	require.Error(t, err)
+}
+
+func TestNewOIDCProviderRequiresIssuer(t *testing.T) {
+	_, err := auth.NewOIDCProvider(auth.OIDCConfig{
+		TenantID:    "tenant-1",
+		ClientID:    "client-1",
+		RedirectURI: "https://app.example.com/oauth/callback",
+		AuthURL:     "https://issuer.example.com/oauth/authorize",
+		TokenURL:    "https://issuer.example.com/oauth/token",
+	}, fakeOIDCExchanger{})
+
+	require.Error(t, err)
+}
+
+func TestOIDCProviderDefaultExchangerCreatesSessionFromVerifiedIDToken(t *testing.T) {
+	issuer := "https://issuer.example.com"
+	clientID := "client-1"
+	kid, key, jwks := newRSAJWKS(t)
+	tokenServer := oidcTokenServer(t, jwks, signedToken(t, kid, key, issuer, clientID, map[string]any{
+		"sub":   "owner-1",
+		"email": "owner@example.com",
+	}, time.Hour))
+	defer tokenServer.Close()
+
+	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
+		TenantID:     "tenant-1",
+		Issuer:       issuer,
+		ClientID:     clientID,
+		ClientSecret: "secret-1",
+		RedirectURI:  "https://app.example.com/oauth/callback",
+		AuthURL:      issuer + "/oauth/authorize",
+		TokenURL:     tokenServer.URL + "/token",
+		JWKSURL:      tokenServer.URL + "/jwks",
+	}, nil)
+	require.NoError(t, err)
+
+	sess, err := provider.Exchange(context.Background(), "code-1")
+
+	require.NoError(t, err)
+	require.Equal(t, "owner-1", sess.OwnerID)
+	require.Equal(t, "owner@example.com", sess.OwnerEmail)
+}
+
+func TestOIDCProviderDefaultExchangerRejectsUnsignedIDToken(t *testing.T) {
+	issuer := "https://issuer.example.com"
+	clientID := "client-1"
+	_, _, jwks := newRSAJWKS(t)
+	tokenServer := oidcTokenServer(t, jwks, unsignedIDToken(t, map[string]any{
+		"iss":   issuer,
+		"aud":   clientID,
+		"sub":   "owner-1",
+		"email": "owner@example.com",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	}))
+	defer tokenServer.Close()
+
+	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
+		TenantID:     "tenant-1",
+		Issuer:       issuer,
+		ClientID:     clientID,
+		ClientSecret: "secret-1",
+		RedirectURI:  "https://app.example.com/oauth/callback",
+		AuthURL:      issuer + "/oauth/authorize",
+		TokenURL:     tokenServer.URL + "/token",
+		JWKSURL:      tokenServer.URL + "/jwks",
+	}, nil)
+	require.NoError(t, err)
+
+	_, err = provider.Exchange(context.Background(), "code-1")
+
+	require.Error(t, err)
+}
+
+func TestOIDCProviderDefaultExchangerRejectsInvalidSignatureIDToken(t *testing.T) {
+	issuer := "https://issuer.example.com"
+	clientID := "client-1"
+	kid, _, jwks := newRSAJWKS(t)
+	_, wrongKey, _ := newRSAJWKS(t)
+	tokenServer := oidcTokenServer(t, jwks, signedToken(t, kid, wrongKey, issuer, clientID, map[string]any{
+		"sub":   "owner-1",
+		"email": "owner@example.com",
+	}, time.Hour))
+	defer tokenServer.Close()
+
+	provider, err := auth.NewOIDCProvider(auth.OIDCConfig{
+		TenantID:     "tenant-1",
+		Issuer:       issuer,
+		ClientID:     clientID,
+		ClientSecret: "secret-1",
+		RedirectURI:  "https://app.example.com/oauth/callback",
+		AuthURL:      issuer + "/oauth/authorize",
+		TokenURL:     tokenServer.URL + "/token",
+		JWKSURL:      tokenServer.URL + "/jwks",
+	}, nil)
 	require.NoError(t, err)
 
 	_, err = provider.Exchange(context.Background(), "code-1")
@@ -150,4 +256,33 @@ func (f fakeOIDCExchanger) ExchangeOIDC(context.Context, string) (auth.OIDCClaim
 		return nil, errors.New("missing fake claims")
 	}
 	return f.claims, nil
+}
+
+func unsignedIDToken(t *testing.T, claims map[string]any) string {
+	t.Helper()
+	header, err := json.Marshal(map[string]any{"alg": "none", "typ": "JWT"})
+	require.NoError(t, err)
+	payload, err := json.Marshal(claims)
+	require.NoError(t, err)
+	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
+}
+
+func oidcTokenServer(t *testing.T, jwks []byte, idToken string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, err := json.Marshal(map[string]string{
+			"access_token": "access-1",
+			"token_type":   "Bearer",
+			"id_token":     idToken,
+		})
+		require.NoError(t, err)
+		_, _ = w.Write(body)
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	})
+	return httptest.NewServer(mux)
 }

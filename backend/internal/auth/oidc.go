@@ -2,14 +2,15 @@ package auth
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"crypto/rsa"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 )
 
@@ -21,6 +22,7 @@ type OIDCConfig struct {
 	RedirectURI  string
 	AuthURL      string
 	TokenURL     string
+	JWKSURL      string
 	Scopes       []string
 	AdminClaim   string
 	AdminEmails  []string
@@ -44,6 +46,9 @@ func NewOIDCProvider(config OIDCConfig, exchanger OIDCExchanger) (*OIDCProvider,
 	if config.TenantID == "" {
 		return nil, errors.New("tenant_id is required")
 	}
+	if config.Issuer == "" {
+		return nil, errors.New("issuer is required")
+	}
 	if config.ClientID == "" {
 		return nil, errors.New("client_id is required")
 	}
@@ -59,6 +64,9 @@ func NewOIDCProvider(config OIDCConfig, exchanger OIDCExchanger) (*OIDCProvider,
 	if len(config.Scopes) == 0 {
 		config.Scopes = []string{"openid", "email", "profile"}
 	}
+	if exchanger == nil && config.JWKSURL == "" {
+		return nil, errors.New("jwks_url is required for default oidc exchanger")
+	}
 	oauthConfig := oauth2.Config{
 		ClientID:     config.ClientID,
 		ClientSecret: config.ClientSecret,
@@ -70,7 +78,11 @@ func NewOIDCProvider(config OIDCConfig, exchanger OIDCExchanger) (*OIDCProvider,
 		},
 	}
 	if exchanger == nil {
-		exchanger = oauth2OIDCExchanger{config: oauthConfig, issuer: config.Issuer, clientID: config.ClientID, client: config.HTTPClient}
+		client := config.HTTPClient
+		if client == nil {
+			client = &http.Client{Timeout: 10 * time.Second}
+		}
+		exchanger = oauth2OIDCExchanger{config: oauthConfig, issuer: config.Issuer, clientID: config.ClientID, jwksURL: config.JWKSURL, client: client}
 	}
 	adminEmails := make(map[string]struct{}, len(config.AdminEmails))
 	for _, email := range config.AdminEmails {
@@ -119,6 +131,7 @@ type oauth2OIDCExchanger struct {
 	config   oauth2.Config
 	issuer   string
 	clientID string
+	jwksURL  string
 	client   *http.Client
 }
 
@@ -134,36 +147,77 @@ func (e oauth2OIDCExchanger) ExchangeOIDC(ctx context.Context, code string) (OID
 	if !ok || rawIDToken == "" {
 		return nil, errors.New("oidc id_token is missing")
 	}
-	claims, err := parseOIDCClaims(rawIDToken)
+	claims, err := e.verifyIDToken(ctx, rawIDToken)
 	if err != nil {
 		return nil, err
-	}
-	if e.issuer != "" && oidcStringClaim(claims, "iss") != e.issuer {
-		return nil, errors.New("oidc issuer mismatch")
-	}
-	if e.clientID != "" && !oidcAudienceContains(claims["aud"], e.clientID) {
-		return nil, errors.New("oidc audience mismatch")
-	}
-	if exp := oidcNumericClaim(claims, "exp"); exp > 0 && time.Now().After(time.Unix(exp, 0)) {
-		return nil, errors.New("oidc id_token is expired")
 	}
 	return claims, nil
 }
 
-func parseOIDCClaims(rawIDToken string) (OIDCClaims, error) {
-	parts := strings.Split(rawIDToken, ".")
-	if len(parts) < 2 {
-		return nil, errors.New("oidc id_token is malformed")
-	}
-	body, err := base64.RawURLEncoding.DecodeString(parts[1])
+func (e oauth2OIDCExchanger) verifyIDToken(ctx context.Context, rawIDToken string) (OIDCClaims, error) {
+	claims := jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(rawIDToken, claims, e.keyFunc(ctx),
+		jwt.WithValidMethods([]string{"RS256"}),
+		jwt.WithIssuer(e.issuer),
+		jwt.WithAudience(e.clientID),
+		jwt.WithExpirationRequired(),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("decode oidc claims: %w", err)
+		return nil, fmt.Errorf("verify oidc id_token: %w", err)
 	}
-	var claims OIDCClaims
-	if err := json.Unmarshal(body, &claims); err != nil {
-		return nil, fmt.Errorf("parse oidc claims: %w", err)
+	if !token.Valid {
+		return nil, errors.New("oidc id_token is invalid")
 	}
-	return claims, nil
+	out := make(OIDCClaims, len(claims))
+	for key, value := range claims {
+		out[key] = value
+	}
+	return out, nil
+}
+
+func (e oauth2OIDCExchanger) keyFunc(ctx context.Context) jwt.Keyfunc {
+	return func(token *jwt.Token) (any, error) {
+		kid, ok := token.Header["kid"].(string)
+		if !ok || kid == "" {
+			return nil, errors.New("oidc id_token header missing kid")
+		}
+		keys, err := e.fetchKeys(ctx)
+		if err != nil {
+			return nil, err
+		}
+		key, ok := keys[kid]
+		if !ok {
+			return nil, fmt.Errorf("oidc signing key %q not found in JWKS", kid)
+		}
+		return key, nil
+	}
+}
+
+func (e oauth2OIDCExchanger) fetchKeys(ctx context.Context) (map[string]*rsa.PublicKey, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.jwksURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch OIDC JWKS: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch OIDC JWKS: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	keys, err := parseJWKS(body)
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 func oidcStringClaim(claims OIDCClaims, key string) string {
@@ -183,32 +237,4 @@ func oidcBoolClaim(claims OIDCClaims, key string) bool {
 	default:
 		return false
 	}
-}
-
-func oidcNumericClaim(claims OIDCClaims, key string) int64 {
-	switch value := claims[key].(type) {
-	case float64:
-		return int64(value)
-	case int64:
-		return value
-	case json.Number:
-		n, _ := value.Int64()
-		return n
-	default:
-		return 0
-	}
-}
-
-func oidcAudienceContains(raw any, want string) bool {
-	switch value := raw.(type) {
-	case string:
-		return value == want
-	case []any:
-		for _, item := range value {
-			if s, ok := item.(string); ok && s == want {
-				return true
-			}
-		}
-	}
-	return false
 }

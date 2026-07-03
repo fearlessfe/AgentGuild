@@ -13,6 +13,8 @@ import (
 
 const SessionCookieName = "agentguild_session"
 
+// Session contains only non-secret identity fields. Session cookies are signed
+// for tamper detection but are not encrypted, so secrets must not be stored here.
 type Session struct {
 	TenantID   string    `json:"tenant_id"`
 	OwnerID    string    `json:"owner_id"`
@@ -21,6 +23,7 @@ type Session struct {
 	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 }
 
+// NewSessionCookie returns a signed, not encrypted, session cookie.
 func NewSessionCookie(session Session, secret string, secure bool) (*http.Cookie, error) {
 	if secret == "" {
 		return nil, errors.New("session secret is required")
