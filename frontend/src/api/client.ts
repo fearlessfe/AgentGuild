@@ -335,9 +335,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   }
 
   if (url.pathname === "/v1/agents" && method === "GET") {
-    const status = url.searchParams.get("status");
-    const items = status ? demoAgents.filter((agent) => agent.status === status) : demoAgents;
-    return clone({ data: { items }, meta: demoMeta });
+    return clone({ data: { items: demoAgents }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/agents" && method === "POST") {
@@ -362,8 +360,8 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({
       data: {
         agent,
-        token: `agtok_${agent.id}_once`,
-        expires_at: "2026-07-09T14:00:00Z",
+        activation_token: `agtok_${agent.id}_once`,
+        activation_expires_at: "2026-07-09T14:00:00Z",
       },
       meta: demoMeta,
     });
@@ -378,7 +376,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({ data: agent, meta: demoMeta });
   }
 
-  const agentActionMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/(suspend|resume|revoke)$/);
+  const agentActionMatch = url.pathname.match(/^\/v1\/agents\/([^/:]+):(suspend|resume|revoke)$/);
   if (agentActionMatch && method === "POST") {
     const [, rawId, action] = agentActionMatch;
     const id = decodeURIComponent(rawId);

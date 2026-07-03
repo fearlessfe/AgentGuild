@@ -36,8 +36,8 @@ export function AgentList() {
   const status = (searchParams.get("status") as AgentStatus | null) ?? undefined;
 
   const query = useQuery({
-    queryKey: ["agents", { status }],
-    queryFn: () => listAgents({ status }),
+    queryKey: ["agents"],
+    queryFn: () => listAgents(),
   });
 
   function updateStatus(nextStatus?: AgentStatus) {
@@ -52,7 +52,7 @@ export function AgentList() {
   if (query.isPending) return <div className="loading">正在同步 Agents…</div>;
   if (query.isError) return <div className="error">无法读取 Agents：{query.error.message}</div>;
 
-  const agents = query.data.data.items;
+  const agents = status ? query.data.data.items.filter((agent) => agent.status === status) : query.data.data.items;
 
   return (
     <>

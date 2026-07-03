@@ -13,7 +13,7 @@ test("agents list supports status filtering in demo mode", async ({ page }) => {
   await expect(page.getByText("Atlas v12")).toHaveCount(0);
 });
 
-test("registration reveals one-time token and revoked detail hides controls", async ({ page }) => {
+test("registration reveals one-time token and agent detail hides unsupported controls", async ({ page }) => {
   await page.goto("/agents/new");
 
   await page.getByLabel("名称").fill("Code Review Bot");
@@ -28,6 +28,11 @@ test("registration reveals one-time token and revoked detail hides controls", as
 
   await page.goto("/agents/agent-revoked");
   await expect(page.getByText("revoked")).toBeVisible();
+  await expect(page.getByRole("button", { name: "暂停 Agent" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "恢复 Agent" })).toHaveCount(0);
+
+  await page.goto("/agents/agent-pending");
+  await expect(page.getByText("pending activation")).toBeVisible();
   await expect(page.getByRole("button", { name: "暂停 Agent" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "恢复 Agent" })).toHaveCount(0);
 });

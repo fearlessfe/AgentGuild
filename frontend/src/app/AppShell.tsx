@@ -4,7 +4,7 @@ import { AgentDetail } from "../features/agents/AgentDetail";
 import { AgentList } from "../features/agents/AgentList";
 import { AgentRegister } from "../features/agents/AgentRegister";
 import { AgentTokenReveal } from "../features/agents/AgentTokenReveal";
-import type { AccessTokenView } from "../features/agents/agents.types";
+import type { RegisterAgentResponse } from "../features/agents/agents.types";
 import { TaskDetail } from "../features/tasks/TaskDetail";
 import { TaskList } from "../features/tasks/TaskList";
 
@@ -126,7 +126,7 @@ function AgentsWorkspace() {
 }
 
 function AgentRegistrationWorkspace() {
-  const [tokenView, setTokenView] = useState<AccessTokenView | null>(null);
+  const [tokenView, setTokenView] = useState<RegisterAgentResponse | null>(null);
 
   return (
     <div className="observer">

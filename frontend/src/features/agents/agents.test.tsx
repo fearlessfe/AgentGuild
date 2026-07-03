@@ -3,11 +3,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
-import { envelope } from "../../api/fixtures";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { agentPageFixture, agentViewFixture, envelope } from "../../api/fixtures";
+import { AppShell } from "../../app/AppShell";
 import { AgentDetail } from "./AgentDetail";
 import { AgentList } from "./AgentList";
-import { AgentRegister } from "./AgentRegister";
 
 function renderWithProviders(
   ui: ReactNode,
@@ -21,43 +21,38 @@ function renderWithProviders(
   );
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("Agents UI", () => {
-  it("reveals activation token only through onRegistered after registration", async () => {
-    const onRegistered = vi.fn();
+  it("reveals activation token from the backend register response shape", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify(
           envelope({
-            agent: {
+            agent: agentViewFixture({
               id: "agent-7",
               name: "Code Review Bot",
               status: "pending_activation",
               owner_email: "review@example.com",
-              scopes: ["tasks:read"],
-              created_at: "2026-07-02T01:00:00Z",
-            },
-            token: "agtok_once_only",
-            expires_at: "2026-07-09T01:00:00Z",
+            }),
+            activation_token: "agtok_once_only",
+            activation_expires_at: "2026-07-09T01:00:00Z",
           }),
         ),
         { status: 200 },
       ),
     );
 
-    renderWithProviders(<AgentRegister onRegistered={onRegistered} />, { initialEntries: ["/agents/new"] });
+    renderWithProviders(<AppShell />, { initialEntries: ["/agents/new"] });
 
     await userEvent.type(screen.getByLabelText(/名称/i), "Code Review Bot");
     await userEvent.type(screen.getByLabelText(/Owner Email/i), "review@example.com");
     await userEvent.click(screen.getByRole("button", { name: /注册 agent/i }));
 
-    await waitFor(() =>
-      expect(onRegistered).toHaveBeenCalledWith(
-        expect.objectContaining({
-          token: "agtok_once_only",
-        }),
-      ),
-    );
-    expect(screen.queryByText("agtok_once_only")).toBeNull();
+    expect(await screen.findByText("agtok_once_only")).toBeVisible();
+    expect(screen.getByText(/过期时间：2026-07-09T01:00:00Z/i)).toBeVisible();
   });
 
   it("hides suspend and resume controls for revoked agents", async () => {
@@ -84,45 +79,34 @@ describe("Agents UI", () => {
     expect(screen.queryByRole("button", { name: /恢复 agent/i })).toBeNull();
   });
 
-  it("filters the list by status", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-      const url = new URL(String(input), "http://localhost");
-      const status = url.searchParams.get("status");
-      const items =
-        status === "suspended"
-          ? [
-              {
-                id: "agent-2",
-                name: "Suspended Worker",
-                status: "suspended",
-                owner_email: "ops@example.com",
-                team: "Ops",
-                scopes: ["tasks:read"],
-                created_at: "2026-07-02T01:00:00Z",
-              },
-            ]
-          : [
-              {
-                id: "agent-1",
-                name: "Active Worker",
-                status: "active",
-                owner_email: "eng@example.com",
-                team: "Eng",
-                scopes: ["tasks:read"],
-                created_at: "2026-07-02T01:00:00Z",
-              },
-              {
-                id: "agent-2",
-                name: "Suspended Worker",
-                status: "suspended",
-                owner_email: "ops@example.com",
-                team: "Ops",
-                scopes: ["tasks:read"],
-                created_at: "2026-07-02T01:00:00Z",
-              },
-            ];
-      return Promise.resolve(new Response(JSON.stringify(envelope({ items })), { status: 200 }));
-    });
+  it("does not send a status query param and filters rows client-side", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify(
+            envelope(
+              agentPageFixture([
+                agentViewFixture({
+                  id: "agent-1",
+                  name: "Active Worker",
+                  status: "active",
+                  owner_email: "eng@example.com",
+                  team: "Eng",
+                }),
+                agentViewFixture({
+                  id: "agent-2",
+                  name: "Suspended Worker",
+                  status: "suspended",
+                  owner_email: "ops@example.com",
+                  team: "Ops",
+                }),
+              ]),
+            ),
+          ),
+          { status: 200 },
+        ),
+      ),
+    );
 
     renderWithProviders(
       <Routes>
@@ -137,9 +121,52 @@ describe("Agents UI", () => {
 
     await waitFor(() => {
       const calls = fetchMock.mock.calls.map((call) => new URL(String(call[0]), "http://localhost"));
-      expect(calls.at(-1)?.searchParams.get("status")).toBe("suspended");
+      expect(calls.every((url) => !url.searchParams.has("status"))).toBe(true);
     });
-    expect(await screen.findByText("Suspended Worker")).toBeVisible();
+    expect(screen.getByText("Suspended Worker")).toBeVisible();
     expect(screen.queryByText("Active Worker")).toBeNull();
+  });
+
+  it("uses colon action routes for agent status mutations", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(agentViewFixture())), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(envelope(agentViewFixture({ status: "suspended", updated_at: "2026-07-02T03:00:00Z" }))), {
+          status: 200,
+        }),
+      );
+
+    renderWithProviders(<AgentDetail agentId="agent-1" />);
+
+    await screen.findByText("Atlas v12");
+    await userEvent.click(screen.getByRole("button", { name: /暂停 agent/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(new URL(String(fetchMock.mock.calls[1]?.[0]), "http://localhost").pathname).toBe("/api/v1/agents/agent-1:suspend");
+  });
+
+  it("keeps pending activation agents read-only for suspend and resume controls", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify(
+          envelope(
+            agentViewFixture({
+              id: "agent-pending",
+              name: "Review Draft",
+              status: "pending_activation",
+              owner_email: "review@example.com",
+            }),
+          ),
+        ),
+        { status: 200 },
+      ),
+    );
+
+    renderWithProviders(<AgentDetail agentId="agent-pending" />);
+
+    await waitFor(() => expect(screen.getAllByText(/pending activation/i).length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: /暂停 agent/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /恢复 agent/i })).toBeNull();
   });
 });

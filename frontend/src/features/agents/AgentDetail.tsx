@@ -45,7 +45,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   if (agentQuery.isError) return <div className="error">无法读取 Agent：{agentQuery.error.message}</div>;
 
   const agent = agentQuery.data.data;
-  const canSuspend = agent.status === "active" || agent.status === "pending_activation";
+  const canSuspend = agent.status === "active";
   const canResume = agent.status === "suspended";
   const canRevoke = agent.status !== "revoked";
 

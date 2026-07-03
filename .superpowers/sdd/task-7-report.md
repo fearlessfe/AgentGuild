@@ -59,3 +59,50 @@ Observed passing summary:
 ## Concerns
 
 - `cd frontend && npm run test:e2e -- e2e/agent-onboarding.spec.ts` could not complete in this sandbox because the local Vite server was not permitted to bind `127.0.0.1:5173` or `::1:5173` (`listen EPERM`). The spec file was added and kept aligned with demo-mode routes, but runtime verification of that Playwright path remains blocked by the environment rather than by a page assertion failure.
+
+## Task 7 Review Round 1 Fix
+
+### What changed
+
+- Fixed agents status mutations to use the backend's colon routes: `/v1/agents/{id}:suspend`, `/v1/agents/{id}:resume`, `/v1/agents/{id}:revoke`.
+- Aligned the register response contract with `RegisterAgentResponse`: the frontend now consumes `agent`, `activation_token`, and `activation_expires_at`.
+- Removed unsupported `status` query usage from `/v1/agents`; the UI now fetches the full list once and filters rows client-side.
+- Hid suspend/resume controls for `pending_activation`; only `active` shows suspend and only `suspended` shows resume.
+- Updated demo handlers, fixtures, component tests, and Playwright assertions to match the REST contract.
+
+### RED evidence
+
+Command:
+
+```bash
+cd frontend && npm test -- --run src/features/agents/agents.test.tsx
+```
+
+Observed failures before the fix:
+
+- Registration flow rendered an empty activation token because the UI expected `token` / `expires_at` instead of `activation_token` / `activation_expires_at`.
+- Status filtering sent an unsupported `status` query parameter to `/v1/agents`.
+- Status mutation posted to `/api/v1/agents/agent-1/suspend` instead of `/api/v1/agents/agent-1:suspend`.
+- `pending_activation` detail incorrectly rendered the Suspend control.
+
+### GREEN evidence
+
+Commands:
+
+```bash
+cd frontend && npm test -- --run src/features/agents/agents.test.tsx
+cd frontend && npm test -- --run
+cd frontend && npm run build
+git diff --check
+```
+
+Observed results:
+
+- `src/features/agents/agents.test.tsx`: `5` tests passed.
+- Full frontend suite: `4` files and `13` tests passed.
+- `npm run build`: passed with `tsc -b && vite build`.
+- `git diff --check`: clean output.
+
+### Concerns
+
+- Playwright E2E was not rerun in this fix round. The known local-server bind restriction (`listen EPERM` on `127.0.0.1:5173` / `::1:5173`) still applies in this sandbox, so the spec was updated but not re-verified end-to-end here.

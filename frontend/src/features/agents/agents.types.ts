@@ -31,10 +31,10 @@ export type RegisterAgentRequest = {
   budget_currency?: string;
 };
 
-export type AccessTokenView = {
+export type RegisterAgentResponse = {
   agent: AgentView;
-  token: string;
-  expires_at: string;
+  activation_token: string;
+  activation_expires_at?: string | null;
 };
 
 export type AgentAction = "suspend" | "resume" | "revoke";

@@ -1,5 +1,5 @@
 import type { Envelope, ExecutionView, TaskPage, TaskView } from "./client";
-import type { AccessTokenView, AgentPage, AgentView } from "../features/agents/agents.types";
+import type { AgentPage, AgentView, RegisterAgentResponse } from "../features/agents/agents.types";
 
 export const defaultMeta = {
   server_time: "2026-07-02T02:00:00Z",
@@ -84,11 +84,11 @@ export function agentPageFixture(items: AgentView[]): AgentPage {
   return { items };
 }
 
-export function accessTokenFixture(overrides?: Partial<AccessTokenView>): AccessTokenView {
+export function registerAgentResponseFixture(overrides?: Partial<RegisterAgentResponse>): RegisterAgentResponse {
   return {
     agent: agentViewFixture(),
-    token: "agtok_once_only",
-    expires_at: "2026-07-09T02:00:00Z",
+    activation_token: "agtok_once_only",
+    activation_expires_at: "2026-07-09T02:00:00Z",
     ...overrides,
   };
 }

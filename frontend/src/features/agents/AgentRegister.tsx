@@ -2,10 +2,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { registerAgent } from "./agents.api";
-import type { AccessTokenView, RegisterAgentRequest } from "./agents.types";
+import type { RegisterAgentRequest, RegisterAgentResponse } from "./agents.types";
 
 type AgentRegisterProps = {
-  onRegistered: (tokenView: AccessTokenView) => void;
+  onRegistered: (response: RegisterAgentResponse) => void;
 };
 
 type FormState = {
