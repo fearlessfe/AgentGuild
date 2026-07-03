@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -158,11 +159,132 @@ func TestGetAgentTokenStatus(t *testing.T) {
 	require.Equal(t, "agent-1", app.calls[0].payload.(identityapp.GetActivationStatus).AgentID)
 }
 
+func TestOIDCLoginRedirectsWithSignedStateCookie(t *testing.T) {
+	provider := &fakeOIDCProvider{}
+	server := newIdentityOIDCTestServer(&fakeIdentityApplication{}, provider)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/oidc/login", nil)
+	rec := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	require.NotEmpty(t, provider.state)
+	require.Contains(t, rec.Header().Get("Location"), url.QueryEscape(provider.state))
+	cookie := findCookie(rec.Result().Cookies(), "agentguild_oidc_state")
+	require.NotNil(t, cookie)
+	require.NotEmpty(t, cookie.Value)
+	require.True(t, cookie.HttpOnly)
+	require.False(t, cookie.Secure)
+	require.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
+	require.Equal(t, "/oauth/oidc/callback", cookie.Path)
+}
+
+func TestOIDCCallbackAcceptsMatchingSignedState(t *testing.T) {
+	provider := &fakeOIDCProvider{
+		session: &auth.Session{
+			TenantID:   "tenant-1",
+			OwnerID:    "owner-1",
+			OwnerEmail: "owner-1@example.com",
+			ExpiresAt:  time.Now().Add(time.Hour),
+		},
+	}
+	server := newIdentityOIDCTestServer(&fakeIdentityApplication{}, provider)
+	login := httptestRecorder(server, httptest.NewRequest(http.MethodGet, "/oauth/oidc/login", nil))
+	stateCookie := findCookie(login.Result().Cookies(), "agentguild_oidc_state")
+	require.NotNil(t, stateCookie)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/oidc/callback?code=code-1&state="+url.QueryEscape(provider.state), nil)
+	req.AddCookie(stateCookie)
+	rec := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "code-1", provider.exchangedCode)
+	require.NotNil(t, findCookie(rec.Result().Cookies(), auth.SessionCookieName))
+	cleared := findCookie(rec.Result().Cookies(), "agentguild_oidc_state")
+	require.NotNil(t, cleared)
+	require.Less(t, cleared.MaxAge, 0)
+}
+
+func TestOIDCCallbackRejectsMissingStateWithoutSession(t *testing.T) {
+	provider := &fakeOIDCProvider{
+		session: &auth.Session{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner-1@example.com"},
+	}
+	server := newIdentityOIDCTestServer(&fakeIdentityApplication{}, provider)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/oidc/callback?code=code-1", nil)
+	rec := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Empty(t, provider.exchangedCode)
+	require.Nil(t, findCookie(rec.Result().Cookies(), auth.SessionCookieName))
+}
+
+func TestOIDCCallbackRejectsMismatchedStateWithoutSession(t *testing.T) {
+	provider := &fakeOIDCProvider{
+		session: &auth.Session{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner-1@example.com"},
+	}
+	server := newIdentityOIDCTestServer(&fakeIdentityApplication{}, provider)
+	login := httptestRecorder(server, httptest.NewRequest(http.MethodGet, "/oauth/oidc/login", nil))
+	stateCookie := findCookie(login.Result().Cookies(), "agentguild_oidc_state")
+	require.NotNil(t, stateCookie)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/oidc/callback?code=code-1&state=different-state", nil)
+	req.AddCookie(stateCookie)
+	rec := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Empty(t, provider.exchangedCode)
+	require.Nil(t, findCookie(rec.Result().Cookies(), auth.SessionCookieName))
+}
+
+func TestOIDCCallbackRejectsTamperedStateCookieWithoutSession(t *testing.T) {
+	provider := &fakeOIDCProvider{
+		session: &auth.Session{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner-1@example.com"},
+	}
+	server := newIdentityOIDCTestServer(&fakeIdentityApplication{}, provider)
+	login := httptestRecorder(server, httptest.NewRequest(http.MethodGet, "/oauth/oidc/login", nil))
+	stateCookie := findCookie(login.Result().Cookies(), "agentguild_oidc_state")
+	require.NotNil(t, stateCookie)
+	stateCookie.Value = "tampered." + stateCookie.Value
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/oidc/callback?code=code-1&state="+url.QueryEscape(provider.state), nil)
+	req.AddCookie(stateCookie)
+	rec := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Empty(t, provider.exchangedCode)
+	require.Nil(t, findCookie(rec.Result().Cookies(), auth.SessionCookieName))
+}
+
 func newIdentityTestServer(identity *fakeIdentityApplication) http.Handler {
 	return rest.NewServer(&fakeApplication{}, &tokenVerifier{},
 		rest.WithIdentityService(identity),
 		rest.WithSession(testSessionSecret, false),
 	).Router()
+}
+
+func newIdentityOIDCTestServer(identity *fakeIdentityApplication, provider *fakeOIDCProvider) http.Handler {
+	return rest.NewServer(&fakeApplication{}, &tokenVerifier{},
+		rest.WithIdentityService(identity),
+		rest.WithSession(testSessionSecret, false),
+		rest.WithOIDCProvider(provider),
+	).Router()
+}
+
+type fakeOIDCProvider struct {
+	state         string
+	exchangedCode string
+	session       *auth.Session
+	err           error
+}
+
+func (f *fakeOIDCProvider) BeginAuthURL(state string) string {
+	f.state = state
+	return "/oidc/start?state=" + url.QueryEscape(state)
+}
+
+func (f *fakeOIDCProvider) Exchange(ctx context.Context, code string) (*auth.Session, error) {
+	f.exchangedCode = code
+	return f.session, f.err
 }
 
 func sessionCookie(t *testing.T, ownerID string, isAdmin bool) *http.Cookie {
@@ -185,6 +307,15 @@ func postJSONNoAuth(t *testing.T, server http.Handler, path, body string) *httpt
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	return rec
+}
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
 }
 
 func postJSONWithSession(t *testing.T, server http.Handler, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {

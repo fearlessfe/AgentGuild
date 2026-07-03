@@ -79,3 +79,54 @@ ok agentguild.dev/agentguild/backend/internal/transport/rest
 - `cmd/agentguild-api` still constructs `rest.NewServer` without passing an identity service, session secret, or OIDC provider. Task-owned files did not include composition/config wiring, so this change exposes the REST surface through server options and tests it at transport level.
 - OIDC login currently generates an OAuth state but does not persist/validate it in a separate state cookie. Existing Task 4 auth APIs expose provider/session primitives, but no state-store contract was present in the allowed files.
 - Activation rate limiting currently keys by method/path because no bearer principal exists before activation.
+
+## Review round 1 fixes
+
+- Added signed OIDC state cookie persistence on `GET /oauth/oidc/login`.
+- Added strict OIDC callback state validation before token exchange/session creation. Missing, mismatched, or tampered state is rejected without calling `Exchange` and without setting a session cookie.
+- Added OIDC route tests for login redirect cookie attributes, normal callback state flow, missing state, mismatched state, and tampered state cookie.
+- Changed anonymous REST rate-limit key derivation to include caller source from `RemoteAddr` after existing `middleware.RealIP` processing.
+- Added focused activation limiter test showing two anonymous callers from different `RemoteAddr` values do not share a global path-only budget.
+
+## RED/GREEN evidence
+
+RED command:
+
+```bash
+cd backend && go test ./internal/transport/rest -run 'TestOIDC|TestAgentActivateRateLimitKeyIncludesAnonymousRemoteAddr' -count=1
+```
+
+RED output summary:
+
+```text
+FAIL TestAgentActivateRateLimitKeyIncludesAnonymousRemoteAddr: expected 200, actual 429
+FAIL TestOIDCLoginRedirectsWithSignedStateCookie: expected state cookie, got nil
+FAIL TestOIDCCallbackRejectsMissingStateWithoutSession: expected 401, actual 200
+FAIL TestOIDCCallbackAcceptsMatchingSignedState / Mismatched / Tampered: expected state cookie, got nil
+```
+
+GREEN command:
+
+```bash
+cd backend && go test ./internal/transport/rest -run 'TestOIDC|TestAgentActivateRateLimitKeyIncludesAnonymousRemoteAddr' -count=1
+```
+
+GREEN output summary:
+
+```text
+ok agentguild.dev/agentguild/backend/internal/transport/rest
+```
+
+## Verification results
+
+- `cd backend && go test ./internal/transport/rest -count=1` PASS.
+- `gofmt -w backend/internal/transport/rest/identity_router.go backend/internal/transport/rest/router.go backend/internal/transport/rest/identity_router_test.go backend/internal/transport/rest/agent_self_router_test.go` PASS.
+- `git diff --check` PASS.
+
+## Files changed
+
+- `backend/internal/transport/rest/identity_router.go`
+- `backend/internal/transport/rest/router.go`
+- `backend/internal/transport/rest/identity_router_test.go`
+- `backend/internal/transport/rest/agent_self_router_test.go`
+- `.superpowers/sdd/task-5-report.md`

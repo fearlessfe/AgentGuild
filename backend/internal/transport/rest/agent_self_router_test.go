@@ -94,6 +94,44 @@ func TestAgentSelfTokenExpiredMaps401(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "TOKEN_EXPIRED")
 }
 
+func TestAgentActivateRateLimitKeyIncludesAnonymousRemoteAddr(t *testing.T) {
+	expiresAt := time.Date(2026, 7, 3, 10, 15, 0, 0, time.UTC)
+	app := &fakeIdentityApplication{
+		activate: identityapp.Envelope[identityapp.AccessTokenView]{
+			Data: identityapp.AccessTokenView{
+				Token:          "access-token-1",
+				TokenType:      "Bearer",
+				ExpiresAt:      expiresAt,
+				AgentID:        "agent-1",
+				AgentVersionID: "agent-1.v1",
+			},
+		},
+	}
+	limiter := &perKeyBudgetRateLimiter{budget: 1}
+	server := rest.NewServer(&fakeApplication{}, &tokenVerifier{},
+		rest.WithIdentityService(app),
+		rest.WithSession(testSessionSecret, false),
+		rest.WithRateLimiter(limiter),
+	).Router()
+	body := `{"activation_token":"activation-token-1","runtime":"codex","model":"gpt-5"}`
+
+	req := httptestNewPost(t, "/v1/agents/me:activate", body)
+	req.RemoteAddr = "203.0.113.10:1234"
+	first := httptestRecorder(server, req)
+
+	req = httptestNewPost(t, "/v1/agents/me:activate", body)
+	req.RemoteAddr = "203.0.113.11:1234"
+	second := httptestRecorder(server, req)
+
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, http.StatusOK, second.Code)
+	require.Len(t, app.calls, 2)
+	require.Len(t, limiter.keys, 2)
+	require.NotEqual(t, limiter.keys[0], limiter.keys[1])
+	require.Contains(t, limiter.keys[0], "203.0.113.10")
+	require.Contains(t, limiter.keys[1], "203.0.113.11")
+}
+
 func newAgentSelfTestServer(identity *fakeIdentityApplication) http.Handler {
 	return rest.NewServer(&fakeApplication{}, &tokenVerifier{},
 		rest.WithIdentityService(identity),
@@ -105,6 +143,24 @@ type expiredTokenVerifier struct{}
 
 func (expiredTokenVerifier) Verify(ctx context.Context, rawToken string) (auth.Principal, error) {
 	return auth.Principal{}, auth.ErrTokenExpired
+}
+
+type perKeyBudgetRateLimiter struct {
+	budget int
+	keys   []string
+	counts map[string]int
+}
+
+func (f *perKeyBudgetRateLimiter) Allow(ctx context.Context, key string) (bool, int) {
+	if f.counts == nil {
+		f.counts = make(map[string]int)
+	}
+	f.keys = append(f.keys, key)
+	f.counts[key]++
+	if f.counts[key] > f.budget {
+		return false, 60
+	}
+	return true, 0
 }
 
 func httptestNewPost(t *testing.T, path, body string) *http.Request {

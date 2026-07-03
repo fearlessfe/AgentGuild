@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -157,6 +158,8 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		key := r.Method + "|" + r.URL.Path
 		if principal.TenantID != "" {
 			key = principal.TenantID + "|" + key
+		} else {
+			key = "anonymous|" + callerSource(r) + "|" + key
 		}
 		allowed, retryAfter := s.limiter.Allow(r.Context(), key)
 		if !allowed {
@@ -165,6 +168,21 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func callerSource(r *http.Request) string {
+	source := strings.TrimSpace(r.RemoteAddr)
+	if source == "" {
+		return "unknown"
+	}
+	if host, _, err := net.SplitHostPort(source); err == nil {
+		source = host
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "unknown"
+	}
+	return source
 }
 
 func (s *Server) authenticate(next http.Handler) http.Handler {
