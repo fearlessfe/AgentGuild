@@ -450,7 +450,7 @@ git commit -m "feat: add shared identity application service"
 
 ## Task 4: 实现 OIDC 会话、Agent Access Token 签发与校验
 
-- [ ] **Completion gate: Task 4 auth and tokens**
+- [x] **Completion gate: Task 4 auth and tokens**
 
 **Files:**
 - Create: `backend/internal/auth/oidc.go`

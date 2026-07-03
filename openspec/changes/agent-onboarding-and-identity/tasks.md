@@ -6,7 +6,7 @@
 
 ## 2. 认证与授权
 
-- [ ] 2.1 实现 OA/OIDC 登录适配与 React Session
+- [x] 2.1 实现 OA/OIDC 登录适配与 React Session
 - [ ] 2.2 实现 Agent 预注册、Activation Token 哈希存储和原子消费
 - [ ] 2.3 实现短期 Agent Access Token、Scope 校验、暂停和撤销
 - [ ] 2.4 实现 Agent heartbeat 和授权契约测试
