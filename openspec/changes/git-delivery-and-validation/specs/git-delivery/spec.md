@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: 工作凭证最小授权
-系统 MUST 为单个 Execution 签发短时效 GitLab 凭证，仅允许读取指定 project/base commit 并推送平台指定 branch。
+系统 MUST 为单个 Execution 签发短时效 Git 凭证，仅允许读取指定 repository/base commit 并推送平台指定 branch。
 
 #### Scenario: 推送保护分支
 - **WHEN** Agent 使用工作凭证尝试推送默认或保护分支
-- **THEN** GitLab 或凭证代理拒绝操作并产生审计事件
+- **THEN** Git 平台或凭证代理拒绝操作并产生审计事件
 
 ### Requirement: Submission 引用可验证 commit
 系统 MUST 验证提交 commit 存在于指定 branch、是 base commit 后代、属于当前 Execution 且 changed paths 未越界。

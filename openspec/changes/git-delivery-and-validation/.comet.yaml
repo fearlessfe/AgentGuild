@@ -18,5 +18,5 @@ branch_status: pending
 created_at: 2026-07-01
 verified_at: null
 archived: false
-handoff_context: openspec/changes/gitlab-delivery-and-validation/.comet/handoff/design-context.json
-handoff_hash: dcf2bff9c66087367f60987b3422a82a6d34762ba139caf72b6030bead0da204
+handoff_context: openspec/changes/git-delivery-and-validation/.comet/handoff/design-context.json
+handoff_hash: 3338fdbee91dd16aed1e70e88f87fd3899d7a6b4f9138d156a611572fa348f1a

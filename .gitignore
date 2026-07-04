@@ -30,6 +30,8 @@ tmp/
 temp/
 .cache/
 *.tmp
+.worktrees/
+worktrees/
 
 # Go
 backend/vendor/

@@ -1,6 +1,6 @@
-## 1. GitLab 交付
+## 1. Git 交付
 
-- [ ] 1.1 实现 GitLab Client、项目配置和任务级 CredentialIssuer 接口
+- [ ] 1.1 实现 Git Driver 抽象、GitHub Client、项目配置和任务级 CredentialIssuer 接口
 - [ ] 1.2 实现受限 branch 规则、短期凭证签发和撤销
 - [ ] 1.3 实现 Submission、commit metadata、diff fingerprint 和修订数据模型
 - [ ] 1.4 实现 commit 存在性、祖先、作者、branch 和 changed path 校验
