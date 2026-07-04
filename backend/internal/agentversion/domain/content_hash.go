@@ -3,8 +3,8 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"sort"
-	"strings"
 )
 
 // ComputeContentHash returns a canonical SHA256 content-addressed hash for the
@@ -22,17 +22,18 @@ func ComputeContentHash(
 	skills := sortedCopy(skillRefs)
 	tools := sortedCopy(toolRefs)
 
-	parts := []string{
+	// Use JSON for unambiguous serialization; arrays are already sorted so the
+	// encoding is canonical for our purposes.
+	payload, _ := json.Marshal([7]any{
 		runtime,
 		model,
-		strings.Join(caps, ","),
+		caps,
 		promptRef,
-		strings.Join(skills, ","),
+		skills,
 		memoryRef,
-		strings.Join(tools, ","),
-	}
-	joined := strings.Join(parts, "|")
-	sum := sha256.Sum256([]byte(joined))
+		tools,
+	})
+	sum := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 

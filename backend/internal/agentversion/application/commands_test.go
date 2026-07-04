@@ -113,7 +113,7 @@ func TestCreateDraftAndFullLifecycle(t *testing.T) {
 	updateCurrentVersion(t, store, repo, tenantID, agentID, initial.ID)
 
 	// Create draft with changed prompt.
-	resp, err := svc.CreateDraft(context.Background(), ownerPrincipal(tenantID, ownerID), application.CreateDraft{
+	resp, err := svc.CreateDraft(context.Background(), application.CreateDraft{
 		TenantID:  tenantID,
 		AgentID:   agentID,
 		CreatedBy: ownerID,
@@ -126,21 +126,21 @@ func TestCreateDraftAndFullLifecycle(t *testing.T) {
 		ToolRefs:  []string{"sha256:tool"},
 	})
 	require.NoError(t, err)
-	require.NotNil(t, resp.Data.Version)
-	require.Equal(t, 2, resp.Data.Version.VersionNumber)
-	require.Equal(t, initial.ID, resp.Data.Version.ParentVersionID)
-	require.Equal(t, domain.StatusDraft, resp.Data.Version.Status)
+	require.NotNil(t, resp.Version)
+	require.Equal(t, 2, resp.Version.VersionNumber)
+	require.Equal(t, initial.ID, resp.Version.ParentVersionID)
+	require.Equal(t, domain.StatusDraft, resp.Version.Status)
 
 	// Start evaluation.
 	err = svc.StartEvaluation(context.Background(), ownerPrincipal(tenantID, ownerID), application.StartEvaluation{
 		TenantID:  tenantID,
 		AgentID:   agentID,
-		VersionID: resp.Data.Version.ID,
+		VersionID: resp.Version.ID,
 	})
 	require.NoError(t, err)
 
 	// Mark eligible directly via repository (evaluation module would do this).
-	eligible, err := repo.GetByID(context.Background(), tenantID, agentID, resp.Data.Version.ID)
+	eligible, err := repo.GetByID(context.Background(), tenantID, agentID, resp.Version.ID)
 	require.NoError(t, err)
 	require.NoError(t, eligible.MarkEligible())
 	err = store.WithTx(context.Background(), func(tx application.Tx) error {
@@ -152,13 +152,13 @@ func TestCreateDraftAndFullLifecycle(t *testing.T) {
 	err = svc.Promote(context.Background(), ownerPrincipal(tenantID, ownerID), application.Promote{
 		TenantID:  tenantID,
 		AgentID:   agentID,
-		VersionID: resp.Data.Version.ID,
+		VersionID: resp.Version.ID,
 	})
 	require.NoError(t, err)
 
 	active, err := repo.GetActiveByAgent(context.Background(), tenantID, agentID)
 	require.NoError(t, err)
-	require.Equal(t, resp.Data.Version.ID, active.ID)
+	require.Equal(t, resp.Version.ID, active.ID)
 	require.Equal(t, domain.StatusActive, active.Status)
 
 	initialReload, err := repo.GetByID(context.Background(), tenantID, agentID, initial.ID)
@@ -192,7 +192,7 @@ func TestCreateDraftSameFingerprintReturnsNoChange(t *testing.T) {
 	createVersion(t, store, repo, initial)
 	updateCurrentVersion(t, store, repo, tenantID, agentID, initial.ID)
 
-	_, err := svc.CreateDraft(context.Background(), ownerPrincipal(tenantID, ownerID), cfg)
+	_, err := svc.CreateDraft(context.Background(), cfg)
 	require.ErrorIs(t, err, domain.ErrNoChange)
 }
 

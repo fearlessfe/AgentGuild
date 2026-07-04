@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"testing"
 	"time"
 )
 
@@ -13,6 +12,10 @@ type AgentVersion struct {
 	AgentID           string
 	VersionNumber     int
 	ParentVersionID   string
+	// Status is the current lifecycle status. It is exported solely so
+	// repositories can scan it from the database; callers must use the
+	// state-machine methods (StartEvaluation, MarkEligible, MarkRejected,
+	// Promote, Retire) and must never assign to this field directly.
 	Status            VersionStatus
 	Runtime           string
 	Model             string
@@ -140,49 +143,6 @@ func NewDraftFromCurrent(
 		cfg.PromptRef, cfg.SkillRefs, cfg.MemoryRef, cfg.ToolRefs,
 		cfg.EnvironmentDigest, cfg.CreatedBy, now,
 	)
-}
-
-// NewTestAgentVersion returns a persisted test version in the requested state.
-func NewTestAgentVersion(t testing.TB, status VersionStatus) *AgentVersion {
-	t.Helper()
-	return NewTestAgentVersionWithConfig(t, status, DraftConfig{
-		Runtime:      "python",
-		Model:        "gpt-4",
-		Capabilities: []string{"code"},
-		PromptRef:    "sha256:prompt",
-		MemoryRef:    "sha256:memory",
-		SkillRefs:    []string{"sha256:skill1"},
-		ToolRefs:     []string{"sha256:tool1"},
-	})
-}
-
-// NewTestAgentVersionWithConfig returns a persisted test version with a custom
-// configuration.
-func NewTestAgentVersionWithConfig(t testing.TB, status VersionStatus, cfg DraftConfig) *AgentVersion {
-	t.Helper()
-	now := time.Now()
-	v, err := NewAgentVersion(
-		"version-id", "tenant-id", "agent-id", 1, "",
-		cfg.Runtime, cfg.Model, cfg.Capabilities,
-		cfg.PromptRef, cfg.SkillRefs, cfg.MemoryRef, cfg.ToolRefs,
-		"env-digest", "owner-id", now,
-	)
-	if err != nil {
-		t.Fatalf("new test agent version: %v", err)
-	}
-	v.Persisted = true
-	v.Status = status
-	switch status {
-	case StatusActive:
-		v.PromotedAt = &now
-	case StatusRetired:
-		v.PromotedAt = &now
-		retired := now.Add(time.Minute)
-		v.RetiredAt = &retired
-	case StatusRejected:
-		v.RejectedReason = "test rejection"
-	}
-	return v
 }
 
 // Now returns the current time. It is exposed for test convenience.

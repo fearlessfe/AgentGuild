@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"time"
 
 	"agentguild.dev/agentguild/backend/internal/agentversion/domain"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -27,6 +26,9 @@ func NewVersionService(
 	if policy == nil {
 		return nil, invalidArgument("policy")
 	}
+	if evalProvider == nil {
+		return nil, invalidArgument("eval_provider")
+	}
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
@@ -43,17 +45,14 @@ func NewVersionService(
 // If the configuration is unchanged, it returns domain.ErrNoChange.
 func (s *VersionService) CreateDraft(
 	ctx context.Context,
-	principal identityapp.Principal,
 	cmd CreateDraft,
-) (identityapp.Envelope[CreateDraftResponse], error) {
-	var result identityapp.Envelope[CreateDraftResponse]
-	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
-		return result, err
+) (*CreateDraftResponse, error) {
+	principal := identityapp.Principal{
+		TenantID: cmd.TenantID,
+		OwnerID:  cmd.CreatedBy,
 	}
-
-	active, err := s.versions.GetActiveByAgent(ctx, cmd.TenantID, cmd.AgentID)
-	if err != nil && !isNotFound(err) {
-		return result, err
+	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
+		return nil, err
 	}
 
 	cfg := domain.DraftConfig{
@@ -69,34 +68,37 @@ func (s *VersionService) CreateDraft(
 	}
 
 	var version *domain.AgentVersion
-	if active != nil {
-		version, err = domain.NewDraftFromCurrent(active, cfg, s.newID, time.Now())
-		if err != nil {
-			return result, err
-		}
-	} else {
-		version, err = domain.NewAgentVersion(
-			s.newID(), cmd.TenantID, cmd.AgentID, 1, "",
-			cfg.Runtime, cfg.Model, cfg.Capabilities,
-			cfg.PromptRef, cfg.SkillRefs, cfg.MemoryRef, cfg.ToolRefs,
-			cfg.EnvironmentDigest, cfg.CreatedBy, time.Now(),
-		)
-		if err != nil {
-			return result, err
-		}
-	}
-
 	if err := s.store.WithTx(ctx, func(tx Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		active, err := s.versions.GetActiveByAgent(ctx, cmd.TenantID, cmd.AgentID)
+		if err != nil && !isNotFound(err) {
+			return err
+		}
+		if active != nil {
+			version, err = domain.NewDraftFromCurrent(active, cfg, s.newID, now)
+			if err != nil {
+				return err
+			}
+		} else {
+			version, err = domain.NewAgentVersion(
+				s.newID(), cmd.TenantID, cmd.AgentID, 1, "",
+				cfg.Runtime, cfg.Model, cfg.Capabilities,
+				cfg.PromptRef, cfg.SkillRefs, cfg.MemoryRef, cfg.ToolRefs,
+				cfg.EnvironmentDigest, cfg.CreatedBy, now,
+			)
+			if err != nil {
+				return err
+			}
+		}
 		return s.versions.Create(ctx, tx, version)
 	}); err != nil {
-		return result, err
+		return nil, err
 	}
 
-	result = identityapp.Envelope[CreateDraftResponse]{
-		Data: CreateDraftResponse{Version: version},
-		Meta: identityapp.Meta{ServerTime: time.Now()},
-	}
-	return result, nil
+	return &CreateDraftResponse{Version: version}, nil
 }
 
 // StartEvaluation transitions a draft version to evaluating.
@@ -145,14 +147,12 @@ func (s *VersionService) Promote(
 		if target.Status != domain.StatusEligible {
 			return domain.ErrStateConflict
 		}
-		if s.evalProvider != nil {
-			run, err := s.evalProvider.GetLatestPassed(ctx, tx, cmd.TenantID, cmd.VersionID)
-			if err != nil {
-				return err
-			}
-			if run == nil {
-				return domain.ErrStateConflict
-			}
+		run, err := s.evalProvider.GetLatestPassed(ctx, tx, cmd.TenantID, cmd.VersionID)
+		if err != nil {
+			return err
+		}
+		if run == nil {
+			return domain.ErrStateConflict
 		}
 		active, err := s.versions.GetActiveByAgent(ctx, cmd.TenantID, cmd.AgentID)
 		if err != nil && !isNotFound(err) {

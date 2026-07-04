@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"sort"
 
 	"agentguild.dev/agentguild/backend/internal/agentversion/domain"
 )
@@ -159,11 +158,4 @@ func toSet(values []string) map[string]bool {
 		set[v] = true
 	}
 	return set
-}
-
-// sortedCopy returns a sorted copy for deterministic comparison.
-func sortedCopy(values []string) []string {
-	copy := append([]string(nil), values...)
-	sort.Strings(copy)
-	return copy
 }
