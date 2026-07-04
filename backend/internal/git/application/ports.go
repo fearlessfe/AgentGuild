@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"time"
+
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
 
 // Store begins a transaction against the credential repository.
@@ -29,7 +31,7 @@ type CredentialRepository interface {
 
 // SubmissionRepository persists submission aggregates.
 type SubmissionRepository interface {
-	Save(context.Context, *SubmissionRecord) error
-	GetByID(context.Context, string, string) (*SubmissionRecord, error)
-	GetByExecutionID(context.Context, string, string) ([]*SubmissionRecord, error)
+	Save(context.Context, *gitdomain.Submission) error
+	GetByID(context.Context, string, string) (*gitdomain.Submission, error)
+	GetByExecutionID(context.Context, string, string) ([]*gitdomain.Submission, error)
 }

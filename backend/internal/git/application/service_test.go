@@ -422,15 +422,15 @@ func cloneRecord(record *application.CredentialRecord) *application.CredentialRe
 
 type memorySubmissionRepository struct{}
 
-func (r *memorySubmissionRepository) Save(context.Context, *application.SubmissionRecord) error {
+func (r *memorySubmissionRepository) Save(context.Context, *gitdomain.Submission) error {
 	return nil
 }
 
-func (r *memorySubmissionRepository) GetByID(context.Context, string, string) (*application.SubmissionRecord, error) {
+func (r *memorySubmissionRepository) GetByID(context.Context, string, string) (*gitdomain.Submission, error) {
 	return nil, git.ErrSubmissionNotFound
 }
 
-func (r *memorySubmissionRepository) GetByExecutionID(context.Context, string, string) ([]*application.SubmissionRecord, error) {
+func (r *memorySubmissionRepository) GetByExecutionID(context.Context, string, string) ([]*gitdomain.Submission, error) {
 	return nil, nil
 }
 

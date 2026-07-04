@@ -66,7 +66,7 @@ func (tx *Tx) Credentials() application.CredentialRepository {
 
 // Submissions returns the submission repository for this transaction.
 func (tx *Tx) Submissions() application.SubmissionRepository {
-	return &submissionRepository{q: tx.tx, now: tx.Now}
+	return &submissionRepository{q: tx.tx}
 }
 
 var _ application.Store = (*Store)(nil)
