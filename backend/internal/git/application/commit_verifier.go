@@ -14,12 +14,16 @@ import (
 // exists, is reachable from the expected base and branch, and only touches
 // allowed paths.
 type CommitVerifier struct {
-	driver git.Driver
+	driver       git.Driver
+	submissions  SubmissionRepository
 }
 
-// NewCommitVerifier creates a CommitVerifier backed by the supplied Git driver.
-func NewCommitVerifier(driver git.Driver) *CommitVerifier {
-	return &CommitVerifier{driver: driver}
+// NewCommitVerifier creates a CommitVerifier backed by the supplied Git driver
+// and submission repository. The repository is used to detect duplicate
+// submissions before running expensive Git checks; future force-push detection
+// will also use it.
+func NewCommitVerifier(driver git.Driver, repo SubmissionRepository) *CommitVerifier {
+	return &CommitVerifier{driver: driver, submissions: repo}
 }
 
 // VerifyCommit carries the inputs required to validate a commit.
@@ -77,6 +81,19 @@ func (e *PathViolationError) Unwrap() error {
 func (v *CommitVerifier) Verify(ctx context.Context, cmd VerifyCommit) error {
 	if err := validateVerifyCommit(cmd); err != nil {
 		return err
+	}
+
+	// Guard against duplicate submissions before running expensive Git checks.
+	// A submission for the same execution with the identical commit SHA is
+	// treated as idempotent.
+	existing, err := v.submissions.GetByExecutionID(ctx, cmd.TenantID, cmd.ExecutionID)
+	if err != nil {
+		return err
+	}
+	for _, sub := range existing {
+		if sub.CommitSHA == cmd.CommitSHA {
+			return nil
+		}
 	}
 
 	// 1. Commit exists.

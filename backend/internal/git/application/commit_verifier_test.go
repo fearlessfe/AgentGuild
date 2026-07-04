@@ -9,6 +9,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -284,6 +285,69 @@ func TestVerifyCommitAllowsAllPathsWhenAllowedEmptyAndNoForbidden(t *testing.T) 
 	require.NoError(t, err)
 }
 
+func TestVerifyCommitReturnsSuccessWhenDuplicateCommitSHA(t *testing.T) {
+	fixture := newVerifierFixture(t)
+	fixture.submissions.submissions = []*gitdomain.Submission{
+		{TenantID: "tenant-1", ExecutionID: "exec-1", CommitSHA: "head-sha"},
+	}
+
+	err := fixture.verifier.Verify(context.Background(), application.VerifyCommit{
+		TenantID:      "tenant-1",
+		ExecutionID:   "exec-1",
+		Repo:          "owner/repo",
+		Branch:        "agentguild/exec-1",
+		CommitSHA:     "head-sha",
+		BaseCommitSHA: "base-sha",
+	})
+
+	require.NoError(t, err)
+}
+
+func TestVerifyCommitPropagatesIsAncestorError(t *testing.T) {
+	fixture := newVerifierFixture(t)
+	fixture.driver.commits = map[string]git.Commit{
+		"head-sha": {SHA: "head-sha"},
+		"base-sha": {SHA: "base-sha"},
+	}
+	fixture.driver.ancestorErr = domain.ErrRateLimited
+
+	err := fixture.verifier.Verify(context.Background(), application.VerifyCommit{
+		TenantID:      "tenant-1",
+		ExecutionID:   "exec-1",
+		Repo:          "owner/repo",
+		Branch:        "agentguild/exec-1",
+		CommitSHA:     "head-sha",
+		BaseCommitSHA: "base-sha",
+	})
+
+	require.ErrorIs(t, err, domain.ErrRateLimited)
+}
+
+func TestVerifyCommitPropagatesCompareCommitsError(t *testing.T) {
+	fixture := newVerifierFixture(t)
+	fixture.driver.commits = map[string]git.Commit{
+		"head-sha":          {SHA: "head-sha"},
+		"base-sha":          {SHA: "base-sha"},
+		"agentguild/exec-1": {SHA: "head-sha"},
+	}
+	fixture.driver.ancestors = map[ancestorKey]bool{
+		{base: "base-sha", head: "head-sha"}: true,
+		{base: "head-sha", head: "head-sha"}: true,
+	}
+	fixture.driver.compareErr = domain.ErrRateLimited
+
+	err := fixture.verifier.Verify(context.Background(), application.VerifyCommit{
+		TenantID:      "tenant-1",
+		ExecutionID:   "exec-1",
+		Repo:          "owner/repo",
+		Branch:        "agentguild/exec-1",
+		CommitSHA:     "head-sha",
+		BaseCommitSHA: "base-sha",
+	})
+
+	require.ErrorIs(t, err, domain.ErrRateLimited)
+}
+
 func TestVerifyCommitPropagatesDriverErrors(t *testing.T) {
 	fixture := newVerifierFixture(t)
 	fixture.driver.commitErr = domain.ErrRateLimited
@@ -301,16 +365,19 @@ func TestVerifyCommitPropagatesDriverErrors(t *testing.T) {
 }
 
 type verifierFixture struct {
-	verifier *application.CommitVerifier
-	driver   *fakeDriver
+	verifier    *application.CommitVerifier
+	driver      *fakeDriver
+	submissions *fakeSubmissionRepository
 }
 
 func newVerifierFixture(t *testing.T) *verifierFixture {
 	t.Helper()
 	d := &fakeDriver{commits: map[string]git.Commit{}}
+	s := &fakeSubmissionRepository{}
 	return &verifierFixture{
-		verifier: application.NewCommitVerifier(d),
-		driver:   d,
+		verifier:    application.NewCommitVerifier(d, s),
+		driver:      d,
+		submissions: s,
 	}
 }
 
@@ -364,4 +431,20 @@ func (f *fakeDriver) IsAncestor(_ context.Context, _, base, head string) (bool, 
 		return false, nil
 	}
 	return v, nil
+}
+
+type fakeSubmissionRepository struct {
+	submissions []*gitdomain.Submission
+}
+
+func (r *fakeSubmissionRepository) Save(context.Context, *gitdomain.Submission) error {
+	return nil
+}
+
+func (r *fakeSubmissionRepository) GetByID(context.Context, string, string) (*gitdomain.Submission, error) {
+	return nil, git.ErrSubmissionNotFound
+}
+
+func (r *fakeSubmissionRepository) GetByExecutionID(context.Context, string, string) ([]*gitdomain.Submission, error) {
+	return r.submissions, nil
 }
