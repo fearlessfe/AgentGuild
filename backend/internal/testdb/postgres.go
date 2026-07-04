@@ -124,11 +124,13 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
 	applyMigration(t, db, "000002_agent_identity.up.sql")
+	applyMigration(t, db, "000003_agent_version_and_experience.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000003_agent_version_and_experience.down.sql")
 	applyMigration(t, db, "000002_agent_identity.down.sql")
 	applyMigration(t, db, "000001_task_lifecycle.down.sql")
 }
@@ -137,6 +139,7 @@ func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
 	applyMigration(t, db, "000002_agent_identity.up.sql")
+	applyMigration(t, db, "000003_agent_version_and_experience.up.sql")
 }
 
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
@@ -147,7 +150,13 @@ func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
 	if err != nil {
 		t.Fatalf("read migration %s: %v", name, err)
 	}
-	if _, err := db.Exec(context.Background(), string(body)); err != nil {
-		t.Fatalf("apply migration %s: %v", name, err)
+	for _, stmt := range strings.Split(string(body), ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.Exec(context.Background(), stmt); err != nil {
+			t.Fatalf("apply migration %s: %v", name, err)
+		}
 	}
 }
