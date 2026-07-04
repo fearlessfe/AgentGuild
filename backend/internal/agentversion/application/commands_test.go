@@ -98,6 +98,53 @@ func newService(t *testing.T, db *pgxpool.Pool) (*application.VersionService, ap
 	return svc, repo, store
 }
 
+func TestCreateDraftUsesLatestVersionNumber(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	svc, repo, store := newService(t, db)
+
+	tenantID := "tenant-latest"
+	agentID := "agent-latest"
+	ownerID := "owner"
+	insertAgent(t, db, tenantID, agentID, ownerID)
+
+	initial := newVersion(t, tenantID, agentID, 1, "", domain.StatusActive)
+	createVersion(t, store, repo, initial)
+	updateCurrentVersion(t, store, repo, tenantID, agentID, initial.ID)
+
+	first, err := svc.CreateDraft(context.Background(), application.CreateDraft{
+		TenantID:  tenantID,
+		AgentID:   agentID,
+		CreatedBy: ownerID,
+		IsAdmin:   false,
+		Runtime:   "python",
+		Model:     "gpt-4",
+		Capabilities: []string{"code"},
+		PromptRef: "sha256:prompt-v2",
+		SkillRefs: []string{"sha256:skill"},
+		MemoryRef: "sha256:memory",
+		ToolRefs:  []string{"sha256:tool"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, first.Version.VersionNumber)
+
+	second, err := svc.CreateDraft(context.Background(), application.CreateDraft{
+		TenantID:  tenantID,
+		AgentID:   agentID,
+		CreatedBy: ownerID,
+		IsAdmin:   false,
+		Runtime:   "python",
+		Model:     "gpt-4",
+		Capabilities: []string{"code"},
+		PromptRef: "sha256:prompt-v3",
+		SkillRefs: []string{"sha256:skill"},
+		MemoryRef: "sha256:memory",
+		ToolRefs:  []string{"sha256:tool"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, second.Version.VersionNumber)
+	require.Equal(t, first.Version.ID, second.Version.ParentVersionID)
+}
+
 func TestCreateDraftAndFullLifecycle(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	svc, repo, store := newService(t, db)
@@ -117,6 +164,7 @@ func TestCreateDraftAndFullLifecycle(t *testing.T) {
 		TenantID:  tenantID,
 		AgentID:   agentID,
 		CreatedBy: ownerID,
+		IsAdmin:   false,
 		Runtime:   "python",
 		Model:     "gpt-4",
 		Capabilities: []string{"code"},
@@ -149,10 +197,12 @@ func TestCreateDraftAndFullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Promote.
-	err = svc.Promote(context.Background(), ownerPrincipal(tenantID, ownerID), application.Promote{
+	err = svc.Promote(context.Background(), application.Promote{
 		TenantID:  tenantID,
 		AgentID:   agentID,
 		VersionID: resp.Version.ID,
+		ActorID:   ownerID,
+		IsAdmin:   false,
 	})
 	require.NoError(t, err)
 
@@ -179,6 +229,7 @@ func TestCreateDraftSameFingerprintReturnsNoChange(t *testing.T) {
 		TenantID:  tenantID,
 		AgentID:   agentID,
 		CreatedBy: ownerID,
+		IsAdmin:   false,
 		Runtime:   "python",
 		Model:     "gpt-4",
 		Capabilities: []string{"code"},
@@ -218,10 +269,12 @@ func TestConcurrentPromoteOnlyOneSucceeds(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- svc.Promote(context.Background(), ownerPrincipal(tenantID, ownerID), application.Promote{
+			errs <- svc.Promote(context.Background(), application.Promote{
 				TenantID:  tenantID,
 				AgentID:   agentID,
 				VersionID: target.ID,
+				ActorID:   ownerID,
+				IsAdmin:   false,
 			})
 		}()
 	}
@@ -254,10 +307,12 @@ func TestRollbackUpdatesCurrentVersion(t *testing.T) {
 	createVersion(t, store, repo, newActive)
 	updateCurrentVersion(t, store, repo, tenantID, agentID, newActive.ID)
 
-	err := svc.Rollback(context.Background(), ownerPrincipal(tenantID, ownerID), application.Rollback{
+	err := svc.Rollback(context.Background(), application.Rollback{
 		TenantID:  tenantID,
 		AgentID:   agentID,
 		VersionID: oldActive.ID,
+		ActorID:   ownerID,
+		IsAdmin:   false,
 	})
 	require.NoError(t, err)
 

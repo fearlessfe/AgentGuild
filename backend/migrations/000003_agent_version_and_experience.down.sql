@@ -15,4 +15,5 @@ ALTER TABLE agent_versions
     DROP COLUMN IF EXISTS tool_refs,
     DROP COLUMN IF EXISTS created_by,
     DROP COLUMN IF EXISTS promoted_at,
-    DROP COLUMN IF EXISTS retired_at;
+    DROP COLUMN IF EXISTS retired_at,
+    DROP COLUMN IF EXISTS rejected_reason;

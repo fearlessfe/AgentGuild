@@ -9,7 +9,8 @@ ALTER TABLE agent_versions
     ADD COLUMN tool_refs TEXT[] NOT NULL DEFAULT '{}'::text[],
     ADD COLUMN created_by TEXT NOT NULL DEFAULT '',
     ADD COLUMN promoted_at TIMESTAMPTZ,
-    ADD COLUMN retired_at TIMESTAMPTZ;
+    ADD COLUMN retired_at TIMESTAMPTZ,
+    ADD COLUMN rejected_reason TEXT;
 
 UPDATE agent_versions
 SET status = 'active',

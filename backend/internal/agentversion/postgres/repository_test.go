@@ -102,6 +102,36 @@ func TestRepositoryUpdateStatusDoesNotMutateContent(t *testing.T) {
 	require.Equal(t, []string{"sha256:skill"}, loaded.SkillRefs)
 }
 
+func TestRepositoryUpdateStatusPersistsRejectedReason(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := avpostgres.NewVersionRepository(db)
+	store := avpostgres.NewStore(db)
+
+	tenantID := "tenant-rejected"
+	agentID := "agent-rejected"
+	insertAgent(t, db, tenantID, agentID, "owner")
+
+	v := newDraftVersion(t, tenantID, agentID, 1, "")
+	createVersion(t, store, repo, v)
+
+	v.Status = domain.StatusEvaluating
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.UpdateStatus(context.Background(), tx, v)
+	}))
+
+	loaded, err := repo.GetByID(context.Background(), tenantID, agentID, v.ID)
+	require.NoError(t, err)
+	require.NoError(t, loaded.MarkRejected("evaluation failed"))
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.UpdateStatus(context.Background(), tx, loaded)
+	}))
+
+	reloaded, err := repo.GetByID(context.Background(), tenantID, agentID, v.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusRejected, reloaded.Status)
+	require.Equal(t, "evaluation failed", reloaded.RejectedReason)
+}
+
 func TestRepositoryListByAgentOrdered(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	repo := avpostgres.NewVersionRepository(db)

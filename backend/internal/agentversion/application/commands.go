@@ -41,7 +41,7 @@ func NewVersionService(
 	}, nil
 }
 
-// CreateDraft creates a new draft version from the current active version.
+// CreateDraft creates a new draft version from the latest version for the agent.
 // If the configuration is unchanged, it returns domain.ErrNoChange.
 func (s *VersionService) CreateDraft(
 	ctx context.Context,
@@ -50,6 +50,7 @@ func (s *VersionService) CreateDraft(
 	principal := identityapp.Principal{
 		TenantID: cmd.TenantID,
 		OwnerID:  cmd.CreatedBy,
+		IsAdmin:  cmd.IsAdmin,
 	}
 	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
 		return nil, err
@@ -73,12 +74,12 @@ func (s *VersionService) CreateDraft(
 		if err != nil {
 			return err
 		}
-		active, err := s.versions.GetActiveByAgent(ctx, cmd.TenantID, cmd.AgentID)
+		latest, err := s.versions.GetLatestByAgent(ctx, cmd.TenantID, cmd.AgentID)
 		if err != nil && !isNotFound(err) {
 			return err
 		}
-		if active != nil {
-			version, err = domain.NewDraftFromCurrent(active, cfg, s.newID, now)
+		if latest != nil {
+			version, err = domain.NewDraftFromCurrent(latest, cfg, s.newID, now)
 			if err != nil {
 				return err
 			}
@@ -126,9 +127,13 @@ func (s *VersionService) StartEvaluation(
 // active version atomically.
 func (s *VersionService) Promote(
 	ctx context.Context,
-	principal identityapp.Principal,
 	cmd Promote,
 ) error {
+	principal := identityapp.Principal{
+		TenantID: cmd.TenantID,
+		OwnerID:  cmd.ActorID,
+		IsAdmin:  cmd.IsAdmin,
+	}
 	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
 		return err
 	}
@@ -180,9 +185,13 @@ func (s *VersionService) Promote(
 // active/eligible/retired version.
 func (s *VersionService) Rollback(
 	ctx context.Context,
-	principal identityapp.Principal,
 	cmd Rollback,
 ) error {
+	principal := identityapp.Principal{
+		TenantID: cmd.TenantID,
+		OwnerID:  cmd.ActorID,
+		IsAdmin:  cmd.IsAdmin,
+	}
 	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
 		return err
 	}

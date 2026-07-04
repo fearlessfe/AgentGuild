@@ -36,7 +36,7 @@ func (p *Policy) RequireOwnerOrAdmin(ctx context.Context, principal identityapp.
 	}
 	ownerID, err := p.ownerProvider.GetAgentOwner(ctx, tenantID, agentID)
 	if err != nil {
-		return domain.ErrForbidden
+		return domainForbidden()
 	}
 	if principal.OwnerID != "" && principal.OwnerID == ownerID {
 		return nil

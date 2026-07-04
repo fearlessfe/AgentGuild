@@ -150,13 +150,7 @@ func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
 	if err != nil {
 		t.Fatalf("read migration %s: %v", name, err)
 	}
-	for _, stmt := range strings.Split(string(body), ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-		if _, err := db.Exec(context.Background(), stmt); err != nil {
-			t.Fatalf("apply migration %s: %v", name, err)
-		}
+	if _, err := db.Exec(context.Background(), string(body)); err != nil {
+		t.Fatalf("apply migration %s: %v", name, err)
 	}
 }

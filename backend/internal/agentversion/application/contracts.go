@@ -69,6 +69,7 @@ type CreateDraft struct {
 	TenantID          string
 	AgentID           string
 	CreatedBy         string
+	IsAdmin           bool
 	Runtime           string
 	Model             string
 	Capabilities      []string
@@ -88,6 +89,7 @@ type Promote struct {
 	AgentID   string
 	VersionID string
 	ActorID   string
+	IsAdmin   bool
 }
 
 type Rollback struct {
@@ -95,6 +97,7 @@ type Rollback struct {
 	AgentID   string
 	VersionID string
 	ActorID   string
+	IsAdmin   bool
 }
 
 type StartEvaluation struct {
