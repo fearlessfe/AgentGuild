@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/identity/application"
 	"agentguild.dev/agentguild/backend/internal/identity/domain"
 	"github.com/stretchr/testify/require"
@@ -147,6 +148,26 @@ func TestAgentHeartbeatUpdatesLastSeenForAgentSelf(t *testing.T) {
 	require.Equal(t, heartbeatAt, *got.Data.LastSeenAt)
 	require.NotNil(t, fixture.store.agents[agent.ID].LastSeenAt)
 	require.Equal(t, heartbeatAt, *fixture.store.agents[agent.ID].LastSeenAt)
+}
+
+func TestAgentStatusCheckerDistinguishesSuspendedAndRevokedAgents(t *testing.T) {
+	fixture := newServiceFixture(t)
+	active := fixture.seedActiveAgent(t, "tenant-1", "agent-active", "owner-1")
+	suspended := fixture.seedActiveAgent(t, "tenant-1", "agent-suspended", "owner-1")
+	require.NoError(t, fixture.store.agents[suspended.ID].Suspend("owner-1", fixture.store.now))
+	revoked := fixture.seedActiveAgent(t, "tenant-1", "agent-revoked", "owner-1")
+	require.NoError(t, fixture.store.agents[revoked.ID].Revoke("owner-1", "retired", fixture.store.now))
+	checker := application.NewAgentStatusChecker(fixture.store)
+
+	require.NoError(t, checker.CheckAgentStatus(context.Background(), authPrincipalFromAgent(active)))
+	require.ErrorIs(t, checker.CheckAgentStatus(context.Background(), authPrincipalFromAgent(suspended)), domain.ErrStateConflict)
+	require.ErrorIs(t, checker.CheckAgentStatus(context.Background(), authPrincipalFromAgent(revoked)), domain.ErrTokenRevoked)
+	require.NoError(t, checker.CheckAgentStatus(context.Background(), auth.Principal{
+		TenantID:       "tenant-1",
+		Type:           auth.PrincipalTypeAgent,
+		AgentID:        "legacy-agent",
+		AgentVersionID: "legacy-version",
+	}))
 }
 
 func TestIssueAccessTokenRequiresTokenIssuer(t *testing.T) {
@@ -309,6 +330,17 @@ func (f *serviceFixture) owner(agent *domain.Agent) application.Principal {
 
 func (f *serviceFixture) agentPrincipal(agent *domain.Agent) application.Principal {
 	return application.Principal{TenantID: agent.TenantID, AgentID: agent.ID, AgentVersionID: agent.CurrentVersionID, Scopes: agent.Scopes, RepoScope: agent.RepoScope}
+}
+
+func authPrincipalFromAgent(agent *domain.Agent) auth.Principal {
+	return auth.Principal{
+		TenantID:       agent.TenantID,
+		Type:           auth.PrincipalTypeAgent,
+		AgentID:        agent.ID,
+		AgentVersionID: agent.CurrentVersionID,
+		Scopes:         agent.Scopes,
+		RepoScope:      agent.RepoScope,
+	}
 }
 
 type recordingIssuer struct {

@@ -27,7 +27,7 @@ afterEach(() => {
 
 describe("Agents UI", () => {
   it("reveals activation token from the backend register response shape", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify(
           envelope({
@@ -47,10 +47,14 @@ describe("Agents UI", () => {
 
     renderWithProviders(<AppShell />, { initialEntries: ["/agents/new"] });
 
+    expect(screen.queryByLabelText(/owner email/i)).toBeNull();
     await userEvent.type(screen.getByLabelText(/名称/i), "Code Review Bot");
-    await userEvent.type(screen.getByLabelText(/Owner Email/i), "review@example.com");
     await userEvent.click(screen.getByRole("button", { name: /注册 agent/i }));
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(payload).not.toHaveProperty("owner_email");
+    expect(payload.scopes).toEqual(["tasks:publish", "tasks:claim", "tasks:execute", "tasks:read"]);
     expect(await screen.findByText("agtok_once_only")).toBeVisible();
     expect(screen.getByText(/过期时间：2026-07-09T01:00:00Z/i)).toBeVisible();
   });
@@ -64,7 +68,7 @@ describe("Agents UI", () => {
             name: "Atlas v12",
             status: "revoked",
             owner_email: "owner@example.com",
-            scopes: ["tasks:read", "tasks:write"],
+            scopes: ["tasks:read", "tasks:execute"],
             created_at: "2026-07-02T01:00:00Z",
           }),
         ),

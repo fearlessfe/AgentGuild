@@ -192,6 +192,9 @@ func (s *IdentityService) IssueAccessToken(ctx context.Context, principal Princi
 		if err := s.policy.RequireAgentSelf(principal, agent); err != nil {
 			return err
 		}
+		if agent.Status == domain.AgentRevoked {
+			return domain.ErrTokenRevoked
+		}
 		if err := s.policy.RequireAgentStatus(agent, domain.AgentActive); err != nil {
 			return err
 		}
@@ -222,6 +225,9 @@ func (s *IdentityService) AgentHeartbeat(ctx context.Context, principal Principa
 		}
 		if err := s.policy.RequireAgentSelf(principal, agent); err != nil {
 			return err
+		}
+		if agent.Status == domain.AgentRevoked {
+			return domain.ErrTokenRevoked
 		}
 		if err := agent.Heartbeat(now); err != nil {
 			return err

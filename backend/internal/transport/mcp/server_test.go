@@ -13,6 +13,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -185,11 +186,11 @@ func TestToolCallsMapToApplicationService(t *testing.T) {
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "execution_start",
 		Arguments: map[string]any{
-			"request_id":     "req-2",
-			"execution_id":   "exe-1",
+			"request_id":       "req-2",
+			"execution_id":     "exe-1",
 			"lease_generation": int64(1),
-			"stage":          "planning",
-			"progress":       0.25,
+			"stage":            "planning",
+			"progress":         0.25,
 		},
 	})
 	require.NoError(t, err)
@@ -215,6 +216,7 @@ func TestDomainErrorsMapToStableMCPCodes(t *testing.T) {
 		{"lease_expired", &domain.Error{Code: "lease_expired", Message: "lease is expired"}, false, "LEASE_EXPIRED", "lease is expired"},
 		{"idempotency_mismatch", &domain.Error{Code: "idempotency_mismatch", Message: "idempotency mismatch"}, false, "IDEMPOTENCY_MISMATCH", "idempotency mismatch"},
 		{"deadline_exceeded", &domain.Error{Code: "deadline_exceeded", Message: "deadline exceeded"}, false, "DEADLINE_EXCEEDED", "deadline exceeded"},
+		{"token_revoked", identitydomain.ErrTokenRevoked, false, "TOKEN_REVOKED", "token has been revoked"},
 		{"forbidden_non_admin", &domain.Error{Code: "forbidden", Message: "not allowed"}, false, "NOT_FOUND", "resource not found"},
 		{"forbidden_admin", &domain.Error{Code: "forbidden", Message: "not allowed"}, true, "FORBIDDEN", "not allowed"},
 		{"not_found_non_admin", &domain.Error{Code: "not_found", Message: "hidden"}, false, "NOT_FOUND", "resource not found"},

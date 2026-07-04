@@ -16,6 +16,9 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 	if err := s.policy.Require(principal, "tasks:claim"); err != nil {
 		return result, err
 	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
@@ -78,6 +81,10 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 		var result Envelope[ExecutionView]
 		return result, err
 	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
+		var result Envelope[ExecutionView]
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err
@@ -89,6 +96,10 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 
 func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Principal, command HeartbeatExecution) (Envelope[ExecutionView], error) {
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
+		var result Envelope[ExecutionView]
+		return result, err
+	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err
 	}
@@ -188,6 +199,9 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 		requireOwner = true
 	} else {
 		return result, domain.ErrForbidden
+	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
+		return result, err
 	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err

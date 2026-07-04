@@ -17,6 +17,9 @@ func (s *Service) PublishTask(ctx context.Context, principal auth.Principal, com
 	if err := s.policy.Require(principal, "tasks:publish"); err != nil {
 		return result, err
 	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
@@ -71,6 +74,9 @@ func (s *Service) PublishTask(ctx context.Context, principal auth.Principal, com
 func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, command CancelTask) (Envelope[TaskView], error) {
 	var result Envelope[TaskView]
 	if err := s.policy.Require(principal, "tasks:cancel"); err != nil {
+		return result, err
+	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
 		return result, err
 	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {

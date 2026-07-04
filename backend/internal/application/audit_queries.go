@@ -29,6 +29,9 @@ func (s *Service) ListTaskEvents(ctx context.Context, principal auth.Principal, 
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}

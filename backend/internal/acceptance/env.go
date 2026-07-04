@@ -45,13 +45,15 @@ func Start(t *testing.T) *Env {
 
 	db := testdb.StartPostgres(t)
 	store := postgres.NewStore(db)
+	identityStore := identitypostgres.NewStore(db)
 	svc, err := application.NewService(store, application.Options{
-		CursorSecret: []byte("0123456789abcdef0123456789abcdef"),
-		CursorTTL:    15 * time.Minute,
+		CursorSecret:       []byte("0123456789abcdef0123456789abcdef"),
+		CursorTTL:          15 * time.Minute,
+		AgentStatusChecker: identityapp.NewAgentStatusChecker(identityStore),
 	})
 	require.NoError(t, err)
 	verifier, tokenIssuer := newAcceptanceIdentityRuntime(t)
-	identitySvc, err := identityapp.NewIdentityService(identitypostgres.NewStore(db), identityapp.IdentityOptions{
+	identitySvc, err := identityapp.NewIdentityService(identityStore, identityapp.IdentityOptions{
 		NewID:       acceptanceSequenceIDs("agent-1", "version-1", "agent-2", "version-2", "agent-3", "version-3"),
 		TokenIssuer: tokenIssuer,
 	})
@@ -227,6 +229,20 @@ func (c *MCPClient) TaskClaim(taskID, requestID string) application.ExecutionVie
 	return res.Execution
 }
 
+// PublishTaskCode 返回 publish 的错误码，空字符串表示成功。
+func (c *MCPClient) PublishTaskCode(deadline time.Time, requestID string) string {
+	c.t.Helper()
+	return c.call("task_publish", map[string]any{
+		"request_id":   requestID,
+		"type":         "code",
+		"title":        "Acceptance task",
+		"problem":      "Verify identity status enforcement",
+		"constraints":  []string{"fast"},
+		"requirements": []string{"pass"},
+		"deadline":     deadline,
+	}).Code
+}
+
 // Heartbeat 续租并返回 execution 视图。
 func (c *MCPClient) Heartbeat(executionID string, generation int64, requestID string) application.ExecutionView {
 	c.t.Helper()
@@ -292,6 +308,12 @@ func (c *MCPClient) StartExecutionCode(executionID string, generation int64, req
 		"execution_id":     executionID,
 		"lease_generation": generation,
 	}).Code
+}
+
+// GetExecutionCode 返回 get execution 的错误码，空字符串表示成功。
+func (c *MCPClient) GetExecutionCode(executionID string) string {
+	c.t.Helper()
+	return c.call("execution_get", map[string]any{"execution_id": executionID}).Code
 }
 
 // TaskClaimCode 返回 claim 的错误码。

@@ -14,6 +14,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
 	"github.com/stretchr/testify/require"
 )
@@ -223,6 +224,16 @@ func TestClaimMapsConflictWithoutLeakingHolder(t *testing.T) {
 	require.Equal(t, http.StatusConflict, res.Code)
 	require.JSONEq(t, `{"error":{"code":"STATE_CONFLICT","message":"task is not claimable"}}`, res.Body.String())
 	require.NotContains(t, res.Body.String(), "agent-1")
+}
+
+func TestTaskRoutesMapRevokedIdentityToken(t *testing.T) {
+	app := &fakeApplication{claimErr: identitydomain.ErrTokenRevoked}
+	server := newTestServer(app)
+
+	res := postJSON(t, server, "/v1/tasks/task-1:claim", `{"request_id":"req-2"}`, "token-agent-2", "Idempotency-Key", "req-2")
+
+	require.Equal(t, http.StatusUnauthorized, res.Code)
+	require.JSONEq(t, `{"error":{"code":"TOKEN_REVOKED","message":"token has been revoked"}}`, res.Body.String())
 }
 
 func TestForbiddenAndNotFoundReturnSameSecureResponseForNonAdmin(t *testing.T) {

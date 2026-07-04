@@ -9,6 +9,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -34,6 +35,9 @@ func isAdministrator(p auth.Principal) bool {
 // 对非管理员，forbidden 与 not_found 返回一致的安全响应，避免资源探测。
 func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 	code := domain.CodeOf(err)
+	if code == "" {
+		code = identitydomain.CodeOf(err)
+	}
 	errContent := MCPError{Code: "INTERNAL_ERROR", Message: "internal server error"}
 	switch code {
 	case "invalid_argument":
@@ -58,6 +62,8 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 		errContent = MCPError{Code: "IDEMPOTENCY_MISMATCH", Message: err.Error()}
 	case "deadline_exceeded":
 		errContent = MCPError{Code: "DEADLINE_EXCEEDED", Message: err.Error()}
+	case "token_revoked":
+		errContent = MCPError{Code: "TOKEN_REVOKED", Message: err.Error()}
 	case "rate_limited":
 		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error(), RetryAfterSeconds: retryAfterSeconds(domain.RetryAfterOf(err))}
 	default:

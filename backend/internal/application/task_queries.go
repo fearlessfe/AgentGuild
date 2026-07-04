@@ -33,6 +33,9 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
+		return result, err
+	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {
 		return result, err
 	}
@@ -58,6 +61,9 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query ListTasks) (Envelope[TaskPage], error) {
 	var result Envelope[TaskPage]
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
+		return result, err
+	}
+	if err := s.requireLiveAgent(ctx, principal); err != nil {
 		return result, err
 	}
 	if err := s.checkRateLimit(ctx, principal); err != nil {

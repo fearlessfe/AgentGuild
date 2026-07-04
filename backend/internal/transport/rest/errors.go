@@ -83,6 +83,9 @@ func writeFieldError(w http.ResponseWriter, status int, code, message, field str
 // 对非管理员，forbidden 与 not_found 返回一致的安全响应，避免资源探测。
 func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) {
 	code := domain.CodeOf(err)
+	if code == "" {
+		code = identitydomain.CodeOf(err)
+	}
 	switch code {
 	case "invalid_argument":
 		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), domain.FieldOf(err))
@@ -106,6 +109,8 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusConflict, "IDEMPOTENCY_MISMATCH", err.Error())
 	case "deadline_exceeded":
 		writeError(w, http.StatusConflict, "DEADLINE_EXCEEDED", err.Error())
+	case "token_revoked":
+		writeError(w, http.StatusUnauthorized, "TOKEN_REVOKED", err.Error())
 	case "rate_limited":
 		writeRateLimited(w, err.Error(), retryAfterSeconds(domain.RetryAfterOf(err)))
 	default:

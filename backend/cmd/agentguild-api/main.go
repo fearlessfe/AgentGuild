@@ -51,7 +51,10 @@ func run() error {
 	if err := pool.Ping(ctx); err != nil {
 		return err
 	}
-	service, err := application.NewService(postgres.NewStore(pool), application.Options{CursorSecret: []byte(cfg.CursorSecret)})
+	service, err := application.NewService(postgres.NewStore(pool), application.Options{
+		CursorSecret:       []byte(cfg.CursorSecret),
+		AgentStatusChecker: identityapp.NewAgentStatusChecker(identitypostgres.NewStore(pool)),
+	})
 	if err != nil {
 		return err
 	}

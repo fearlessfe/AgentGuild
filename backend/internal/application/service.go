@@ -12,19 +12,25 @@ import (
 )
 
 type Options struct {
-	CursorSecret []byte
-	CursorTTL    time.Duration
-	NewID        func() string
-	RateLimiter  ratelimit.RateLimiter
+	CursorSecret       []byte
+	CursorTTL          time.Duration
+	NewID              func() string
+	RateLimiter        ratelimit.RateLimiter
+	AgentStatusChecker AgentStatusChecker
+}
+
+type AgentStatusChecker interface {
+	CheckAgentStatus(context.Context, auth.Principal) error
 }
 
 type Service struct {
-	store        Store
-	policy       auth.ScopePolicy
-	cursorSecret []byte
-	cursorTTL    time.Duration
-	newID        func() string
-	rateLimiter  ratelimit.RateLimiter
+	store              Store
+	policy             auth.ScopePolicy
+	cursorSecret       []byte
+	cursorTTL          time.Duration
+	newID              func() string
+	rateLimiter        ratelimit.RateLimiter
+	agentStatusChecker AgentStatusChecker
 }
 
 func NewService(store Store, options Options) (*Service, error) {
@@ -40,7 +46,14 @@ func NewService(store Store, options Options) (*Service, error) {
 	if options.RateLimiter == nil {
 		options.RateLimiter = ratelimit.NewUnlimited()
 	}
-	return &Service{store: store, cursorSecret: append([]byte(nil), options.CursorSecret...), cursorTTL: options.CursorTTL, newID: options.NewID, rateLimiter: options.RateLimiter}, nil
+	return &Service{
+		store:              store,
+		cursorSecret:       append([]byte(nil), options.CursorSecret...),
+		cursorTTL:          options.CursorTTL,
+		newID:              options.NewID,
+		rateLimiter:        options.RateLimiter,
+		agentStatusChecker: options.AgentStatusChecker,
+	}, nil
 }
 
 func randomID() string {
@@ -60,4 +73,11 @@ func (s *Service) checkRateLimit(ctx context.Context, principal auth.Principal) 
 		return &domain.Error{Code: "rate_limited", Message: "rate limit exceeded", RetryAfter: decision.RetryAfter}
 	}
 	return nil
+}
+
+func (s *Service) requireLiveAgent(ctx context.Context, principal auth.Principal) error {
+	if s.agentStatusChecker == nil || principal.Type != auth.PrincipalTypeAgent {
+		return nil
+	}
+	return s.agentStatusChecker.CheckAgentStatus(ctx, principal)
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
+	"time"
 
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	"github.com/stretchr/testify/require"
@@ -51,8 +52,54 @@ func TestAgentActivationAndLifecycle(t *testing.T) {
 
 	revoked := env.Identity.RevokeAgent(ownerSession(), registered.Agent.ID, "retired")
 	require.Equal(t, identitydomain.AgentRevoked, revoked.Status)
-	require.Equal(t, "STATE_CONFLICT", env.Identity.RefreshTokenCode(refreshed.Token))
-	require.Equal(t, "STATE_CONFLICT", env.Identity.HeartbeatCode(refreshed.Token))
+	require.Equal(t, "TOKEN_REVOKED", env.Identity.RefreshTokenCode(refreshed.Token))
+	require.Equal(t, "TOKEN_REVOKED", env.Identity.HeartbeatCode(refreshed.Token))
+}
+
+func TestSuspendedIdentityIssuedTokenCannotUseTaskOperations(t *testing.T) {
+	env := Start(t)
+	registered := env.Identity.RegisterAgent(ownerSession(), RegisterAgentRequest{
+		Name:   "Suspended Worker",
+		Scopes: []string{"tasks:publish", "tasks:claim", "tasks:execute", "tasks:read"},
+	})
+	activated := env.Identity.ActivateAgent(registered.ActivationToken, ActivateAgentRequest{
+		Runtime: "codex",
+		Model:   "gpt-5",
+	})
+	agent := env.AsAgent(activated.Token)
+	taskID := env.PublishTask(time.Now().Add(time.Hour))
+	claimed := agent.TaskClaim(taskID, "claim-before-suspend")
+
+	env.Identity.SuspendAgent(ownerSession(), registered.Agent.ID, "maintenance")
+
+	require.Equal(t, "STATE_CONFLICT", agent.PublishTaskCode(time.Now().Add(time.Hour), "publish-after-suspend"))
+	require.Equal(t, "STATE_CONFLICT", agent.TaskClaimCode(env.PublishTask(time.Now().Add(time.Hour)), "claim-after-suspend"))
+	require.Equal(t, "STATE_CONFLICT", agent.StartExecutionCode(claimed.ID, claimed.LeaseGeneration, "start-after-suspend"))
+	require.Equal(t, "STATE_CONFLICT", agent.HeartbeatCode(claimed.ID, claimed.LeaseGeneration, "beat-after-suspend"))
+	require.Equal(t, "STATE_CONFLICT", agent.GetExecutionCode(claimed.ID))
+}
+
+func TestRevokedIdentityIssuedTokenReturnsTokenRevokedForTaskOperations(t *testing.T) {
+	env := Start(t)
+	registered := env.Identity.RegisterAgent(ownerSession(), RegisterAgentRequest{
+		Name:   "Revoked Worker",
+		Scopes: []string{"tasks:publish", "tasks:claim", "tasks:execute", "tasks:read"},
+	})
+	activated := env.Identity.ActivateAgent(registered.ActivationToken, ActivateAgentRequest{
+		Runtime: "codex",
+		Model:   "gpt-5",
+	})
+	agent := env.AsAgent(activated.Token)
+	taskID := env.PublishTask(time.Now().Add(time.Hour))
+	claimed := agent.TaskClaim(taskID, "claim-before-revoke")
+
+	env.Identity.RevokeAgent(ownerSession(), registered.Agent.ID, "retired")
+
+	require.Equal(t, "TOKEN_REVOKED", agent.PublishTaskCode(time.Now().Add(time.Hour), "publish-after-revoke"))
+	require.Equal(t, "TOKEN_REVOKED", agent.TaskClaimCode(env.PublishTask(time.Now().Add(time.Hour)), "claim-after-revoke"))
+	require.Equal(t, "TOKEN_REVOKED", agent.StartExecutionCode(claimed.ID, claimed.LeaseGeneration, "start-after-revoke"))
+	require.Equal(t, "TOKEN_REVOKED", agent.HeartbeatCode(claimed.ID, claimed.LeaseGeneration, "beat-after-revoke"))
+	require.Equal(t, "TOKEN_REVOKED", agent.GetExecutionCode(claimed.ID))
 }
 
 func TestActivationTokenReplayFails(t *testing.T) {

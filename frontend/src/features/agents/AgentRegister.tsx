@@ -10,7 +10,6 @@ type AgentRegisterProps = {
 
 type FormState = {
   name: string;
-  ownerEmail: string;
   description: string;
   team: string;
   scopes: string;
@@ -21,10 +20,9 @@ type FormState = {
 
 const initialState: FormState = {
   name: "",
-  ownerEmail: "",
   description: "",
   team: "",
-  scopes: "tasks:read, tasks:write",
+  scopes: "tasks:publish, tasks:claim, tasks:execute, tasks:read",
   repoScope: "",
   budgetCents: "",
   budgetCurrency: "USD",
@@ -53,7 +51,6 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
   function buildPayload(): RegisterAgentRequest {
     return {
       name: form.name.trim(),
-      owner_email: form.ownerEmail.trim(),
       description: form.description.trim() || undefined,
       team: form.team.trim() || undefined,
       scopes: parseList(form.scopes),
@@ -86,16 +83,6 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
             placeholder="Code Review Bot"
           />
         </label>
-        <label>
-          Owner Email
-          <input
-            type="email"
-            value={form.ownerEmail}
-            onChange={(event) => updateField("ownerEmail", event.target.value)}
-            required
-            placeholder="review@example.com"
-          />
-        </label>
         <label className="field-span-2">
           描述
           <textarea
@@ -114,7 +101,7 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
           <input
             value={form.scopes}
             onChange={(event) => updateField("scopes", event.target.value)}
-            placeholder="tasks:read, tasks:write"
+            placeholder="tasks:publish, tasks:claim, tasks:execute, tasks:read"
           />
         </label>
         <label className="field-span-2">

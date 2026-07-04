@@ -22,7 +22,6 @@ export type AgentPage = {
 
 export type RegisterAgentRequest = {
   name: string;
-  owner_email: string;
   description?: string;
   team?: string;
   scopes: string[];

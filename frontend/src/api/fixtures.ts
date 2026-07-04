@@ -69,7 +69,7 @@ export function agentViewFixture(overrides?: Partial<AgentView>): AgentView {
     status: "active",
     team: "Platform",
     owner_email: "atlas@example.com",
-    scopes: ["tasks:read", "tasks:write"],
+    scopes: ["tasks:publish", "tasks:claim", "tasks:execute", "tasks:read"],
     repo_scope: ["billing-service"],
     budget_cents: 5000,
     budget_currency: "USD",
