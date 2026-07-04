@@ -17,13 +17,13 @@ func (s *Service) PublishTask(ctx context.Context, principal auth.Principal, com
 	if err := s.policy.Require(principal, "tasks:publish"); err != nil {
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -76,13 +76,13 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 	if err := s.policy.Require(principal, "tasks:cancel"); err != nil {
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err

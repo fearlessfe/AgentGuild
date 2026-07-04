@@ -12,25 +12,19 @@ import (
 )
 
 type Options struct {
-	CursorSecret       []byte
-	CursorTTL          time.Duration
-	NewID              func() string
-	RateLimiter        ratelimit.RateLimiter
-	AgentStatusChecker AgentStatusChecker
-}
-
-type AgentStatusChecker interface {
-	CheckAgentStatus(context.Context, auth.Principal) error
+	CursorSecret []byte
+	CursorTTL    time.Duration
+	NewID        func() string
+	RateLimiter  ratelimit.RateLimiter
 }
 
 type Service struct {
-	store              Store
-	policy             auth.ScopePolicy
-	cursorSecret       []byte
-	cursorTTL          time.Duration
-	newID              func() string
-	rateLimiter        ratelimit.RateLimiter
-	agentStatusChecker AgentStatusChecker
+	store        Store
+	policy       auth.ScopePolicy
+	cursorSecret []byte
+	cursorTTL    time.Duration
+	newID        func() string
+	rateLimiter  ratelimit.RateLimiter
 }
 
 func NewService(store Store, options Options) (*Service, error) {
@@ -47,12 +41,11 @@ func NewService(store Store, options Options) (*Service, error) {
 		options.RateLimiter = ratelimit.NewUnlimited()
 	}
 	return &Service{
-		store:              store,
-		cursorSecret:       append([]byte(nil), options.CursorSecret...),
-		cursorTTL:          options.CursorTTL,
-		newID:              options.NewID,
-		rateLimiter:        options.RateLimiter,
-		agentStatusChecker: options.AgentStatusChecker,
+		store:        store,
+		cursorSecret: append([]byte(nil), options.CursorSecret...),
+		cursorTTL:    options.CursorTTL,
+		newID:        options.NewID,
+		rateLimiter:  options.RateLimiter,
 	}, nil
 }
 
@@ -75,9 +68,9 @@ func (s *Service) checkRateLimit(ctx context.Context, principal auth.Principal) 
 	return nil
 }
 
-func (s *Service) requireLiveAgent(ctx context.Context, principal auth.Principal) error {
-	if s.agentStatusChecker == nil || principal.Type != auth.PrincipalTypeAgent {
+func (s *Service) requireLiveAgent(ctx context.Context, tx Tx, principal auth.Principal) error {
+	if principal.Type != auth.PrincipalTypeAgent {
 		return nil
 	}
-	return s.agentStatusChecker.CheckAgentStatus(ctx, principal)
+	return tx.RequireLiveAgent(ctx, principal)
 }

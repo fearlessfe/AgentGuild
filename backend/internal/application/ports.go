@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"github.com/shopspring/decimal"
 )
@@ -18,6 +19,7 @@ type Tx interface {
 	IdempotencyRepository
 	EventRepository
 	Now(context.Context) (time.Time, error)
+	RequireLiveAgent(context.Context, auth.Principal) error
 }
 
 type TaskRecord struct {

@@ -16,13 +16,13 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 	if err := s.policy.Require(principal, "tasks:claim"); err != nil {
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -81,14 +81,6 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 		var result Envelope[ExecutionView]
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		var result Envelope[ExecutionView]
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		var result Envelope[ExecutionView]
-		return result, err
-	}
 	return s.mutateExecution(ctx, principal, "execution_start", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "start", func(execution *domain.Execution, now time.Time, generation int64) error {
 		return execution.Start(now, generation, command.Stage, command.Progress)
 	})
@@ -96,14 +88,6 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 
 func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Principal, command HeartbeatExecution) (Envelope[ExecutionView], error) {
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
-		var result Envelope[ExecutionView]
-		return result, err
-	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		var result Envelope[ExecutionView]
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err
 	}
@@ -121,6 +105,12 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		return result, err
 	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -200,13 +190,13 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 	} else {
 		return result, domain.ErrForbidden
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err

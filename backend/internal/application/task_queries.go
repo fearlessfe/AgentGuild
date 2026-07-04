@@ -33,13 +33,13 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -63,12 +63,6 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	limit := query.Limit
 	if limit == 0 {
 		limit = 20
@@ -77,6 +71,12 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 		return result, invalid("limit")
 	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err

@@ -45,3 +45,28 @@ Branch: feature/20260702/agent-onboarding-and-identity
   - PASS. Plain `make build` was blocked by sandbox access to `~/Library/Caches/go-build`; escalation was rejected by approval service 503.
 - `git diff --check`
   - PASS.
+
+## Final Fix Round: Transaction Window
+
+### RED
+
+- `cd backend && go test ./internal/application -run TestTaskOperationsCheckLiveAgentInsideTaskTransaction -count=1`
+  - Failed as expected: `PublishTask error=<nil>, want identity state conflict`. This proved task operations still trusted the old transaction-external checker path and could persist work after the fake store changed the agent to suspended immediately before the task transaction.
+
+### Changes
+
+- Added `application.Tx.RequireLiveAgent(ctx, principal)` and moved live-agent enforcement into the `WithTx` closure for `PublishTask`, `CancelTask`, `ClaimTask`, `StartExecution`, `HeartbeatExecution`, `GetTask`, `ListTasks`, `GetExecution`, and `ListTaskEvents`.
+- Implemented Postgres task-store enforcement in `backend/internal/postgres/agent_status.go` using the same transaction and `SELECT ... FOR UPDATE` on the current `agents` row.
+- Removed task-service wiring for the old independent `AgentStatusChecker`; the identity checker remains only for identity-layer compatibility tests.
+- Updated acceptance fake publisher/agent principals to set `Type: auth.PrincipalTypeAgent`, so tests exercise the live-agent gate.
+
+### GREEN
+
+- `cd backend && go test ./internal/application -run TestTaskOperationsCheckLiveAgentInsideTaskTransaction -count=1`
+  - PASS.
+- `cd backend && go test ./internal/application ./internal/identity/... ./internal/transport/rest ./internal/transport/mcp ./internal/acceptance -count=1`
+  - PASS.
+- `git diff --check`
+  - PASS.
+- `env GOCACHE=/private/tmp/agentguild-go-build-cache make build`
+  - PASS.

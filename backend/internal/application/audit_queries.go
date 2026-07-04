@@ -29,12 +29,6 @@ func (s *Service) ListTaskEvents(ctx context.Context, principal auth.Principal, 
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
-	if err := s.requireLiveAgent(ctx, principal); err != nil {
-		return result, err
-	}
-	if err := s.checkRateLimit(ctx, principal); err != nil {
-		return result, err
-	}
 	if query.TaskID == "" {
 		return result, invalid("task_id")
 	}
@@ -46,6 +40,12 @@ func (s *Service) ListTaskEvents(ctx context.Context, principal auth.Principal, 
 		return result, invalid("limit")
 	}
 	err := s.store.WithTx(ctx, func(tx Tx) error {
+		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
+			return err
+		}
+		if err := s.checkRateLimit(ctx, principal); err != nil {
+			return err
+		}
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err

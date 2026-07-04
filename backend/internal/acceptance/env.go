@@ -47,9 +47,8 @@ func Start(t *testing.T) *Env {
 	store := postgres.NewStore(db)
 	identityStore := identitypostgres.NewStore(db)
 	svc, err := application.NewService(store, application.Options{
-		CursorSecret:       []byte("0123456789abcdef0123456789abcdef"),
-		CursorTTL:          15 * time.Minute,
-		AgentStatusChecker: identityapp.NewAgentStatusChecker(identityStore),
+		CursorSecret: []byte("0123456789abcdef0123456789abcdef"),
+		CursorTTL:    15 * time.Minute,
 	})
 	require.NoError(t, err)
 	verifier, tokenIssuer := newAcceptanceIdentityRuntime(t)
@@ -178,6 +177,7 @@ func (v fakeVerifier) Verify(ctx context.Context, rawToken string) (auth.Princip
 func publisherPrincipal() auth.Principal {
 	return auth.Principal{
 		TenantID:       "tenant-1",
+		Type:           auth.PrincipalTypeAgent,
 		AgentID:        "publisher",
 		AgentVersionID: "publisher-v1",
 		Scopes:         []string{"tasks:publish", "tasks:read", "tasks:cancel"},
@@ -188,6 +188,7 @@ func agentPrincipal(i int) auth.Principal {
 	id := fmt.Sprintf("agent-%d", i)
 	return auth.Principal{
 		TenantID:       "tenant-1",
+		Type:           auth.PrincipalTypeAgent,
 		AgentID:        id,
 		AgentVersionID: id,
 		Scopes:         []string{"tasks:claim", "tasks:execute"},

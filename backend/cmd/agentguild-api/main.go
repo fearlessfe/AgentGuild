@@ -52,8 +52,7 @@ func run() error {
 		return err
 	}
 	service, err := application.NewService(postgres.NewStore(pool), application.Options{
-		CursorSecret:       []byte(cfg.CursorSecret),
-		AgentStatusChecker: identityapp.NewAgentStatusChecker(identitypostgres.NewStore(pool)),
+		CursorSecret: []byte(cfg.CursorSecret),
 	})
 	if err != nil {
 		return err

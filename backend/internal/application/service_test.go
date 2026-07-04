@@ -12,6 +12,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 )
 
 var fixtureNow = time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
@@ -97,6 +98,35 @@ func TestPublishPersistsLosslessBodyEventsAndStableReplay(t *testing.T) {
 	record := tx.tasks[tx.key("tenant-1", first.Data.ID)]
 	if string(record.Constraints) != `["offline"]` || string(record.Requirements) != `["tests"]` || len(tx.events) != 1 || len(tx.outbox) != 1 {
 		t.Fatalf("lossy or incomplete publish: record=%#v events=%d outbox=%d", record, len(tx.events), len(tx.outbox))
+	}
+}
+
+func TestTaskOperationsCheckLiveAgentInsideTaskTransaction(t *testing.T) {
+	tx := newFakeTx()
+	tx.seedLiveAgent("tenant-1", "publisher", identitydomain.AgentActive, "publisher-v1")
+	store := &fakeStore{
+		tx: tx,
+		beforeTx: func(tx *fakeTx) {
+			tx.seedLiveAgent("tenant-1", "publisher", identitydomain.AgentSuspended, "publisher-v1")
+		},
+	}
+	svc, err := application.NewService(store, application.Options{
+		CursorSecret: []byte("01234567890123456789012345678901"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := principal("tenant-1", "publisher-v1", "tasks:publish")
+	p.Type = auth.PrincipalTypeAgent
+	p.AgentID = "publisher"
+
+	_, err = svc.PublishTask(context.Background(), p, application.PublishTask{RequestID: "req", Deadline: fixtureNow.Add(time.Hour)})
+
+	if !errors.Is(err, identitydomain.ErrStateConflict) {
+		t.Fatalf("PublishTask error=%v, want identity state conflict", err)
+	}
+	if len(tx.tasks) != 0 {
+		t.Fatalf("suspended agent transaction persisted tasks: %#v", tx.tasks)
 	}
 }
 
@@ -398,9 +428,20 @@ func assertDomainError(t *testing.T, err error, code, field string) {
 	}
 }
 
-type fakeStore struct{ tx *fakeTx }
+type liveAgentRecord struct {
+	status           string
+	currentVersionID string
+}
+
+type fakeStore struct {
+	tx       *fakeTx
+	beforeTx func(*fakeTx)
+}
 
 func (s *fakeStore) WithTx(_ context.Context, fn func(application.Tx) error) error {
+	if s.beforeTx != nil {
+		s.beforeTx(s.tx)
+	}
 	working := s.tx.clone()
 	if err := fn(working); err != nil {
 		return err
@@ -419,10 +460,11 @@ type fakeTx struct {
 	failAt         string
 	usageErr       error
 	latestEventErr error
+	liveAgents     map[string]liveAgentRecord
 }
 
 func (tx *fakeTx) clone() *fakeTx {
-	copyTx := &fakeTx{now: tx.now, tasks: make(map[string]application.TaskRecord, len(tx.tasks)), executions: make(map[string]*domain.Execution, len(tx.executions)), idem: make(map[application.IdempotencyKey]*application.IdempotencyRecord, len(tx.idem)), events: append([]application.TaskEvent(nil), tx.events...), outbox: append([]application.OutboxEvent(nil), tx.outbox...), failAt: tx.failAt, usageErr: tx.usageErr, latestEventErr: tx.latestEventErr}
+	copyTx := &fakeTx{now: tx.now, tasks: make(map[string]application.TaskRecord, len(tx.tasks)), executions: make(map[string]*domain.Execution, len(tx.executions)), idem: make(map[application.IdempotencyKey]*application.IdempotencyRecord, len(tx.idem)), events: append([]application.TaskEvent(nil), tx.events...), outbox: append([]application.OutboxEvent(nil), tx.outbox...), failAt: tx.failAt, usageErr: tx.usageErr, latestEventErr: tx.latestEventErr, liveAgents: make(map[string]liveAgentRecord, len(tx.liveAgents))}
 	for key, task := range tx.tasks {
 		task.Constraints = append([]byte(nil), task.Constraints...)
 		task.Requirements = append([]byte(nil), task.Requirements...)
@@ -437,10 +479,36 @@ func (tx *fakeTx) clone() *fakeTx {
 		copyRecord.ResponseBody = append([]byte(nil), record.ResponseBody...)
 		copyTx.idem[key] = &copyRecord
 	}
+	for key, record := range tx.liveAgents {
+		copyTx.liveAgents[key] = record
+	}
 	return copyTx
 }
 
 func (tx *fakeTx) key(tenant, id string) string { return tenant + "/" + id }
+func (tx *fakeTx) seedLiveAgent(tenantID, agentID, status, currentVersionID string) {
+	if tx.liveAgents == nil {
+		tx.liveAgents = map[string]liveAgentRecord{}
+	}
+	tx.liveAgents[tx.key(tenantID, agentID)] = liveAgentRecord{status: status, currentVersionID: currentVersionID}
+}
+func (tx *fakeTx) RequireLiveAgent(_ context.Context, principal auth.Principal) error {
+	record, ok := tx.liveAgents[tx.key(principal.TenantID, principal.AgentID)]
+	if !ok {
+		return nil
+	}
+	if record.currentVersionID != "" && principal.AgentVersionID != record.currentVersionID {
+		return identitydomain.ErrForbidden
+	}
+	switch record.status {
+	case identitydomain.AgentActive:
+		return nil
+	case identitydomain.AgentRevoked:
+		return identitydomain.ErrTokenRevoked
+	default:
+		return identitydomain.ErrStateConflict
+	}
+}
 func (tx *fakeTx) seed(r application.TaskRecord) {
 	if r.Constraints == nil {
 		r.Constraints = []byte(`[]`)
