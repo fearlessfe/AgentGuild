@@ -23,6 +23,12 @@ func NewSubmissionRepository(pool *pgxpool.Pool) application.SubmissionRepositor
 }
 
 func (r *submissionRepository) Save(ctx context.Context, submission *gitdomain.Submission) error {
+	var evidenceArg *string
+	if len(submission.Evidence) > 0 {
+		s := string(submission.Evidence)
+		evidenceArg = &s
+	}
+
 	_, err := r.q.Exec(ctx, `
 		INSERT INTO submissions (
 			id, tenant_id, task_id, execution_id, branch, commit_sha, base_commit_sha,
@@ -42,7 +48,7 @@ func (r *submissionRepository) Save(ctx context.Context, submission *gitdomain.S
 			updated_at = EXCLUDED.updated_at`,
 		submission.ID, submission.TenantID, submission.TaskID, submission.ExecutionID, submission.Branch,
 		submission.CommitSHA, submission.BaseCommitSHA, submission.Summary, submission.TestDeclaration,
-		string(submission.Evidence), submission.DiffFingerprint, string(submission.Status), submission.ValidationJobID,
+		evidenceArg, submission.DiffFingerprint, string(submission.Status), submission.ValidationJobID,
 		submission.CreatedAt, submission.UpdatedAt,
 	)
 	if err != nil {
@@ -84,7 +90,7 @@ func (r *submissionRepository) GetByExecutionID(ctx context.Context, tenantID, e
 	}
 	defer rows.Close()
 
-	var out []*gitdomain.Submission
+	var out []*gitdomain.Submission = []*gitdomain.Submission{}
 	for rows.Next() {
 		submission, err := r.scanRow(rows)
 		if err != nil {

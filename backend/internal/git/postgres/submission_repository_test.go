@@ -112,6 +112,30 @@ func TestSubmissionRepositoryEvidenceJSONB(t *testing.T) {
 	require.JSONEq(t, string(sub.Evidence), string(got.Evidence))
 }
 
+func TestSubmissionRepositoryEvidenceNilOrEmpty(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+	repo := postgres.NewSubmissionRepository(db)
+
+	// nil evidence
+	subNil := sampleSubmission("tenant-1", "task-1", "exec-1", "sub-nil")
+	subNil.Evidence = nil
+	require.NoError(t, repo.Save(ctx, subNil))
+
+	gotNil, err := repo.GetByID(ctx, subNil.TenantID, subNil.ID)
+	require.NoError(t, err)
+	require.Nil(t, gotNil.Evidence)
+
+	// empty evidence
+	subEmpty := sampleSubmission("tenant-1", "task-1", "exec-1", "sub-empty")
+	subEmpty.Evidence = []byte{}
+	require.NoError(t, repo.Save(ctx, subEmpty))
+
+	gotEmpty, err := repo.GetByID(ctx, subEmpty.TenantID, subEmpty.ID)
+	require.NoError(t, err)
+	require.Empty(t, gotEmpty.Evidence)
+}
+
 func TestSubmissionRepositoryUpsertRespectsTenantIsolation(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
