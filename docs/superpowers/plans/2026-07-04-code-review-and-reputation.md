@@ -181,7 +181,7 @@ git commit -m "feat(review): add review, comment, rubric and reviewer domain mod
   - `RubricRepository.GetActive/GetByID/ListVersions/CreateVersion`
   - `ReviewerRepository.GetByID/ListActive/IncrementLoad/DecrementLoad`
 
-- [ ] **Step 1: 编写迁移 SQL（含表、约束、索引）**
+- [x] **Step 1: 编写迁移 SQL（含表、约束、索引）**
 
 ```sql
 CREATE TABLE reviews (
@@ -271,9 +271,9 @@ CREATE TABLE reputation_projections (
 );
 ```
 
-- [ ] **Step 2: 创建 down 迁移删除上述表**
+- [x] **Step 2: 创建 down 迁移删除上述表**
 
-- [ ] **Step 3: 实现 postgres 仓库方法并写失败测试**
+- [x] **Step 3: 实现 postgres 仓库方法并写失败测试**
 
 ```go
 func TestInsertReviewIsTenantScoped(t *testing.T) {
@@ -281,13 +281,13 @@ func TestInsertReviewIsTenantScoped(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: 运行测试**
+- [x] **Step 4: 运行测试**
 
 ```bash
 go test ./internal/review/postgres/... -v
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add backend/migrations backend/internal/review/postgres backend/internal/review/application/ports.go
