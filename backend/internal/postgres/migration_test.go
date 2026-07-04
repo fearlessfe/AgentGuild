@@ -27,6 +27,8 @@ func TestMigrationRoundTrip(t *testing.T) {
 	tables := []string{
 		"tasks", "executions", "idempotency_records",
 		"task_events", "outbox_events", "execution_usage",
+		"agents", "agent_versions", "activation_credentials", "identity_events",
+		"git_credentials",
 	}
 	for _, table := range tables {
 		var name *string
@@ -69,6 +71,8 @@ func TestMigrationRoundTrip(t *testing.T) {
 		"tasks_active_execution_fk",
 		"task_events_execution_fk",
 		"execution_usage_execution_fk",
+		"git_credentials_pkey",
+		"git_credentials_tenant_id_execution_id_key",
 	}
 	for _, constraint := range requiredConstraints {
 		var exists bool
