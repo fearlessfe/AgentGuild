@@ -70,3 +70,48 @@ Branch: feature/20260702/agent-onboarding-and-identity
   - PASS.
 - `env GOCACHE=/private/tmp/agentguild-go-build-cache make build`
   - PASS.
+
+## Final Fix Round: Fail-Closed Identity Tokens And JWKS Semantics
+
+### RED
+
+- `cd backend && go test ./internal/application -run TestTaskOperationsRejectUnknownLiveAgent -count=1`
+  - Failed as expected: `PublishTask error=<nil>, want identity forbidden`. This proved signature-valid agent principals with no `agents` row were still allowed through task operations.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsMissingExpiration -count=1`
+  - Failed as expected: a JWT without `exp` was accepted.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsRemovedKeyAfterRotationRefresh -count=1`
+  - Failed as expected: a key removed from JWKS remained trusted after refresh.
+- `cd backend && go test ./internal/acceptance -run TestAgentHeartbeatReceivesTenMinuteLeaseAndPollAfterSeconds -count=1`
+  - Failed after the fail-closed change because the acceptance fake publisher had no active identity row.
+
+### Changes
+
+- Changed Postgres `RequireLiveAgent` to fail closed with `ErrForbidden` when the `agents` row is missing.
+- Updated application fakes and tests to assert unknown agent principals are rejected.
+- Required JWT expiration during OAuth/JWKS verification.
+- Replaced JWKS cache contents on refresh instead of appending stale keys forever.
+- Added JWKS cache expiry based on `Cache-Control: max-age`, `Expires`, or a default TTL, so cached keys refresh before accepting tokens after expiry.
+- Seeded active identity rows for acceptance fake lifecycle principals while keeping them under distinct IDs and owner scope so identity registration/list tests remain isolated.
+
+### GREEN
+
+- `cd backend && go test ./internal/application -run TestTaskOperationsRejectUnknownLiveAgent -count=1`
+  - PASS.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsMissingExpiration -count=1`
+  - PASS.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsRemovedKeyAfterRotationRefresh -count=1`
+  - PASS.
+- `cd backend && go test ./internal/acceptance -run TestAgentHeartbeatReceivesTenMinuteLeaseAndPollAfterSeconds -count=1`
+  - PASS.
+- `cd backend && go test ./internal/acceptance -run TestIdentityAuditEventsQueryUsesIsolatedTenantScope -count=1`
+  - PASS.
+- `cd backend && go test ./internal/acceptance -count=1`
+  - PASS.
+- `cd backend && go test ./internal/auth ./internal/application ./internal/identity/... ./internal/transport/rest ./internal/transport/mcp ./internal/acceptance -count=1`
+  - PASS.
+- `cd frontend && npm test -- --run`
+  - PASS: 13 tests.
+- `git diff --check`
+  - PASS.
+- `make build GOCACHE=/private/tmp/agentguild-go-build-cache`
+  - PASS.

@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,10 +26,14 @@ type JWKSVerifier struct {
 	audience string
 	jwksURL  string
 	client   *http.Client
+	now      func() time.Time
 
-	mu   sync.RWMutex
-	keys map[string]*rsa.PublicKey
+	mu             sync.RWMutex
+	keys           map[string]*rsa.PublicKey
+	cacheExpiresAt time.Time
 }
+
+const defaultJWKSCacheTTL = 5 * time.Minute
 
 // NewJWKSVerifier 创建一个验证指定 issuer、audience 的 JWT verifier。
 // client 为 nil 时使用带 10 秒超时和 TLS 校验的默认 HTTP client。
@@ -41,6 +46,7 @@ func NewJWKSVerifier(issuer, audience, jwksURL string, client *http.Client) *JWK
 		audience: audience,
 		jwksURL:  jwksURL,
 		client:   client,
+		now:      time.Now,
 		keys:     make(map[string]*rsa.PublicKey),
 	}
 }
@@ -52,7 +58,7 @@ func (v *JWKSVerifier) Verify(ctx context.Context, rawToken string) (Principal, 
 		return principal, errors.New("token is empty")
 	}
 
-	token, err := jwt.Parse(rawToken, v.keyFunc(ctx), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.audience), jwt.WithValidMethods([]string{"RS256"}))
+	token, err := jwt.Parse(rawToken, v.keyFunc(ctx), jwt.WithIssuer(v.issuer), jwt.WithAudience(v.audience), jwt.WithValidMethods([]string{"RS256"}), jwt.WithExpirationRequired())
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return principal, ErrTokenExpired
@@ -91,15 +97,16 @@ func (v *JWKSVerifier) keyFunc(ctx context.Context) jwt.Keyfunc {
 
 		v.mu.RLock()
 		key, ok := v.keys[kid]
+		cacheFresh := v.now().Before(v.cacheExpiresAt)
 		v.mu.RUnlock()
-		if ok {
+		if ok && cacheFresh {
 			return key, nil
 		}
 
 		v.mu.Lock()
 		defer v.mu.Unlock()
 		// 双重检查，防止并发时重复刷新。
-		if key, ok := v.keys[kid]; ok {
+		if key, ok := v.keys[kid]; ok && v.now().Before(v.cacheExpiresAt) {
 			return key, nil
 		}
 		if err := v.fetchKeys(ctx); err != nil {
@@ -128,6 +135,7 @@ func (v *JWKSVerifier) fetchKeys(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("fetch JWKS: status %d", resp.StatusCode)
 	}
+	now := v.now()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -138,10 +146,28 @@ func (v *JWKSVerifier) fetchKeys(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for kid, key := range keys {
-		v.keys[kid] = key
-	}
+	v.keys = keys
+	v.cacheExpiresAt = jwksCacheExpiresAt(now, resp.Header)
 	return nil
+}
+
+func jwksCacheExpiresAt(now time.Time, header http.Header) time.Time {
+	for _, directive := range strings.Split(header.Get("Cache-Control"), ",") {
+		directive = strings.TrimSpace(strings.ToLower(directive))
+		if !strings.HasPrefix(directive, "max-age=") {
+			continue
+		}
+		seconds, err := strconv.Atoi(strings.TrimPrefix(directive, "max-age="))
+		if err == nil && seconds >= 0 {
+			return now.Add(time.Duration(seconds) * time.Second)
+		}
+	}
+	if expires := header.Get("Expires"); expires != "" {
+		if parsed, err := http.ParseTime(expires); err == nil {
+			return parsed
+		}
+	}
+	return now.Add(defaultJWKSCacheTTL)
 }
 
 type jwk struct {

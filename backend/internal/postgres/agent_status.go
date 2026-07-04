@@ -20,7 +20,7 @@ func (tx *Tx) RequireLiveAgent(ctx context.Context, principal auth.Principal) er
 		principal.TenantID, principal.AgentID,
 	).Scan(&status, &currentVersionID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return identitydomain.ErrForbidden
 	}
 	if err != nil {
 		return err

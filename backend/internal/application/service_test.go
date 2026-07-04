@@ -130,6 +130,22 @@ func TestTaskOperationsCheckLiveAgentInsideTaskTransaction(t *testing.T) {
 	}
 }
 
+func TestTaskOperationsRejectUnknownLiveAgent(t *testing.T) {
+	svc, tx := newServiceFixture()
+	p := principal("tenant-1", "unknown-version", "tasks:publish")
+	p.Type = auth.PrincipalTypeAgent
+	p.AgentID = "unknown-agent"
+
+	_, err := svc.PublishTask(context.Background(), p, application.PublishTask{RequestID: "req", Deadline: fixtureNow.Add(time.Hour)})
+
+	if !errors.Is(err, identitydomain.ErrForbidden) {
+		t.Fatalf("PublishTask error=%v, want identity forbidden", err)
+	}
+	if len(tx.tasks) != 0 {
+		t.Fatalf("unknown agent persisted tasks: %#v", tx.tasks)
+	}
+}
+
 func TestListCursorIsSignedAndBoundToTenantAndFilter(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.seed(application.TaskRecord{ID: "task-3", TenantID: "tenant-1", PublisherAgentVersionID: "publisher-1", Status: domain.TaskOpen, CreatedAt: fixtureNow.Add(3 * time.Minute)})
@@ -495,7 +511,7 @@ func (tx *fakeTx) seedLiveAgent(tenantID, agentID, status, currentVersionID stri
 func (tx *fakeTx) RequireLiveAgent(_ context.Context, principal auth.Principal) error {
 	record, ok := tx.liveAgents[tx.key(principal.TenantID, principal.AgentID)]
 	if !ok {
-		return nil
+		return identitydomain.ErrForbidden
 	}
 	if record.currentVersionID != "" && principal.AgentVersionID != record.currentVersionID {
 		return identitydomain.ErrForbidden

@@ -139,6 +139,28 @@ func TestJWKSVerifierRejectsExpiredToken(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestJWKSVerifierRejectsMissingExpiration(t *testing.T) {
+	issuer := "https://auth.example.com"
+	audience := "agentguild"
+	kid, key, jwks := newRSAJWKS(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(jwks)
+	}))
+	defer server.Close()
+
+	verifier := auth.NewJWKSVerifier(issuer, audience, server.URL, nil)
+	token := signedToken(t, kid, key, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           []string{"tasks:read"},
+		"exp":              omitClaim{},
+	}, time.Hour)
+
+	_, err := verifier.Verify(context.Background(), token)
+	require.Error(t, err)
+}
+
 func TestJWKSVerifierRejectsWrongIssuer(t *testing.T) {
 	issuer := "https://auth.example.com"
 	audience := "agentguild"
@@ -262,7 +284,7 @@ func TestJWKSVerifierCachesKeysAndHandlesRotation(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
-func TestJWKSVerifierRetainsOldKeyDuringRotation(t *testing.T) {
+func TestJWKSVerifierRejectsRemovedKeyAfterRotationRefresh(t *testing.T) {
 	issuer := "https://auth.example.com"
 	audience := "agentguild"
 	kid1, key1, jwks1 := newRSAJWKS(t)
@@ -302,9 +324,45 @@ func TestJWKSVerifierRetainsOldKeyDuringRotation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 
-	// 用旧 key 签名的 token 仍应通过，说明轮换过渡期旧 key 未被删除。
+	// 重新获取只包含新 key 的 JWKS 后，旧 key 不能被无限保留。
 	_, err = verifier.Verify(context.Background(), token1)
+	require.Error(t, err)
+	require.Equal(t, 3, calls)
+}
+
+func TestJWKSVerifierRefreshesExpiredCacheBeforeAcceptingCachedKey(t *testing.T) {
+	issuer := "https://auth.example.com"
+	audience := "agentguild"
+	kid1, key1, jwks1 := newRSAJWKS(t)
+	_, _, jwks2 := newRSAJWKS(t)
+
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Cache-Control", "max-age=0")
+		if calls == 1 {
+			_, _ = w.Write(jwks1)
+			return
+		}
+		_, _ = w.Write(jwks2)
+	}))
+	defer server.Close()
+
+	verifier := auth.NewJWKSVerifier(issuer, audience, server.URL, nil)
+	token := signedToken(t, kid1, key1, issuer, audience, map[string]any{
+		"tenant_id":        "tenant-1",
+		"agent_id":         "agent-1",
+		"agent_version_id": "version-1",
+		"scopes":           []string{"tasks:read"},
+	}, time.Hour)
+
+	_, err := verifier.Verify(context.Background(), token)
 	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+
+	_, err = verifier.Verify(context.Background(), token)
+	require.Error(t, err)
+	require.Equal(t, 2, calls)
 }
 
 func TestJWKSVerifierFetchesKeysOnDemand(t *testing.T) {
@@ -352,6 +410,10 @@ func signedToken(t *testing.T, kid string, key *rsa.PrivateKey, issuer, audience
 		"exp": time.Now().Add(ttl).Unix(),
 	}
 	for k, v := range custom {
+		if _, ok := v.(omitClaim); ok {
+			delete(claims, k)
+			continue
+		}
 		claims[k] = v
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -360,6 +422,8 @@ func signedToken(t *testing.T, kid string, key *rsa.PrivateKey, issuer, audience
 	require.NoError(t, err)
 	return signed
 }
+
+type omitClaim struct{}
 
 func TestTokenVerifierInterfaceContract(t *testing.T) {
 	var verifier auth.TokenVerifier = stubVerifierFunc(func(context.Context, string) (auth.Principal, error) {

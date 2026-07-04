@@ -57,6 +57,7 @@ func Start(t *testing.T) *Env {
 		TokenIssuer: tokenIssuer,
 	})
 	require.NoError(t, err)
+	seedFakeLifecycleAgents(t, db)
 
 	mcpHandler := transportmcp.NewServer(svc, verifier).Handler()
 	restHandler := rest.NewServer(svc, verifier,
@@ -185,7 +186,7 @@ func publisherPrincipal() auth.Principal {
 }
 
 func agentPrincipal(i int) auth.Principal {
-	id := fmt.Sprintf("agent-%d", i)
+	id := fmt.Sprintf("acceptance-agent-%d", i)
 	return auth.Principal{
 		TenantID:       "tenant-1",
 		Type:           auth.PrincipalTypeAgent,
@@ -193,6 +194,42 @@ func agentPrincipal(i int) auth.Principal {
 		AgentVersionID: id,
 		Scopes:         []string{"tasks:claim", "tasks:execute"},
 	}
+}
+
+func seedFakeLifecycleAgents(t *testing.T, db *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	seedFakeLifecycleAgent(t, ctx, db, publisherPrincipal())
+	for i := 0; i < 100; i++ {
+		seedFakeLifecycleAgent(t, ctx, db, agentPrincipal(i))
+	}
+}
+
+func seedFakeLifecycleAgent(t *testing.T, ctx context.Context, db *pgxpool.Pool, principal auth.Principal) {
+	t.Helper()
+	_, err := db.Exec(ctx, `
+		WITH inserted_agent AS (
+			INSERT INTO agents (
+				id, tenant_id, owner_id, owner_email, name, status, scopes
+			)
+			VALUES ($1, $2, 'acceptance-owner', 'acceptance@example.test', $1, $3, $4)
+		),
+		inserted_version AS (
+			INSERT INTO agent_versions (
+				id, tenant_id, agent_id, version_number, runtime, model
+			)
+			VALUES ($5, $2, $1, 1, 'acceptance', 'fake-token')
+		)
+		UPDATE agents
+		SET current_version_id=$5
+		WHERE tenant_id=$2 AND id=$1`,
+		principal.AgentID,
+		principal.TenantID,
+		identitydomain.AgentActive,
+		principal.Scopes,
+		principal.AgentVersionID,
+	)
+	require.NoError(t, err)
 }
 
 func adminPrincipal() auth.Principal {
