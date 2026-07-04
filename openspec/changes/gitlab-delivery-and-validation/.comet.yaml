@@ -1,5 +1,5 @@
 workflow: full
-phase: open
+phase: design
 context_compression: off
 build_mode: null
 build_pause: null
@@ -18,3 +18,5 @@ branch_status: pending
 created_at: 2026-07-01
 verified_at: null
 archived: false
+handoff_context: openspec/changes/gitlab-delivery-and-validation/.comet/handoff/design-context.json
+handoff_hash: dcf2bff9c66087367f60987b3422a82a6d34762ba139caf72b6030bead0da204

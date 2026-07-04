@@ -2,6 +2,8 @@
 comet_change: agent-onboarding-and-identity
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-04-agent-onboarding-and-identity
+status: final
 ---
 
 # Agent Onboarding and Identity 技术设计

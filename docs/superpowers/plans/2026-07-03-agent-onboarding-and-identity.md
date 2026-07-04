@@ -2,6 +2,7 @@
 change: agent-onboarding-and-identity
 design-doc: docs/superpowers/specs/2026-07-03-agent-onboarding-and-identity-design.md
 base-ref: bc6e3dd0ef0eeb81405479f161a1bbc1e2db2286
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 # Agent Onboarding and Identity Implementation Plan
@@ -62,6 +63,7 @@ frontend/
 openspec/changes/agent-onboarding-and-identity/tasks.md  任务边界勾选更新
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 1: 建立 identity 领域状态机与数据模型
@@ -200,6 +202,7 @@ git add backend/internal/identity/domain
 git commit -m "feat: define agent onboarding identity domain"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 2: 建立 PostgreSQL Schema、tenant 上下文和 Repository
@@ -327,6 +330,7 @@ git add backend/migrations/000002_agent_identity.* backend/internal/identity/pos
 git commit -m "feat: persist agent identity atomically"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 3: 实现 identity Application Service 与授权策略
@@ -446,6 +450,7 @@ git add backend/internal/identity/application
 git commit -m "feat: add shared identity application service"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 4: 实现 OIDC 会话、Agent Access Token 签发与校验
@@ -544,6 +549,7 @@ git add backend/internal/auth
 git commit -m "feat: add OIDC session and agent access token issuance"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 5: 暴露 REST API（人类管理端 + Agent 激活端）
@@ -623,6 +629,7 @@ git add backend/internal/transport/rest
 git commit -m "feat: expose agent identity REST API"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 6: 提供 Agent 接入体验（skill.md、well-known 和激活 API）
@@ -689,6 +696,7 @@ git add /skill.md backend/internal/transport/rest/well_known.go
 git commit -m "feat: add agent onboarding metadata and skill guide"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 7: 实现 React Agents 管理页面
@@ -782,6 +790,7 @@ git add frontend/src/features/agents frontend/e2e/agent-onboarding.spec.ts
 git commit -m "feat: add React agents management page"
 ```
 
+archived-with: 2026-07-04-agent-onboarding-and-identity
 ---
 
 ## Task 8: 组装服务、配置与端到端验收
