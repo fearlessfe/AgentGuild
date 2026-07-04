@@ -2,8 +2,6 @@ package application
 
 import (
 	"context"
-
-	"agentguild.dev/agentguild/backend/internal/git"
 )
 
 // GetCredential retrieves the metadata for a credential by execution ID.
@@ -14,8 +12,8 @@ type GetCredential struct {
 // GetCredential returns the credential metadata if the caller is authorized.
 func (s *CredentialService) GetCredential(ctx context.Context, principal Principal, query GetCredential) (Envelope[CredentialView], error) {
 	var result Envelope[CredentialView]
-	if principal.TenantID == "" {
-		return result, git.ErrCredentialNotFound
+	if err := s.requireCaller(principal); err != nil {
+		return result, err
 	}
 	if query.ExecutionID == "" {
 		return result, invalid("execution_id")

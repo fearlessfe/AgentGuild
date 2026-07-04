@@ -10,6 +10,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // IssueCredential requests a short-lived Git credential for an execution.
@@ -53,12 +54,7 @@ func (s *CredentialService) IssueCredential(ctx context.Context, principal Princ
 		return result, git.ErrInvalidBranch
 	}
 
-	credential, err := s.issuer.Issue(ctx, principal.TenantID, cmd.ExecutionID, cmd.Repo, branch, cmd.BaseCommit)
-	if err != nil {
-		return result, err
-	}
-
-	err = s.store.WithTx(ctx, func(tx Tx) error {
+	err := s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -73,10 +69,16 @@ func (s *CredentialService) IssueCredential(ctx context.Context, principal Princ
 			}
 		}
 
+		if existing != nil && existing.RevokedAt != nil {
+			return git.ErrCredentialRevoked
+		}
+
+		credential, err := s.issuer.Issue(ctx, principal.TenantID, cmd.ExecutionID, cmd.Repo, branch, cmd.BaseCommit)
+		if err != nil {
+			return err
+		}
+
 		if existing != nil {
-			if existing.RevokedAt != nil {
-				return git.ErrCredentialRevoked
-			}
 			existing.Provider = s.provider
 			existing.RepoURL = credential.RepoURL
 			existing.Branch = branch
@@ -107,6 +109,9 @@ func (s *CredentialService) IssueCredential(ctx context.Context, principal Princ
 			CreatedAt:   now,
 		}
 		if err := tx.Credentials().Insert(ctx, record); err != nil {
+			if isUniqueViolation(err) {
+				return git.ErrAlreadyIssued
+			}
 			return err
 		}
 		result = Envelope[IssueCredentialResponse]{
@@ -144,7 +149,11 @@ func (s *CredentialService) RevokeCredential(ctx context.Context, principal Prin
 			return err
 		}
 		if record.RevokedAt != nil {
-			return git.ErrCredentialRevoked
+			result = Envelope[CredentialView]{
+				Data: credentialView(record, now),
+				Meta: Meta{ServerTime: now},
+			}
+			return nil
 		}
 		if err := tx.Credentials().Revoke(ctx, principal.TenantID, cmd.ExecutionID); err != nil {
 			return err
@@ -201,4 +210,12 @@ func randomID() string {
 
 func invalid(field string) error {
 	return &domain.Error{Code: "invalid_argument", Message: field + " is invalid", Field: field}
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }

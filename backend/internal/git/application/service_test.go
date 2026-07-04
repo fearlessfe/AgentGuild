@@ -143,14 +143,64 @@ func TestAgentWithExecuteScopeCanIssueCredential(t *testing.T) {
 	require.Equal(t, "exec-1", got.Data.Credential.ExecutionID)
 }
 
+func TestRevokeCredentialIsIdempotent(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	issued, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+
+	got, err := fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+	require.NotNil(t, got.Data.RevokedAt)
+	require.Equal(t, issued.Data.Credential.ID, got.Data.ID)
+}
+
+func TestGetCredentialRequiresAuthorizedCaller(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.svc.GetCredential(context.Background(), application.Principal{}, application.GetCredential{ExecutionID: "exec-1"})
+	require.ErrorIs(t, err, domain.ErrForbidden)
+
+	_, err = fixture.svc.GetCredential(context.Background(), application.Principal{TenantID: "tenant-1"}, application.GetCredential{ExecutionID: "exec-1"})
+	require.ErrorIs(t, err, domain.ErrForbidden)
+}
+
+func TestIssueCredentialDoesNotIssueTokenForRevokedCredential(t *testing.T) {
+	fixture := newCredentialFixture(t)
+
+	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, fixture.issuer.counter)
+
+	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+
+	_, err = fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.ErrorIs(t, err, git.ErrCredentialRevoked)
+	require.Equal(t, 1, fixture.issuer.counter)
+}
+
 func ownerPrincipal() application.Principal {
 	return application.Principal{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com"}
 }
 
 type credentialFixture struct {
-	svc   *application.CredentialService
-	store *memoryStore
-	now   time.Time
+	svc    *application.CredentialService
+	store  *memoryStore
+	issuer *fakeIssuer
+	now    time.Time
 }
 
 func newCredentialFixture(t *testing.T) *credentialFixture {
@@ -163,7 +213,7 @@ func newCredentialFixture(t *testing.T) *credentialFixture {
 		NewID:  sequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
-	return &credentialFixture{svc: svc, store: store, now: now}
+	return &credentialFixture{svc: svc, store: store, issuer: issuer, now: now}
 }
 
 type fakeIssuer struct {
@@ -254,7 +304,7 @@ func (r *memoryCredentialRepository) Revoke(_ context.Context, tenantID, executi
 		return git.ErrCredentialNotFound
 	}
 	if record.RevokedAt != nil {
-		return git.ErrCredentialRevoked
+		return git.ErrCredentialNotFound
 	}
 	revoked := cloneRecord(record)
 	revoked.RevokedAt = &r.now
