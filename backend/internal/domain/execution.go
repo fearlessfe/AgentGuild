@@ -143,6 +143,10 @@ func (e *Execution) Apply(intent Intent, actor Actor, now time.Time) error {
 	switch intent {
 	case IntentAccept:
 		return e.Accept(actor, now)
+	case IntentReject:
+		return e.Reject(actor, now)
+	case IntentRequestRevision:
+		return e.RequestRevision(actor, now)
 	case IntentCancel:
 		return e.Cancel(actor, now)
 	default:
@@ -165,15 +169,37 @@ func (e *Execution) Cancel(actor Actor, _ time.Time) error {
 }
 
 func (e *Execution) Accept(actor Actor, now time.Time) error {
-	if e.Status != ExecutionRunning {
+	if e.Status != ExecutionRunning && e.Status != ExecutionReviewing {
 		return ErrStateConflict
 	}
 	if actor.Type != ActorReviewer || actor.ID == "" {
 		return ErrForbidden
 	}
-	if !now.Before(e.Lease.HardExpiry) {
+	if e.Status == ExecutionRunning && !now.Before(e.Lease.HardExpiry) {
 		return ErrLeaseExpired
 	}
 	e.Status = ExecutionAccepted
+	return nil
+}
+
+func (e *Execution) Reject(actor Actor, _ time.Time) error {
+	if e.Status != ExecutionReviewing {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorReviewer || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionRejected
+	return nil
+}
+
+func (e *Execution) RequestRevision(actor Actor, _ time.Time) error {
+	if e.Status != ExecutionReviewing {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorReviewer || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionRevisionRequested
 	return nil
 }
