@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	appdomain "agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"agentguild.dev/agentguild/backend/internal/review/postgres"
@@ -33,7 +34,7 @@ func TestInsertReviewIsTenantScoped(t *testing.T) {
 	require.Equal(t, review.SubmissionID, got.SubmissionID)
 
 	_, err = postgres.NewReviewRepository(db).GetByID(ctx, "tenant-2", review.ID)
-	require.ErrorIs(t, err, domain.ErrNotFound)
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
 }
 
 func TestReviewUpdatePersistsSubmissionAndScores(t *testing.T) {
@@ -133,7 +134,7 @@ func TestRubricRepositoryActiveAndList(t *testing.T) {
 	require.Equal(t, 2, versions[0].VersionNumber)
 
 	_, err = repo.GetActive(ctx, "tenant-2")
-	require.ErrorIs(t, err, domain.ErrNotFound)
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
 }
 
 func TestRubricActiveUniquePerTenant(t *testing.T) {
@@ -167,7 +168,7 @@ func TestReviewerRepositoryLoadOperations(t *testing.T) {
 	require.Equal(t, 0, got.CurrentLoad)
 
 	err = repo.DecrementLoad(ctx, "tenant-1", "reviewer-1")
-	require.ErrorIs(t, err, domain.ErrNotFound)
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
 }
 
 func TestReviewerListActiveOrdersByLoad(t *testing.T) {
@@ -231,6 +232,88 @@ func TestCodeReviewPrimaryAndUniqueConstraintsIncludeTenantID(t *testing.T) {
 	}
 	require.NoError(t, rows.Err())
 	require.Empty(t, violations)
+}
+
+func TestReviewNotFoundReturnsDomainError(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	_, err := postgres.NewReviewRepository(db).GetByID(ctx, "tenant-1", "missing")
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
+	require.Equal(t, "not_found", appdomain.CodeOf(err))
+}
+
+func TestRubricNotFoundReturnsDomainError(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	_, err := postgres.NewRubricRepository(db).GetActive(ctx, "tenant-1")
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
+	require.Equal(t, "not_found", appdomain.CodeOf(err))
+}
+
+func TestReviewerNotFoundReturnsDomainError(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	err := postgres.NewReviewerRepository(db).DecrementLoad(ctx, "tenant-1", "missing")
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
+	require.Equal(t, "not_found", appdomain.CodeOf(err))
+}
+
+func TestReviewInsertUsesTransactionTime(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	past := time.Now().Add(-24 * time.Hour)
+	review, err := domain.NewReview("review-time", "tenant-1", "sub-time", reviewerID, rubricID, past)
+	require.NoError(t, err)
+
+	var txNow time.Time
+	store := postgres.NewStore(db)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		txNow, err = tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		return tx.Reviews().Insert(ctx, review)
+	}))
+
+	var createdAt, updatedAt time.Time
+	err = db.QueryRow(ctx, "SELECT created_at, updated_at FROM reviews WHERE tenant_id=$1 AND id=$2", review.TenantID, review.ID).Scan(&createdAt, &updatedAt)
+	require.NoError(t, err)
+	require.WithinDuration(t, txNow, createdAt, 0)
+	require.WithinDuration(t, txNow, updatedAt, 0)
+	require.NotEqual(t, past.Truncate(time.Microsecond), createdAt)
+}
+
+func TestReviewUpdateUsesTransactionTime(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	review := newReview("review-update-time", "tenant-1", "sub-update", reviewerID, rubricID)
+	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, review))
+
+	var txNow time.Time
+	store := postgres.NewStore(db)
+	var err error
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		txNow, err = tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		require.NoError(t, review.Submit(domain.DecisionAccepted, []domain.RubricScore{{Dimension: "quality", Score: 80}}, txNow))
+		return tx.Reviews().Update(ctx, review)
+	}))
+
+	var updatedAt time.Time
+	err = db.QueryRow(ctx, "SELECT updated_at FROM reviews WHERE tenant_id=$1 AND id=$2", review.TenantID, review.ID).Scan(&updatedAt)
+	require.NoError(t, err)
+	require.WithinDuration(t, txNow, updatedAt, 0)
 }
 
 func newReview(id, tenantID, submissionID, reviewerID, rubricVersionID string) *domain.Review {

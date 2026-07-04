@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/review/application"
@@ -40,12 +41,17 @@ func (s *Store) WithTx(ctx context.Context, fn func(application.Tx) error) error
 
 type Tx struct {
 	tx pgx.Tx
+
+	nowOnce sync.Once
+	now     time.Time
+	nowErr  error
 }
 
 func (tx *Tx) Now(ctx context.Context) (time.Time, error) {
-	var now time.Time
-	err := tx.tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
-	return now, err
+	tx.nowOnce.Do(func() {
+		tx.nowErr = tx.tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&tx.now)
+	})
+	return tx.now, tx.nowErr
 }
 
 func (tx *Tx) Reviews() application.ReviewRepository {

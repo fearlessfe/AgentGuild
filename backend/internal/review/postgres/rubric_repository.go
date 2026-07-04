@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	appdomain "agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,10 @@ func NewRubricRepository(pool *pgxpool.Pool) application.RubricRepository {
 }
 
 func (r *rubricRepository) CreateVersion(ctx context.Context, version *domain.RubricVersion) error {
+	now, err := r.now(ctx)
+	if err != nil {
+		return err
+	}
 	dimensions, err := json.Marshal(version.Dimensions)
 	if err != nil {
 		return err
@@ -37,7 +42,7 @@ func (r *rubricRepository) CreateVersion(ctx context.Context, version *domain.Ru
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		version.TenantID, version.ID, version.VersionNumber, version.Name,
 		dimensions, weights, version.AlgorithmVersion, version.IsActive,
-		version.CreatedAt,
+		now,
 	)
 	return err
 }
@@ -57,7 +62,7 @@ func (r *rubricRepository) GetActive(ctx context.Context, tenantID string) (*dom
 		&version.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
+		return nil, appdomain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -80,7 +85,7 @@ func (r *rubricRepository) GetByID(ctx context.Context, tenantID, rubricID strin
 		&version.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
+		return nil, appdomain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

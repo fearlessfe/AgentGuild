@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	appdomain "agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,10 @@ func NewReviewRepository(pool *pgxpool.Pool) application.ReviewRepository {
 }
 
 func (r *reviewRepository) Insert(ctx context.Context, review *domain.Review) error {
+	now, err := r.now(ctx)
+	if err != nil {
+		return err
+	}
 	scores, err := json.Marshal(review.RubricScores)
 	if err != nil {
 		return err
@@ -30,16 +35,20 @@ func (r *reviewRepository) Insert(ctx context.Context, review *domain.Review) er
 	_, err = r.q.Exec(ctx, `
 		INSERT INTO reviews (
 			tenant_id, id, submission_id, reviewer_id, rubric_version_id,
-			rubric_scores, summary, status, final_decision, submitted_at, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			rubric_scores, summary, status, final_decision, submitted_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
 		review.TenantID, review.ID, review.SubmissionID, review.ReviewerID, review.RubricVersionID,
 		scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
-		nullTime(review.SubmittedAt), review.CreatedAt,
+		nullTime(review.SubmittedAt), now,
 	)
 	return err
 }
 
 func (r *reviewRepository) Update(ctx context.Context, review *domain.Review) error {
+	now, err := r.now(ctx)
+	if err != nil {
+		return err
+	}
 	scores, err := json.Marshal(review.RubricScores)
 	if err != nil {
 		return err
@@ -51,13 +60,13 @@ func (r *reviewRepository) Update(ctx context.Context, review *domain.Review) er
 		WHERE tenant_id=$1 AND id=$2`,
 		review.TenantID, review.ID, review.SubmissionID, review.ReviewerID, review.RubricVersionID,
 		scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
-		nullTime(review.SubmittedAt), time.Now(),
+		nullTime(review.SubmittedAt), now,
 	)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
+		return appdomain.ErrNotFound
 	}
 	return nil
 }
@@ -79,7 +88,7 @@ func (r *reviewRepository) GetByID(ctx context.Context, tenantID, reviewID strin
 		&review.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
+		return nil, appdomain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

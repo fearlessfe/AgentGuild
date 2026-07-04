@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	appdomain "agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
@@ -45,7 +46,7 @@ func (r *reviewerRepository) GetByID(ctx context.Context, tenantID, reviewerID s
 		&profile.CurrentLoad, &profile.IsActive, &profile.CreatedAt, &profile.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrNotFound
+		return nil, appdomain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -100,7 +101,7 @@ func (r *reviewerRepository) IncrementLoad(ctx context.Context, tenantID, review
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
+		return appdomain.ErrNotFound
 	}
 	return nil
 }
@@ -120,7 +121,7 @@ func (r *reviewerRepository) DecrementLoad(ctx context.Context, tenantID, review
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.ErrNotFound
+		return appdomain.ErrNotFound
 	}
 	return nil
 }
