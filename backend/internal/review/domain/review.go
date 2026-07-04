@@ -79,6 +79,12 @@ func (r *Review) Submit(decision Decision, scores []RubricScore, now time.Time) 
 	if r.Status != ReviewPending {
 		return appdomain.ErrStateConflict
 	}
+	if !decisionValid(decision) {
+		return invalidArgument("final_decision")
+	}
+	if now.IsZero() {
+		return invalidArgument("submitted_at")
+	}
 	if decision == DecisionAccepted && !rubricComplete(scores, r.RubricVersionID) {
 		return invalidArgument("rubric_scores")
 	}
@@ -89,15 +95,23 @@ func (r *Review) Submit(decision Decision, scores []RubricScore, now time.Time) 
 	return nil
 }
 
+func decisionValid(d Decision) bool {
+	switch d {
+	case DecisionAccepted, DecisionRejected, DecisionRevisionRequested:
+		return true
+	}
+	return false
+}
+
 func rubricComplete(scores []RubricScore, rubricVersionID string) bool {
 	if rubricVersionID == "" {
-		return true
+		return false
 	}
 	if len(scores) == 0 {
 		return false
 	}
 	for _, s := range scores {
-		if s.Dimension == "" || s.Score < 0 {
+		if s.Dimension == "" || s.Score < 0 || s.Score > 100 {
 			return false
 		}
 	}

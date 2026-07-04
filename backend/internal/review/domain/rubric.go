@@ -110,6 +110,9 @@ func (rv *RubricVersion) Complete(scores []RubricScore) bool {
 		if s.Score < MinRubricScore || s.Score > MaxRubricScore {
 			return false
 		}
+		if _, ok := scored[s.Dimension]; ok {
+			return false
+		}
 		scored[s.Dimension] = s.Score
 	}
 	for _, d := range rv.Dimensions {

@@ -101,6 +101,15 @@ func TestRubricVersionCompleteRejectsOutOfRangeScores(t *testing.T) {
 	}))
 }
 
+func TestRubricVersionCompleteRejectsDuplicateDimensions(t *testing.T) {
+	version := mustNewRubricVersion(t)
+
+	require.False(t, version.Complete([]reviewdomain.RubricScore{
+		{Dimension: "correctness", Score: 80},
+		{Dimension: "correctness", Score: 90},
+	}))
+}
+
 func TestRubricVersionIsActiveByDefault(t *testing.T) {
 	version := mustNewRubricVersion(t)
 	require.True(t, version.IsActive)

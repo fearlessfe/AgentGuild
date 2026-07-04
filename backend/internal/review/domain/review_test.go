@@ -140,4 +140,24 @@ func TestReviewAcceptedRequiresValidRubricScores(t *testing.T) {
 
 	err = review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "correctness", Score: -1}}, now)
 	assertInvalidArgument(t, err, "rubric_scores")
+
+	err = review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "correctness", Score: 101}}, now)
+	assertInvalidArgument(t, err, "rubric_scores")
+}
+
+func TestReviewSubmitRejectsInvalidDecision(t *testing.T) {
+	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
+	now := time.Now()
+
+	err := review.Submit("", nil, now)
+	assertInvalidArgument(t, err, "final_decision")
+
+	err = review.Submit("unknown", nil, now)
+	assertInvalidArgument(t, err, "final_decision")
+}
+
+func TestReviewSubmitRejectsZeroNow(t *testing.T) {
+	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
+	err := review.Submit(decisionRejected(), nil, time.Time{})
+	assertInvalidArgument(t, err, "submitted_at")
 }
