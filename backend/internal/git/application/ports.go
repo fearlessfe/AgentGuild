@@ -13,6 +13,7 @@ type Store interface {
 // Tx is the set of operations available inside one credential transaction.
 type Tx interface {
 	Credentials() CredentialRepository
+	Submissions() SubmissionRepository
 	Now(context.Context) (time.Time, error)
 }
 
@@ -24,4 +25,11 @@ type CredentialRepository interface {
 	GetByExecutionID(context.Context, string, string) (*CredentialRecord, error)
 	Update(context.Context, *CredentialRecord) error
 	Revoke(context.Context, string, string) error
+}
+
+// SubmissionRepository persists submission aggregates.
+type SubmissionRepository interface {
+	Save(context.Context, *SubmissionRecord) error
+	GetByID(context.Context, string, string) (*SubmissionRecord, error)
+	GetByExecutionID(context.Context, string, string) ([]*SubmissionRecord, error)
 }

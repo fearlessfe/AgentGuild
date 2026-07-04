@@ -11,4 +11,5 @@ var (
 	ErrCredentialRevoked  = &domain.Error{Code: "state_conflict", Message: "credential has been revoked"}
 	ErrAlreadyIssued      = &domain.Error{Code: "already_exists", Message: "credential already issued"}
 	ErrInvalidBranch      = &domain.Error{Code: "invalid_argument", Message: "branch must be under agentguild/", Field: "branch"}
+	ErrSubmissionNotFound = &domain.Error{Code: "not_found", Message: "submission not found"}
 )

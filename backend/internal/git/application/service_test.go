@@ -333,6 +333,10 @@ func (tx *memoryTx) Credentials() application.CredentialRepository {
 	return &memoryCredentialRepository{store: tx.store, now: tx.now}
 }
 
+func (tx *memoryTx) Submissions() application.SubmissionRepository {
+	return &memorySubmissionRepository{}
+}
+
 func (tx *memoryTx) Now(context.Context) (time.Time, error) { return tx.now, nil }
 
 type memoryCredentialRepository struct {
@@ -414,6 +418,20 @@ func cloneRecord(record *application.CredentialRecord) *application.CredentialRe
 		clone.RevokedAt = &v
 	}
 	return &clone
+}
+
+type memorySubmissionRepository struct{}
+
+func (r *memorySubmissionRepository) Save(context.Context, *application.SubmissionRecord) error {
+	return nil
+}
+
+func (r *memorySubmissionRepository) GetByID(context.Context, string, string) (*application.SubmissionRecord, error) {
+	return nil, git.ErrSubmissionNotFound
+}
+
+func (r *memorySubmissionRepository) GetByExecutionID(context.Context, string, string) ([]*application.SubmissionRecord, error) {
+	return nil, nil
 }
 
 func sequenceIDs(values ...string) func() string {
