@@ -1,0 +1,150 @@
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"agentguild.dev/agentguild/backend/internal/review/application"
+	"agentguild.dev/agentguild/backend/internal/review/domain"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type reviewRepository struct {
+	q   queryer
+	now func(context.Context) (time.Time, error)
+}
+
+func NewReviewRepository(pool *pgxpool.Pool) application.ReviewRepository {
+	return &reviewRepository{q: pool, now: func(context.Context) (time.Time, error) { return time.Now(), nil }}
+}
+
+func (r *reviewRepository) Insert(ctx context.Context, review *domain.Review) error {
+	scores, err := json.Marshal(review.RubricScores)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.Exec(ctx, `
+		INSERT INTO reviews (
+			tenant_id, id, submission_id, reviewer_id, rubric_version_id,
+			rubric_scores, summary, status, final_decision, submitted_at, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		review.TenantID, review.ID, review.SubmissionID, review.ReviewerID, review.RubricVersionID,
+		scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
+		nullTime(review.SubmittedAt), review.CreatedAt,
+	)
+	return err
+}
+
+func (r *reviewRepository) Update(ctx context.Context, review *domain.Review) error {
+	scores, err := json.Marshal(review.RubricScores)
+	if err != nil {
+		return err
+	}
+	tag, err := r.q.Exec(ctx, `
+		UPDATE reviews
+		SET submission_id=$3, reviewer_id=$4, rubric_version_id=$5, rubric_scores=$6,
+		    summary=$7, status=$8, final_decision=$9, submitted_at=$10, updated_at=$11
+		WHERE tenant_id=$1 AND id=$2`,
+		review.TenantID, review.ID, review.SubmissionID, review.ReviewerID, review.RubricVersionID,
+		scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
+		nullTime(review.SubmittedAt), time.Now(),
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (r *reviewRepository) GetByID(ctx context.Context, tenantID, reviewID string) (*domain.Review, error) {
+	var review domain.Review
+	var summary, decision sql.NullString
+	var submittedAt *time.Time
+	var scores []byte
+	err := r.q.QueryRow(ctx, `
+		SELECT tenant_id, id, submission_id, reviewer_id, rubric_version_id,
+		       rubric_scores, summary, status, final_decision, submitted_at, created_at
+		FROM reviews
+		WHERE tenant_id=$1 AND id=$2`,
+		tenantID, reviewID,
+	).Scan(
+		&review.TenantID, &review.ID, &review.SubmissionID, &review.ReviewerID, &review.RubricVersionID,
+		&scores, &summary, &review.Status, &decision, &submittedAt,
+		&review.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	review.Summary = summary.String
+	review.FinalDecision = domain.Decision(decision.String)
+	review.SubmittedAt = derefTime(submittedAt)
+	if len(scores) > 0 {
+		if err := json.Unmarshal(scores, &review.RubricScores); err != nil {
+			return nil, err
+		}
+	}
+	return &review, nil
+}
+
+func (r *reviewRepository) ListBySubmission(ctx context.Context, tenantID, submissionID string) ([]domain.Review, error) {
+	rows, err := r.q.Query(ctx, `
+		SELECT tenant_id, id, submission_id, reviewer_id, rubric_version_id,
+		       rubric_scores, summary, status, final_decision, submitted_at, created_at
+		FROM reviews
+		WHERE tenant_id=$1 AND submission_id=$2
+		ORDER BY created_at DESC, id ASC`,
+		tenantID, submissionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reviews []domain.Review
+	for rows.Next() {
+		review, err := scanReview(rows)
+		if err != nil {
+			return nil, err
+		}
+		reviews = append(reviews, *review)
+	}
+	return reviews, rows.Err()
+}
+
+var _ application.ReviewRepository = (*reviewRepository)(nil)
+
+type reviewScanner interface {
+	Scan(...any) error
+}
+
+func scanReview(row reviewScanner) (*domain.Review, error) {
+	var review domain.Review
+	var summary, decision sql.NullString
+	var submittedAt *time.Time
+	var scores []byte
+	if err := row.Scan(
+		&review.TenantID, &review.ID, &review.SubmissionID, &review.ReviewerID, &review.RubricVersionID,
+		&scores, &summary, &review.Status, &decision, &submittedAt,
+		&review.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	review.Summary = summary.String
+	review.FinalDecision = domain.Decision(decision.String)
+	review.SubmittedAt = derefTime(submittedAt)
+	if len(scores) > 0 {
+		if err := json.Unmarshal(scores, &review.RubricScores); err != nil {
+			return nil, err
+		}
+	}
+	return &review, nil
+}
