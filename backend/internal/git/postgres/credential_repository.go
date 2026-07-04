@@ -7,6 +7,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -29,11 +30,11 @@ func (r *credentialRepository) Insert(ctx context.Context, record *application.C
 	_, err := r.q.Exec(ctx, `
 		INSERT INTO git_credentials (
 			id, tenant_id, execution_id, provider, repo_url, branch,
-			base_commit_sha, expires_at, revoked_at, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9)`,
+			base_commit_sha, expires_at, revoked_at, status, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10)`,
 		record.ID, record.TenantID, record.ExecutionID, record.Provider,
 		record.RepoURL, record.Branch, record.BaseCommit, record.ExpiresAt,
-		record.CreatedAt,
+		string(record.Status), record.CreatedAt,
 	)
 	return err
 }
@@ -41,7 +42,7 @@ func (r *credentialRepository) Insert(ctx context.Context, record *application.C
 func (r *credentialRepository) GetByID(ctx context.Context, tenantID, id string) (*application.CredentialRecord, error) {
 	return r.scanOne(ctx, `
 		SELECT id, tenant_id, execution_id, provider, repo_url, branch,
-		       base_commit_sha, expires_at, revoked_at, created_at
+		       base_commit_sha, expires_at, revoked_at, status, created_at
 		FROM git_credentials
 		WHERE tenant_id=$1 AND id=$2`,
 		tenantID, id,
@@ -51,7 +52,7 @@ func (r *credentialRepository) GetByID(ctx context.Context, tenantID, id string)
 func (r *credentialRepository) GetByExecutionID(ctx context.Context, tenantID, executionID string) (*application.CredentialRecord, error) {
 	return r.scanOne(ctx, `
 		SELECT id, tenant_id, execution_id, provider, repo_url, branch,
-		       base_commit_sha, expires_at, revoked_at, created_at
+		       base_commit_sha, expires_at, revoked_at, status, created_at
 		FROM git_credentials
 		WHERE tenant_id=$1 AND execution_id=$2`,
 		tenantID, executionID,
@@ -61,16 +62,16 @@ func (r *credentialRepository) GetByExecutionID(ctx context.Context, tenantID, e
 func (r *credentialRepository) Update(ctx context.Context, record *application.CredentialRecord) error {
 	tag, err := r.q.Exec(ctx, `
 		UPDATE git_credentials
-		SET provider=$3, repo_url=$4, branch=$5, base_commit_sha=$6, expires_at=$7
+		SET provider=$3, repo_url=$4, branch=$5, base_commit_sha=$6, expires_at=$7, status=$8
 		WHERE tenant_id=$1 AND id=$2 AND revoked_at IS NULL`,
 		record.TenantID, record.ID, record.Provider, record.RepoURL,
-		record.Branch, record.BaseCommit, record.ExpiresAt,
+		record.Branch, record.BaseCommit, record.ExpiresAt, string(record.Status),
 	)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return git.ErrCredentialNotFound
+		return r.classifyMissing(ctx, record.TenantID, record.ID)
 	}
 	return nil
 }
@@ -82,7 +83,7 @@ func (r *credentialRepository) Revoke(ctx context.Context, tenantID, executionID
 	}
 	tag, err := r.q.Exec(ctx, `
 		UPDATE git_credentials
-		SET revoked_at=$3
+		SET revoked_at=$3, status='revoked'
 		WHERE tenant_id=$1 AND execution_id=$2 AND revoked_at IS NULL`,
 		tenantID, executionID, now,
 	)
@@ -98,10 +99,11 @@ func (r *credentialRepository) Revoke(ctx context.Context, tenantID, executionID
 func (r *credentialRepository) scanOne(ctx context.Context, query string, args ...any) (*application.CredentialRecord, error) {
 	var record application.CredentialRecord
 	var revokedAt *time.Time
+	var status string
 	err := r.q.QueryRow(ctx, query, args...).Scan(
 		&record.ID, &record.TenantID, &record.ExecutionID,
 		&record.Provider, &record.RepoURL, &record.Branch,
-		&record.BaseCommit, &record.ExpiresAt, &revokedAt, &record.CreatedAt,
+		&record.BaseCommit, &record.ExpiresAt, &revokedAt, &status, &record.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, git.ErrCredentialNotFound
@@ -110,7 +112,27 @@ func (r *credentialRepository) scanOne(ctx context.Context, query string, args .
 		return nil, err
 	}
 	record.RevokedAt = revokedAt
+	record.Status = gitdomain.CredentialStatus(status)
 	return &record, nil
+}
+
+func (r *credentialRepository) classifyMissing(ctx context.Context, tenantID, id string) error {
+	var revokedAt *time.Time
+	err := r.q.QueryRow(ctx, `
+		SELECT revoked_at FROM git_credentials
+		WHERE tenant_id=$1 AND id=$2`,
+		tenantID, id,
+	).Scan(&revokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return git.ErrCredentialNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if revokedAt != nil {
+		return git.ErrCredentialRevoked
+	}
+	return git.ErrCredentialNotFound
 }
 
 var _ application.CredentialRepository = (*credentialRepository)(nil)

@@ -2,12 +2,14 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,11 +51,13 @@ func TestIssueCredentialReturnsTokenAndPersistsMetadata(t *testing.T) {
 	require.Equal(t, "agentguild/exec-1", got.Data.Credential.Branch)
 	require.Equal(t, "abc", got.Data.Credential.BaseCommit)
 	require.True(t, got.Data.Credential.ExpiresAt.After(fixture.now))
+	require.Equal(t, gitdomain.CredentialStatusActive, got.Data.Credential.Status)
 
 	record := fixture.store.credentialByExecution("tenant-1", "exec-1")
 	require.NotNil(t, record)
 	require.Equal(t, "agentguild/exec-1", record.Branch)
 	require.Empty(t, record.RevokedAt)
+	require.Equal(t, gitdomain.CredentialStatusActive, record.Status)
 }
 
 func TestIssueCredentialUpdatesExistingExecutionMetadata(t *testing.T) {
@@ -72,6 +76,7 @@ func TestIssueCredentialUpdatesExistingExecutionMetadata(t *testing.T) {
 	require.NotEqual(t, first.Data.Token, second.Data.Token)
 	require.Equal(t, "def", second.Data.Credential.BaseCommit)
 	require.Equal(t, "agentguild/exec-1", second.Data.Credential.Branch)
+	require.Equal(t, gitdomain.CredentialStatusActive, second.Data.Credential.Status)
 }
 
 func TestIssueCredentialRejectsReissueAfterRevoke(t *testing.T) {
@@ -102,6 +107,7 @@ func TestRevokeCredentialSetsRevokedAt(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.Data.RevokedAt)
 	require.Equal(t, issued.Data.Credential.ID, got.Data.ID)
+	require.Equal(t, gitdomain.CredentialStatusRevoked, got.Data.Status)
 }
 
 func TestRevokeCredentialRequiresOwnerOrAdmin(t *testing.T) {
@@ -157,6 +163,7 @@ func TestRevokeCredentialIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.Data.RevokedAt)
 	require.Equal(t, issued.Data.Credential.ID, got.Data.ID)
+	require.Equal(t, gitdomain.CredentialStatusRevoked, got.Data.Status)
 }
 
 func TestGetCredentialRequiresAuthorizedCaller(t *testing.T) {
@@ -196,6 +203,56 @@ func ownerPrincipal() application.Principal {
 	return application.Principal{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com"}
 }
 
+func TestIssueCredentialRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	fixture.issuer.err = errors.New("issuer unavailable")
+
+	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.Error(t, err)
+
+	record := fixture.store.credentialByExecution("tenant-1", "exec-1")
+	require.Nil(t, record, "pending placeholder must be rolled back when issuer fails")
+}
+
+func TestRevokeCredentialHandlesConcurrentRevokeRace(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	issued, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+
+	// Simulate another caller revoking between Get and Revoke by pre-revoking in
+	// the store and then calling RevokeCredential.
+	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+
+	got, err := fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+	require.NotNil(t, got.Data.RevokedAt)
+	require.Equal(t, issued.Data.Credential.ID, got.Data.ID)
+	require.Equal(t, gitdomain.CredentialStatusRevoked, got.Data.Status)
+}
+
+func TestUpdateRepositoryReturnsRevokedErrorForRevokedRecord(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+
+	record := fixture.store.credentialByExecution("tenant-1", "exec-1")
+	require.NotNil(t, record)
+	err = fixture.store.WithTx(context.Background(), func(tx application.Tx) error {
+		return tx.Credentials().Update(context.Background(), record)
+	})
+	require.ErrorIs(t, err, git.ErrCredentialRevoked)
+}
+
 type credentialFixture struct {
 	svc    *application.CredentialService
 	store  *memoryStore
@@ -218,10 +275,14 @@ func newCredentialFixture(t *testing.T) *credentialFixture {
 
 type fakeIssuer struct {
 	counter int
+	err     error
 }
 
 func (f *fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branch, baseCommit string) (git.Credential, error) {
 	_ = tenantID
+	if f.err != nil {
+		return git.Credential{}, f.err
+	}
 	f.counter++
 	return git.Credential{
 		Token:      "tok-" + executionID + "-" + string(rune('a'+f.counter-1)),
@@ -242,7 +303,24 @@ func newMemoryStore(now time.Time) *memoryStore {
 }
 
 func (s *memoryStore) WithTx(ctx context.Context, fn func(application.Tx) error) error {
-	return fn(&memoryTx{ctx: ctx, store: s, now: s.now})
+	snapshot := s.snapshot()
+	if err := fn(&memoryTx{ctx: ctx, store: s, now: s.now}); err != nil {
+		s.restore(snapshot)
+		return err
+	}
+	return nil
+}
+
+func (s *memoryStore) snapshot() map[string]*application.CredentialRecord {
+	out := make(map[string]*application.CredentialRecord, len(s.credentials))
+	for k, v := range s.credentials {
+		out[k] = cloneRecord(v)
+	}
+	return out
+}
+
+func (s *memoryStore) restore(snapshot map[string]*application.CredentialRecord) {
+	s.credentials = snapshot
 }
 
 type memoryTx struct {
@@ -266,7 +344,11 @@ func (r *memoryCredentialRepository) Insert(_ context.Context, record *applicati
 	if r.store.credentialByExecution(record.TenantID, record.ExecutionID) != nil {
 		return git.ErrAlreadyIssued
 	}
-	r.store.credentials[record.ID] = cloneRecord(record)
+	record = cloneRecord(record)
+	if record.Status == "" {
+		record.Status = gitdomain.CredentialStatusActive
+	}
+	r.store.credentials[record.ID] = record
 	return nil
 }
 
@@ -308,6 +390,7 @@ func (r *memoryCredentialRepository) Revoke(_ context.Context, tenantID, executi
 	}
 	revoked := cloneRecord(record)
 	revoked.RevokedAt = &r.now
+	revoked.Status = gitdomain.CredentialStatusRevoked
 	r.store.credentials[record.ID] = revoked
 	return nil
 }

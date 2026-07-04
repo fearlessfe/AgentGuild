@@ -10,6 +10,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -73,47 +74,54 @@ func (s *CredentialService) IssueCredential(ctx context.Context, principal Princ
 			return git.ErrCredentialRevoked
 		}
 
+		record := existing
+		if record != nil {
+			// Mark the existing record as pending before calling the external
+			// issuer. If any later step fails, the transaction rolls back and
+			// the previous active metadata is restored.
+			record.Status = gitdomain.CredentialStatusPending
+			if err := tx.Credentials().Update(ctx, record); err != nil {
+				return err
+			}
+		} else {
+			record = &CredentialRecord{
+				ID:          s.newID(),
+				TenantID:    principal.TenantID,
+				ExecutionID: cmd.ExecutionID,
+				Provider:    s.provider,
+				RepoURL:     "pending",
+				Branch:      branch,
+				BaseCommit:  cmd.BaseCommit,
+				ExpiresAt:   now,
+				Status:      gitdomain.CredentialStatusPending,
+				CreatedAt:   now,
+			}
+			if err := tx.Credentials().Insert(ctx, record); err != nil {
+				if isUniqueViolation(err) {
+					return git.ErrAlreadyIssued
+				}
+				return err
+			}
+		}
+
+		// Only call the external issuer after a placeholder record has been
+		// persisted. This prevents a live token from being created without any
+		// corresponding metadata row.
 		credential, err := s.issuer.Issue(ctx, principal.TenantID, cmd.ExecutionID, cmd.Repo, branch, cmd.BaseCommit)
 		if err != nil {
 			return err
 		}
 
-		if existing != nil {
-			existing.Provider = s.provider
-			existing.RepoURL = credential.RepoURL
-			existing.Branch = branch
-			existing.BaseCommit = credential.BaseCommit
-			existing.ExpiresAt = credential.ExpiresAt
-			if err := tx.Credentials().Update(ctx, existing); err != nil {
-				return err
-			}
-			result = Envelope[IssueCredentialResponse]{
-				Data: IssueCredentialResponse{
-					Credential: credentialView(existing, now),
-					Token:      credential.Token,
-				},
-				Meta: Meta{ServerTime: now},
-			}
-			return nil
-		}
-
-		record := &CredentialRecord{
-			ID:          s.newID(),
-			TenantID:    principal.TenantID,
-			ExecutionID: cmd.ExecutionID,
-			Provider:    s.provider,
-			RepoURL:     credential.RepoURL,
-			Branch:      branch,
-			BaseCommit:  credential.BaseCommit,
-			ExpiresAt:   credential.ExpiresAt,
-			CreatedAt:   now,
-		}
-		if err := tx.Credentials().Insert(ctx, record); err != nil {
-			if isUniqueViolation(err) {
-				return git.ErrAlreadyIssued
-			}
+		record.Provider = s.provider
+		record.RepoURL = credential.RepoURL
+		record.Branch = branch
+		record.BaseCommit = credential.BaseCommit
+		record.ExpiresAt = credential.ExpiresAt
+		record.Status = gitdomain.CredentialStatusActive
+		if err := tx.Credentials().Update(ctx, record); err != nil {
 			return err
 		}
+
 		result = Envelope[IssueCredentialResponse]{
 			Data: IssueCredentialResponse{
 				Credential: credentialView(record, now),
@@ -156,9 +164,27 @@ func (s *CredentialService) RevokeCredential(ctx context.Context, principal Prin
 			return nil
 		}
 		if err := tx.Credentials().Revoke(ctx, principal.TenantID, cmd.ExecutionID); err != nil {
+			// If another caller revoked between our Get and Revoke, the
+			// repository reports the credential as missing. Re-fetch so we can
+			// return the now-revoked record idempotently.
+			if errors.Is(err, git.ErrCredentialNotFound) {
+				record, err = tx.Credentials().GetByExecutionID(ctx, principal.TenantID, cmd.ExecutionID)
+				if err != nil {
+					return err
+				}
+				if record.RevokedAt == nil {
+					return git.ErrCredentialNotFound
+				}
+				result = Envelope[CredentialView]{
+					Data: credentialView(record, now),
+					Meta: Meta{ServerTime: now},
+				}
+				return nil
+			}
 			return err
 		}
 		record.RevokedAt = &now
+		record.Status = gitdomain.CredentialStatusRevoked
 		result = Envelope[CredentialView]{
 			Data: credentialView(record, now),
 			Meta: Meta{ServerTime: now},
@@ -196,6 +222,7 @@ func credentialView(record *CredentialRecord, now time.Time) CredentialView {
 		BaseCommit:  record.BaseCommit,
 		ExpiresAt:   record.ExpiresAt,
 		RevokedAt:   record.RevokedAt,
+		Status:      record.Status,
 		CreatedAt:   record.CreatedAt,
 	}
 }

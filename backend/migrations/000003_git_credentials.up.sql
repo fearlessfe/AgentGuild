@@ -8,6 +8,7 @@ CREATE TABLE git_credentials (
     base_commit_sha TEXT NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'revoked')),
     created_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (tenant_id, id),
     UNIQUE (tenant_id, execution_id)

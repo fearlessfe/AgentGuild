@@ -2,11 +2,13 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"agentguild.dev/agentguild/backend/internal/git/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
 	"github.com/stretchr/testify/require"
@@ -161,8 +163,73 @@ func sampleRecord(tenantID, executionID string) *application.CredentialRecord {
 		Branch:      "agentguild/" + executionID,
 		BaseCommit:  "abc",
 		ExpiresAt:   time.Now().Add(15 * time.Minute).UTC().Truncate(time.Microsecond),
+		Status:      gitdomain.CredentialStatusActive,
 		CreatedAt:   time.Now().UTC().Truncate(time.Microsecond),
 	}
+}
+
+func TestCredentialRepositoryUpdateRevokedReturnsRevokedError(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+	record := sampleRecord("tenant-1", "exec-1")
+
+	store := postgres.NewStore(db)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		return tx.Credentials().Insert(ctx, record)
+	}))
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		return tx.Credentials().Revoke(ctx, record.TenantID, record.ExecutionID)
+	}))
+
+	err := store.WithTx(ctx, func(tx application.Tx) error {
+		return tx.Credentials().Update(ctx, record)
+	})
+	require.ErrorIs(t, err, git.ErrCredentialRevoked)
+}
+
+func TestCredentialServiceRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	svc, err := application.NewCredentialService(postgres.NewStore(db), application.Options{
+		Issuer: &failingIssuer{err: errors.New("github unavailable")},
+		NewID:  sequenceIDs("cred-1"),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.IssueCredential(ctx, application.Principal{
+		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
+	}, application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.Error(t, err)
+
+	repo := postgres.NewCredentialRepository(db)
+	_, err = repo.GetByExecutionID(ctx, "tenant-1", "exec-1")
+	require.ErrorIs(t, err, git.ErrCredentialNotFound)
+}
+
+func TestCredentialServiceSetsStatusActiveAfterIssuance(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	svc, err := application.NewCredentialService(postgres.NewStore(db), application.Options{
+		Issuer: &fakeIssuer{},
+		NewID:  sequenceIDs("cred-1"),
+	})
+	require.NoError(t, err)
+
+	_, err = svc.IssueCredential(ctx, application.Principal{
+		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
+	}, application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+
+	repo := postgres.NewCredentialRepository(db)
+	record, err := repo.GetByID(ctx, "tenant-1", "cred-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.CredentialStatusActive, record.Status)
 }
 
 type fakeIssuer struct{}
@@ -176,6 +243,14 @@ func (fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branch, 
 		BaseCommit: baseCommit,
 		ExpiresAt:  time.Now().Add(15 * time.Minute),
 	}, nil
+}
+
+type failingIssuer struct {
+	err error
+}
+
+func (f *failingIssuer) Issue(context.Context, string, string, string, string, string) (git.Credential, error) {
+	return git.Credential{}, f.err
 }
 
 func sequenceIDs(values ...string) func() string {

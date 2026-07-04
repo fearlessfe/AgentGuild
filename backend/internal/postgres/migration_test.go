@@ -73,6 +73,7 @@ func TestMigrationRoundTrip(t *testing.T) {
 		"execution_usage_execution_fk",
 		"git_credentials_pkey",
 		"git_credentials_tenant_id_execution_id_key",
+		"git_credentials_status_check",
 	}
 	for _, constraint := range requiredConstraints {
 		var exists bool

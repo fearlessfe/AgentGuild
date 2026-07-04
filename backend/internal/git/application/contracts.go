@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/git"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
 
 // CredentialService issues and revokes short-lived, execution-scoped Git
@@ -80,6 +81,7 @@ type CredentialRecord struct {
 	BaseCommit  string
 	ExpiresAt   time.Time
 	RevokedAt   *time.Time
+	Status      gitdomain.CredentialStatus
 	CreatedAt   time.Time
 }
 
@@ -94,6 +96,7 @@ type CredentialView struct {
 	BaseCommit  string
 	ExpiresAt   time.Time
 	RevokedAt   *time.Time
+	Status      gitdomain.CredentialStatus
 	CreatedAt   time.Time
 }
 
