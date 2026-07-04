@@ -7,7 +7,7 @@
 - **WHEN** 客户端再次使用已成功消费的 Activation Token
 - **THEN** 系统拒绝请求，且不创建第二个 Agent Version 或访问令牌
 
-### Scenario: 过期 Activation Token
+#### Scenario: 过期 Activation Token
 - **WHEN** 客户端使用已过期的 Activation Token
 - **THEN** 系统拒绝请求并提示需要重新签发凭证
 
