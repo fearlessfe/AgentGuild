@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +19,6 @@ import (
 
 const (
 	defaultHTTPTimeout = 10 * time.Second
-	tokenTTL           = 1 * time.Hour
 	appTokenTTL        = 10 * time.Minute
 )
 
@@ -100,13 +100,13 @@ func (d *Driver) GetCommit(ctx context.Context, repo, sha string) (git.Commit, e
 		return git.Commit{}, err
 	}
 
-	url := d.apiURL("/repos/%s/%s/commits/%s", owner, name, sha)
-	body, status, err := d.get(ctx, token, url)
+	url := d.apiURL("/repos/%s/%s/commits/%s", owner, name, url.PathEscape(sha))
+	body, status, retryAfter, err := d.get(ctx, token, url)
 	if err != nil {
 		return git.Commit{}, err
 	}
 	if status != http.StatusOK {
-		return git.Commit{}, mapError(status, body)
+		return git.Commit{}, mapError(status, body, retryAfter)
 	}
 
 	var payload commitPayload
@@ -156,13 +156,13 @@ func (d *Driver) compare(ctx context.Context, repo, base, head string) (compareP
 		return empty, nil, err
 	}
 
-	url := d.apiURL("/repos/%s/%s/compare/%s...%s", owner, name, base, head)
-	body, status, err := d.get(ctx, token, url)
+	url := d.apiURL("/repos/%s/%s/compare/%s...%s", owner, name, url.PathEscape(base), url.PathEscape(head))
+	body, status, retryAfter, err := d.get(ctx, token, url)
 	if err != nil {
 		return empty, nil, err
 	}
 	if status != http.StatusOK {
-		return empty, nil, mapError(status, body)
+		return empty, nil, mapError(status, body, retryAfter)
 	}
 
 	var payload comparePayload
@@ -209,7 +209,7 @@ func (d *Driver) installationToken(ctx context.Context) (string, time.Time, erro
 	}
 
 	if resp.StatusCode != http.StatusCreated {
-		return "", time.Time{}, mapError(resp.StatusCode, body)
+		return "", time.Time{}, mapError(resp.StatusCode, body, resp.Header.Get("Retry-After"))
 	}
 
 	var tokenResp struct {
@@ -235,25 +235,25 @@ func (d *Driver) createJWT() (string, error) {
 	return token.SignedString(d.key)
 }
 
-func (d *Driver) get(ctx context.Context, token, url string) ([]byte, int, error) {
+func (d *Driver) get(ctx context.Context, token, url string) ([]byte, int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("request github api: %w", err)
+		return nil, 0, "", fmt.Errorf("request github api: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return nil, resp.StatusCode, err
+		return nil, resp.StatusCode, resp.Header.Get("Retry-After"), err
 	}
-	return body, resp.StatusCode, nil
+	return body, resp.StatusCode, resp.Header.Get("Retry-After"), nil
 }
 
 func (d *Driver) apiURL(path string, args ...any) string {
@@ -279,7 +279,7 @@ func splitRepo(repo string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
-func mapError(status int, body []byte) error {
+func mapError(status int, body []byte, retryAfter string) error {
 	message := strings.TrimSpace(string(body))
 	if message == "" {
 		message = http.StatusText(status)
@@ -290,7 +290,7 @@ func mapError(status int, body []byte) error {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return git.ErrUnauthorized
 	case http.StatusTooManyRequests:
-		return &domain.Error{Code: domain.ErrRateLimited.Code, Message: "GitHub rate limit exceeded", RetryAfter: retryAfter(message)}
+		return &domain.Error{Code: domain.ErrRateLimited.Code, Message: "GitHub rate limit exceeded", RetryAfter: parseRetryAfter(retryAfter, message)}
 	case http.StatusUnprocessableEntity:
 		return &domain.Error{Code: "invalid_argument", Message: message}
 	}
@@ -300,10 +300,15 @@ func mapError(status int, body []byte) error {
 	return &domain.Error{Code: "external_error", Message: fmt.Sprintf("GitHub API error %d: %s", status, message)}
 }
 
-func retryAfter(message string) time.Duration {
-	// Accept-Ranges, but GitHub returns X-RateLimit-Reset as a timestamp. In
-	// tests we expose a numeric Retry-After seconds string in the mocked body.
-	if seconds, err := strconv.Atoi(message); err == nil && seconds > 0 {
+func parseRetryAfter(header, body string) time.Duration {
+	if d := retryAfterSeconds(header); d > 0 {
+		return d
+	}
+	return retryAfterSeconds(body)
+}
+
+func retryAfterSeconds(value string) time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds > 0 {
 		return time.Duration(seconds) * time.Second
 	}
 	return 0
