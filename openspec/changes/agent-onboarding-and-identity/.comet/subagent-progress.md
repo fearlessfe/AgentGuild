@@ -52,3 +52,28 @@ Extra fix commit: e28f147 fix: close agent status transaction window
 Extra review package: .superpowers/sdd/review-dc0ae47..e28f147.diff
 Extra re-review: 019f2b00-54e0-78d0-8986-d87290e73448 (Banach) found no Critical or Important issues; Ready to archive: Yes.
 Coordinator verification: backend application/auth/identity/rest/mcp/acceptance tests passed; frontend Vitest passed; git diff check passed; `make build` hit sandbox Go cache permission, escalated retry was rejected by approval service 503, and `make build GOCACHE=/private/tmp/agentguild-go-build-cache` passed.
+
+## Final Review Remediation Round 2
+
+Final reviewer: 019f2b0e-1e71-7022-871f-952412a9c913 (Huygens)
+Verdict: Not ready to archive
+Open feedback:
+- Critical: unknown or unregistered agent tokens still failed open when `RequireLiveAgent` could not find an `agents` row.
+- Important: JWKS verifier did not require `exp`, and JWKS refresh retained provider-removed keys indefinitely.
+Execution note: native MCP subagent wait hit a transport-death signal during remediation, and `omx exec` fallback was blocked by sandbox state/approval-service failures. The coordinator used a documented direct TDD fallback for the blocking security fixes, then re-ran the final reviewer when MCP became available again.
+Fix commit: 8f19ef1 fix: fail closed identity token validation
+Review package: .superpowers/sdd/review-f4b276d..8f19ef1.diff
+RED evidence:
+- `cd backend && go test ./internal/application -run TestTaskOperationsRejectUnknownLiveAgent -count=1` failed before the fix because publishing with an unknown live agent returned nil.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsMissingExpiration -count=1` failed before the fix because a JWT without `exp` was accepted.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsRemovedKeyAfterRotationRefresh -count=1` failed before the fix because a provider-removed JWKS key stayed trusted after refresh.
+- `cd backend && go test ./internal/acceptance -run TestAgentHeartbeatReceivesTenMinuteLeaseAndPollAfterSeconds -count=1` failed after the fail-closed production fix until fake lifecycle principals were backed by active test identity rows.
+GREEN evidence:
+- `cd backend && go test ./internal/application -run TestTaskOperationsRejectUnknownLiveAgent -count=1` passed.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsMissingExpiration -count=1` passed.
+- `cd backend && go test ./internal/auth -run TestJWKSVerifierRejectsRemovedKeyAfterRotationRefresh -count=1` passed.
+- `cd backend && go test ./internal/auth ./internal/application ./internal/identity/... ./internal/transport/rest ./internal/transport/mcp ./internal/acceptance -count=1` passed.
+- `cd frontend && npm test -- --run` passed.
+- `git diff --check` passed.
+- `make build GOCACHE=/private/tmp/agentguild-go-build-cache` passed.
+Re-review: 019f2b29-f22d-7f93-9ebd-7759041e493c (Hilbert) found no Critical, Important, or Minor issues; Ready to archive: Yes. LSP/AST diagnostics were attempted by the reviewer but rejected by platform 503, so reviewer relied on source review and Go test evidence.
