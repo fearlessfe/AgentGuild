@@ -311,7 +311,7 @@ git commit -m "feat(review): add review persistence and migrations"
   - `Execution.Reject(actor, now)`：`reviewing` → `rejected`
   - `Execution.RequestRevision(actor, now)`：`reviewing` → `revision_requested`
 
-- [ ] **Step 1: 写状态机测试**
+- [x] **Step 1: 写状态机测试**
 
 ```go
 func TestExecutionReviewingCanBeAcceptedByReviewer(t *testing.T) {
@@ -327,13 +327,13 @@ func TestExecutionReviewingCanBeAcceptedByReviewer(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 ```bash
 go test ./internal/domain/... -run TestExecutionReviewingCanBeAcceptedByReviewer -v
 ```
 
-- [ ] **Step 3: 修改 Execution 方法**
+- [x] **Step 3: 修改 Execution 方法**
 
 ```go
 func (e *Execution) Accept(actor Actor, now time.Time) error {
@@ -370,7 +370,7 @@ func (e *Execution) RequestRevision(actor Actor, _ time.Time) error {
 }
 ```
 
-- [ ] **Step 4: 运行测试并提交**
+- [x] **Step 4: 运行测试并提交**
 
 ```bash
 go test ./internal/domain/... -v
