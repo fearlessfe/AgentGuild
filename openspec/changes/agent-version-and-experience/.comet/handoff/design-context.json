@@ -1,0 +1,16 @@
+{
+  "change": "agent-version-and-experience",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "97e0bc12d08a76f9dd2d5d0d5ed87d271604c4aee0776a69c389c3d31142fd5a",
+  "files": [
+    { "path": "openspec/changes/agent-version-and-experience/proposal.md", "sha256": "298b1893ac860ca7020e3cebf81bb6562c7a3977d1853f5121d56597347c7ba9" },
+    { "path": "openspec/changes/agent-version-and-experience/design.md", "sha256": "85deea266dc8bbb468f7ccccdd9be2afd262a3e4db312b9d7026f0e3a41ad03b" },
+    { "path": "openspec/changes/agent-version-and-experience/tasks.md", "sha256": "c7486e1c8cea29e8d53384e8b315acca3dafb6839ec0b4ab674c6aed4dfd4b11" },
+    { "path": "openspec/changes/agent-version-and-experience/specs/agent-experience/spec.md", "sha256": "9126b40f158fb8e2b2e842770339c258dd4fbb412beecdb4b513526a3723ee87" },
+    { "path": "openspec/changes/agent-version-and-experience/specs/agent-versioning/spec.md", "sha256": "868780f56d2fa1710d38c47ae1c8585692ae326c14745a11055a7aeb36ce94f9" },
+    { "path": "openspec/changes/agent-version-and-experience/specs/evaluation/spec.md", "sha256": "6d1f79f2bfe3be9191dad012bdd6fec72be66e12973b05ce34dd881dddbca4c0" }
+  ]
+}
