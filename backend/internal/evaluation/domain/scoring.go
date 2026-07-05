@@ -3,12 +3,23 @@ package domain
 // ScoringRuleVersion identifies a specific scoring rule implementation.
 const ScoringRuleVersionV1 = "v1"
 
+var knownScoringRuleVersions = map[string]struct{}{
+	ScoringRuleVersionV1: {},
+}
+
+// IsKnownScoringRuleVersion reports whether version is a supported rule version.
+func IsKnownScoringRuleVersion(version string) bool {
+	_, ok := knownScoringRuleVersions[version]
+	return ok
+}
+
 // TaskResult is the outcome of a single benchmark task.
 type TaskResult struct {
 	TaskRef    string
 	Passed     bool
 	LatencyMs  float64
 	Score      float64
+	CostCents  int64
 	IsSecurity bool
 	Details    map[string]any
 }
@@ -23,13 +34,14 @@ const (
 // ApplyScoringRule evaluates task results against the named rule version and
 // returns the threshold results and summary. The only supported version is v1.
 func ApplyScoringRule(taskResults []TaskResult, ruleVersion string) ([]ThresholdResult, EvaluationSummary) {
-	if ruleVersion != ScoringRuleVersionV1 {
+	if !IsKnownScoringRuleVersion(ruleVersion) {
 		return nil, EvaluationSummary{}
 	}
 
 	total := len(taskResults)
 	passed := 0
 	var totalLatencyMs float64
+	var totalCostCents int64
 	securityTotal := 0
 	securityPassed := 0
 
@@ -38,6 +50,7 @@ func ApplyScoringRule(taskResults []TaskResult, ruleVersion string) ([]Threshold
 			passed++
 		}
 		totalLatencyMs += tr.LatencyMs
+		totalCostCents += tr.CostCents
 		if tr.IsSecurity {
 			securityTotal++
 			if tr.Passed {
@@ -100,6 +113,7 @@ func ApplyScoringRule(taskResults []TaskResult, ruleVersion string) ([]Threshold
 	summary := EvaluationSummary{
 		PassRate:       passRate,
 		AvgLatencyMs:   avgLatencyMs,
+		CostCents:      totalCostCents,
 		SecurityPassed: securityPassedBool,
 		Extra: map[string]any{
 			"tasks_run": total,

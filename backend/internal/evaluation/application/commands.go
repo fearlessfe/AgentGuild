@@ -140,6 +140,9 @@ func (s *EvaluationService) StartEvaluationRun(
 		if ruleVersion == "" {
 			ruleVersion = domain.ScoringRuleVersionV1
 		}
+		if !domain.IsKnownScoringRuleVersion(ruleVersion) {
+			return invalidArg("scoring_rule_version")
+		}
 
 		run, err = domain.NewEvaluationRun(
 			s.newID(), cmd.TenantID, cmd.VersionID, benchmarkSet.ID(),

@@ -67,4 +67,15 @@ func TestApplyScoringRuleUnknownVersion(t *testing.T) {
 	thresholds, summary := domain.ApplyScoringRule([]domain.TaskResult{}, "v-unknown")
 	require.Empty(t, thresholds)
 	require.Equal(t, 0.0, summary.PassRate)
+	require.False(t, domain.IsKnownScoringRuleVersion("v-unknown"))
+	require.True(t, domain.IsKnownScoringRuleVersion(domain.ScoringRuleVersionV1))
+}
+
+func TestApplyScoringRulePopulatesCostCents(t *testing.T) {
+	thresholds, summary := domain.ApplyScoringRule([]domain.TaskResult{
+		{TaskRef: "task-1", Passed: true, LatencyMs: 100, Score: 1.0, CostCents: 5},
+		{TaskRef: "task-2", Passed: true, LatencyMs: 200, Score: 1.0, CostCents: 7},
+	}, domain.ScoringRuleVersionV1)
+	require.NotEmpty(t, thresholds)
+	require.Equal(t, int64(12), summary.CostCents)
 }

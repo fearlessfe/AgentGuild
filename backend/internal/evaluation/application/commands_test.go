@@ -300,6 +300,87 @@ func TestCompleteEvaluationRunDirectly(t *testing.T) {
 	require.Equal(t, "eligible", versions.versions[versionID].Status)
 }
 
+func TestStartEvaluationRunUnknownVersionRejected(t *testing.T) {
+	db := testdb.StartPostgres(t)
+
+	tenantID := "tenant-unknown-rule"
+	agentID := "agent-unknown-rule"
+	ownerID := "owner"
+	versionID := randomID()
+	insertAgent(t, db, tenantID, agentID, ownerID)
+	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
+
+	versions := newFakeVersionLifecycle()
+	versions.AddVersion(&application.VersionInfo{ID: versionID, TenantID: tenantID, AgentID: agentID, Status: "draft"})
+
+	svc := newService(t, db, &fakeExecutor{}, versions)
+
+	bsResp, err := svc.CreateBenchmarkSet(context.Background(), application.CreateBenchmarkSet{
+		TenantID:  tenantID,
+		Name:      "Set",
+		Tasks:     []domain.BenchmarkTask{{TaskRef: "task-1"}},
+		CreatedBy: ownerID,
+		IsAdmin:   true,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.StartEvaluationRun(context.Background(), application.StartEvaluationRun{
+		TenantID:           tenantID,
+		AgentID:            agentID,
+		VersionID:          versionID,
+		BenchmarkSetID:     bsResp.BenchmarkSet.ID(),
+		EnvironmentDigest:  "env",
+		ScoringRuleVersion: "v-unknown",
+		ActorID:            ownerID,
+		IsAdmin:            false,
+	})
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+	require.Equal(t, "draft", versions.versions[versionID].Status)
+}
+
+func TestCompleteEvaluationRunRejectsEmptyThresholds(t *testing.T) {
+	db := testdb.StartPostgres(t)
+
+	tenantID := "tenant-empty-th"
+	agentID := "agent-empty-th"
+	ownerID := "owner"
+	versionID := randomID()
+	insertAgent(t, db, tenantID, agentID, ownerID)
+	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
+
+	versions := newFakeVersionLifecycle()
+	versions.AddVersion(&application.VersionInfo{ID: versionID, TenantID: tenantID, AgentID: agentID, Status: "evaluating"})
+
+	svc := newService(t, db, &fakeExecutor{}, versions)
+
+	bsResp, err := svc.CreateBenchmarkSet(context.Background(), application.CreateBenchmarkSet{
+		TenantID:  tenantID,
+		Name:      "Set",
+		CreatedBy: ownerID,
+		IsAdmin:   true,
+	})
+	require.NoError(t, err)
+
+	run, err := domain.NewEvaluationRun(randomID(), tenantID, versionID, bsResp.BenchmarkSet.ID(), "env", domain.ScoringRuleVersionV1, time.Now())
+	require.NoError(t, err)
+	require.NoError(t, evpostgres.NewStore(db).WithTx(context.Background(), func(tx application.Tx) error {
+		return evpostgres.NewEvaluationRunRepository(db).Create(context.Background(), tx, run)
+	}))
+
+	err = svc.CompleteEvaluationRun(context.Background(), application.CompleteEvaluationRun{
+		TenantID:         tenantID,
+		AgentID:          agentID,
+		VersionID:        versionID,
+		EvaluationRunID:  run.ID(),
+		ThresholdResults: []domain.ThresholdResult{},
+		Summary:          domain.EvaluationSummary{PassRate: 1.0},
+		ActorID:          ownerID,
+		IsAdmin:          false,
+	})
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+	require.Equal(t, "evaluating", versions.versions[versionID].Status)
+}
+
 func TestRunningEvaluationRunBlocksVersionContentMutation(t *testing.T) {
 	db := testdb.StartPostgres(t)
 

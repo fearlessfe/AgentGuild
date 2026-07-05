@@ -36,11 +36,18 @@ func TestEvaluationRunCompleteOnlyWhenRunning(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrStateConflict)
 }
 
-func TestEvaluationRunIsPassedWithNoThresholds(t *testing.T) {
+func TestEvaluationRunCompleteRejectsEmptyThresholds(t *testing.T) {
 	run := NewTestEvaluationRun(t)
-	require.NoError(t, run.Complete([]domain.ThresholdResult{}, summary()))
-	require.Equal(t, domain.StatusPassed, run.Status())
-	require.True(t, run.IsPassed())
+	err := run.Complete([]domain.ThresholdResult{}, summary())
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+	require.Equal(t, domain.StatusRunning, run.Status())
+}
+
+func TestEvaluationRunCompleteRejectsNilThresholds(t *testing.T) {
+	run := NewTestEvaluationRun(t)
+	err := run.Complete(nil, summary())
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+	require.Equal(t, domain.StatusRunning, run.Status())
 }
 
 func TestNewEvaluationRunValidatesInputs(t *testing.T) {

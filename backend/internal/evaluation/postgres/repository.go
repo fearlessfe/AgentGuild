@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	avapplication "agentguild.dev/agentguild/backend/internal/agentversion/application"
@@ -460,6 +461,9 @@ func scanEvaluationRun(row evaluationRunScanner) (*domain.EvaluationRun, error) 
 		return nil, err
 	}
 	if status == string(domain.StatusPassed) || status == string(domain.StatusFailed) {
+		if completedAt == nil {
+			return nil, fmt.Errorf("evaluation run %s has status %s but completed_at is NULL", id, status)
+		}
 		if err := run.CompleteAt(thresholdResults, summary, *completedAt); err != nil {
 			return nil, err
 		}

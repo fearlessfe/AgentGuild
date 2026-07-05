@@ -133,6 +133,9 @@ func (r *EvaluationRun) CompleteAt(thresholdResults []ThresholdResult, summary E
 	if r.status != StatusRunning {
 		return ErrStateConflict
 	}
+	if len(thresholdResults) == 0 {
+		return invalidArgument("threshold_results")
+	}
 	r.thresholdResults = append([]ThresholdResult(nil), thresholdResults...)
 	r.summary = summary
 	if IsAllPassed(thresholdResults) {
