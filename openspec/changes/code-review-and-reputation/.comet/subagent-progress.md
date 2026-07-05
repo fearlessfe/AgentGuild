@@ -2,8 +2,11 @@
 
 ## Current Task
 
-- Plan task: Task 11: React 声望页面 — DONE (commit 3a58144, final review PASS)
-- Stage: checkoff
+- Plan task: Task 12: 集成测试与验收测试
+- Stage: implementing
+- Review mode: thorough
+- Implementer: agent-43 (task_id: agent-pimp9wk5, running)
+- Base commit: c6592ec
 
 ## Previous Tasks
 
@@ -11,8 +14,9 @@
 - Task 8: 声望持久化与 Worker — DONE (commit ff50c98, final review PASS)
 - Task 9: React 审核页面骨架与 Diff 展示 — DONE (commit 3f5e3d6, final review PASS)
 - Task 10: React 行级评论、Rubric 评分与决策提交 — DONE (commit 7f0dcf9, final review PASS)
+- Task 11: React 声望页面 — DONE (commit 3a58144, final review PASS)
 
 ## Next
 
-- Commit checkoff update for Task 11.
-- Proceed to Task 12: 集成测试与验收测试.
+- Wait for agent-43 to report back.
+- If DONE/DONE_WITH_CONCERNS, generate review package and dispatch reviewer.
