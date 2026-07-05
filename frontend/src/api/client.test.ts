@@ -48,6 +48,18 @@ describe("REST client authorization", () => {
     expect(headers.Authorization).toBeUndefined();
   });
 
+  it("redirects to /login on 401 responses", async () => {
+    const originalLocation = window.location;
+    delete (window as Window & { location?: Location }).location;
+    window.location = { ...originalLocation, href: "" } as Location;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "未登录" } }), { status: 401 }));
+
+    await expect(listTasks()).rejects.toThrow("未登录");
+    expect(window.location.href).toBe("/login");
+
+    window.location = originalLocation;
+  });
+
   it("does not send Authorization header in demo mode", async () => {
     (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
     (import.meta.env as Record<string, string | undefined>).VITE_API_TOKEN = "dev-token";
