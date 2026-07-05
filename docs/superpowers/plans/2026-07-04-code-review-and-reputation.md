@@ -532,7 +532,7 @@ git commit -m "feat(rest): add review, rubric and reputation routes"
   - `review_get`（查询 Review）
   - `reputation_get`（查询声望投影）
 
-- [ ] **Step 1: 定义输入结构体**
+- [x] **Step 1: 定义输入结构体**
 
 ```go
 type ReviewSubmitInput struct {
@@ -552,7 +552,7 @@ type ReputationGetInput struct {
 }
 ```
 
-- [ ] **Step 2: 注册工具并转发到应用服务**
+- [x] **Step 2: 注册工具并转发到应用服务**
 
 ```go
 mcp.AddTool(server, &mcp.Tool{Name: "review_submit", Description: "提交审核决策"},
@@ -562,7 +562,7 @@ mcp.AddTool(server, &mcp.Tool{Name: "review_submit", Description: "提交审核�
     })
 ```
 
-- [ ] **Step 3: 运行 MCP 测试并提交**
+- [x] **Step 3: 运行 MCP 测试并提交**
 
 ```bash
 go test ./internal/transport/mcp/... -v
