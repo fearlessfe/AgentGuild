@@ -59,18 +59,3 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 
 **注意**：当前 list/summary 端点保持原有裸数组/对象返回风格；detail 端点与 MCP 工具返回完整 DTO。若未来统一为 `Envelope<T>`，应通过独立 change 处理。
 
-### Requirement: 基准集与评测运行接口使用统一响应信封
-系统 SHALL 保证基准集与评测运行接口返回 `Envelope<T>` 结构（含 `data` 与 `meta`），与控制台前端 `apiRequest` 约定保持一致。
-
-#### Scenario: 列出基准集
-- **WHEN** 调用者请求 `/v1/benchmarks`
-- **THEN** 响应体为 `{ data: { items: [...] }, meta: { server_time, resource_version } }`
-
-#### Scenario: 创建基准集
-- **WHEN** 调用者请求 `POST /v1/benchmarks`
-- **THEN** 响应体为 `{ data: { benchmark_set_id, version_number }, meta: { server_time, resource_version } }`
-
-#### Scenario: 查看评测运行详情
-- **WHEN** 调用者请求 `/v1/evaluations/{id}`
-- **THEN** 响应体为 `{ data: EvaluationRunDetail, meta: { server_time, resource_version } }`
-
