@@ -96,6 +96,12 @@ export function ReviewPage() {
     }
   }, [reviewQuery.data]);
 
+  // Reset seed flags when navigating to a different review.
+  useEffect(() => {
+    hasSeededComments.current = false;
+    hasSeededScores.current = false;
+  }, [reviewId]);
+
   const commentMutation = useMutation({
     mutationFn: async (input: {
       lineNumber: number;
@@ -162,7 +168,7 @@ export function ReviewPage() {
     hunkHash: string;
     text: string;
   }) {
-    commentMutation.mutate(input);
+    return commentMutation.mutateAsync(input);
   }
 
   return (
@@ -223,7 +229,7 @@ export function ReviewPage() {
             <button
               type="button"
               className="accept"
-              disabled={decisionMutation.isPending}
+              disabled={decisionMutation.isPending || rubricQuery.isPending}
               onClick={() => decisionMutation.mutate("accepted")}
             >
               通过
@@ -231,7 +237,7 @@ export function ReviewPage() {
             <button
               type="button"
               className="revision"
-              disabled={decisionMutation.isPending}
+              disabled={decisionMutation.isPending || rubricQuery.isPending}
               onClick={() => decisionMutation.mutate("revision_requested")}
             >
               退回修改
@@ -239,7 +245,7 @@ export function ReviewPage() {
             <button
               type="button"
               className="reject"
-              disabled={decisionMutation.isPending}
+              disabled={decisionMutation.isPending || rubricQuery.isPending}
               onClick={() => decisionMutation.mutate("rejected")}
             >
               拒绝
@@ -248,7 +254,6 @@ export function ReviewPage() {
         ) : null}
       </div>
 
-      {isSubmitted && review.summary ? <p className="review-summary">{review.summary}</p> : null}
       {isSubmitted && review.rubric_scores.length > 0 ? (
         <div className="review-rubric">
           <h3>评分</h3>

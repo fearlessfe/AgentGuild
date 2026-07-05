@@ -40,7 +40,7 @@ export function DiffViewer({
 }: {
   diff: FileDiff;
   comments: LineComment[];
-  onAddComment: (input: AddCommentInput) => void;
+  onAddComment: (input: AddCommentInput) => Promise<unknown>;
 }) {
   const [mode, setMode] = useState<DiffMode>("split");
   const [selected, setSelected] = useState<SelectedLine | null>(null);
@@ -52,16 +52,21 @@ export function DiffViewer({
     setDraft("");
   }
 
-  function submitComment() {
+  async function submitComment() {
     if (!selected || draft.trim() === "") return;
-    onAddComment({
-      lineNumber: selected.lineNumber,
-      side: selected.side,
-      hunkHash: selected.hunkHash,
-      text: draft.trim(),
-    });
-    setSelected(null);
-    setDraft("");
+    const text = draft.trim();
+    try {
+      await onAddComment({
+        lineNumber: selected.lineNumber,
+        side: selected.side,
+        hunkHash: selected.hunkHash,
+        text,
+      });
+      setSelected(null);
+      setDraft("");
+    } catch {
+      setDraft(text);
+    }
   }
 
   const allLines: { hunkIndex: number; lineIndex: number; line: DiffLine; hunk: Hunk }[] = [];

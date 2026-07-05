@@ -423,10 +423,12 @@ describe("ReviewPage", () => {
       ([url]) => typeof url === "string" && url.includes("/v1/reviews/rev-1/comments")
     )!;
     const body = JSON.parse((init as RequestInit).body as string);
+    const headers = (init as RequestInit).headers as Record<string, string>;
     expect(body.file_path).toBe("src/payment.go");
     expect(body.line_number).toBe(12);
     expect(body.text).toBe("边界情况未处理");
-    expect(body.request_id).toBeTruthy();
+    expect(body.request_id).toBeUndefined();
+    expect(headers["Idempotency-Key"]).toBeTruthy();
   });
 
   it("displays hard-gate error when accepting a submission with failed hard gates", async () => {

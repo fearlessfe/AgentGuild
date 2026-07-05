@@ -22,10 +22,8 @@ export const addComment = (
 ) =>
   apiRequest<LineComment>(`/v1/reviews/${encodeURIComponent(reviewId)}/comments`, {
     method: "POST",
-    body: {
-      request_id: generateRequestId(),
-      ...payload,
-    },
+    headers: { "Idempotency-Key": generateRequestId() },
+    body: payload,
   });
 
 export const submitDecision = (
@@ -38,8 +36,8 @@ export const submitDecision = (
 ) =>
   apiRequest<ReviewView>(`/v1/reviews/${encodeURIComponent(reviewId)}/decision`, {
     method: "POST",
+    headers: { "Idempotency-Key": generateRequestId() },
     body: {
-      request_id: generateRequestId(),
       decision: payload.decision,
       scores: payload.scores,
       summary: payload.summary,
