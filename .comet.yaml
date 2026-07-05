@@ -1,2 +1,2 @@
-build_command: "cd backend && go build ./... && cd ../frontend && npm run build"
-verify_command: "cd backend && go test ./... -count=1 && cd ../frontend && npm run test -- --run && npx playwright test e2e/agent-version-and-experience.spec.ts"
+build_command: "make build"
+verify_command: "make verify"
