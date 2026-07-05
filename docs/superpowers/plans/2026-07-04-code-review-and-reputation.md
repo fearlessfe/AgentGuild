@@ -400,7 +400,7 @@ git commit -m "feat(domain): extend execution state machine for review decisions
   - `AddComment(ctx, principal, cmd AddComment) (Envelope[CommentView], error)`
   - `GetReview(ctx, principal, query GetReview) (Envelope[ReviewView], error)`
 
-- [ ] **Step 1: 定义端口和命令类型**
+- [x] **Step 1: 定义端口和命令类型**
 
 ```go
 type CreateReview struct {
@@ -425,7 +425,7 @@ type AddComment struct {
 }
 ```
 
-- [ ] **Step 2: 实现硬门槛复检**
+- [x] **Step 2: 实现硬门槛复检**
 
 ```go
 if cmd.Decision == DecisionAccepted {
@@ -439,14 +439,14 @@ if cmd.Decision == DecisionAccepted {
 }
 ```
 
-- [ ] **Step 3: 实现权限策略（publisher / reviewer / agent owner）**
+- [x] **Step 3: 实现权限策略（publisher / reviewer / agent owner）**
 
 ```go
 func (p *Policy) CanViewReview(ctx context.Context, principal auth.Principal, review ReviewRecord, task TaskSummary) error
 func (p *Policy) CanSubmitDecision(principal auth.Principal, review ReviewRecord) error
 ```
 
-- [ ] **Step 4: 实现 ReviewerAllocator**
+- [x] **Step 4: 实现 ReviewerAllocator**
 
 ```go
 func (a *Allocator) Allocate(ctx context.Context, tx application.Tx, tenantID string, caps []string) (string, error)
@@ -454,7 +454,7 @@ func (a *Allocator) Allocate(ctx context.Context, tx application.Tx, tenantID st
 
 选择逻辑：匹配 capability → 最低 current_load → 同负载时按创建时间/ID 轮询。
 
-- [ ] **Step 5: 写应用服务测试并提交**
+- [x] **Step 5: 写应用服务测试并提交**
 
 ```bash
 go test ./internal/review/application/... -v
