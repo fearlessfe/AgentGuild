@@ -5,12 +5,107 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeVersionService struct {
+	list      []agentversionapp.VersionSummary
+	listErr   error
+	listCalls []struct {
+		tenantID string
+		agentID  string
+	}
+
+	diff      *agentversionapp.VersionDiff
+	diffErr   error
+	diffCalls []struct {
+		tenantID      string
+		agentID       string
+		versionID     string
+		baseVersionID string
+	}
+}
+
+func (f *fakeVersionService) ListVersions(ctx context.Context, tenantID, agentID string) ([]agentversionapp.VersionSummary, error) {
+	f.listCalls = append(f.listCalls, struct {
+		tenantID string
+		agentID  string
+	}{tenantID: tenantID, agentID: agentID})
+	return f.list, f.listErr
+}
+
+func (f *fakeVersionService) GetVersion(ctx context.Context, tenantID, agentID, versionID string) (*agentversionapp.VersionDetail, error) {
+	return nil, nil
+}
+
+func (f *fakeVersionService) GetVersionDiff(ctx context.Context, tenantID, agentID, versionID, baseVersionID string) (*agentversionapp.VersionDiff, error) {
+	f.diffCalls = append(f.diffCalls, struct {
+		tenantID      string
+		agentID       string
+		versionID     string
+		baseVersionID string
+	}{tenantID: tenantID, agentID: agentID, versionID: versionID, baseVersionID: baseVersionID})
+	return f.diff, f.diffErr
+}
+
+func (f *fakeVersionService) CreateDraft(ctx context.Context, cmd agentversionapp.CreateDraft) (*agentversionapp.CreateDraftResponse, error) {
+	return nil, nil
+}
+
+func (f *fakeVersionService) StartEvaluation(ctx context.Context, principal identityapp.Principal, cmd agentversionapp.StartEvaluation) error {
+	return nil
+}
+
+func (f *fakeVersionService) Promote(ctx context.Context, cmd agentversionapp.Promote) error {
+	return nil
+}
+
+func (f *fakeVersionService) Rollback(ctx context.Context, cmd agentversionapp.Rollback) error {
+	return nil
+}
+
+func TestListAgentVersionsReturnsSnakeCaseFields(t *testing.T) {
+	now := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
+	versions := &fakeVersionService{
+		list: []agentversionapp.VersionSummary{
+			{
+				ID:                "v1",
+				VersionNumber:     1,
+				Status:            "active",
+				ParentVersionID:   "v0",
+				ConfigFingerprint: "fp-1",
+				CreatedAt:         now,
+			},
+		},
+	}
+	server := rest.NewServer(&fakeApplication{}, &tokenVerifier{},
+		rest.WithSession(testSessionSecret, false),
+		rest.WithVersionService(versions),
+	).Router()
+
+	res := getWithSession(t, server, "/v1/agents/agent-1/versions", sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, versions.listCalls, 1)
+	require.Equal(t, "tenant-1", versions.listCalls[0].tenantID)
+	require.Equal(t, "agent-1", versions.listCalls[0].agentID)
+
+	body := res.Body.String()
+	require.Contains(t, body, `"version_number":`)
+	require.Contains(t, body, `"parent_version_id":`)
+	require.Contains(t, body, `"config_fingerprint":`)
+	require.Contains(t, body, `"created_at":`)
+	require.Contains(t, body, `"status":`)
+	require.NotContains(t, body, `"VersionNumber"`)
+	require.NotContains(t, body, `"ParentVersionID"`)
+	require.NotContains(t, body, `"ConfigFingerprint"`)
+	require.NotContains(t, body, `"CreatedAt"`)
+}
 
 func TestDiffAgentVersionReturnsStructuredView(t *testing.T) {
 	versions := &fakeVersionService{
@@ -70,49 +165,4 @@ func TestDiffAgentVersionReturnsStructuredView(t *testing.T) {
 	require.NotNil(t, changedByField["runtime"].To)
 	require.Equal(t, "r2", *changedByField["runtime"].To)
 	require.Contains(t, changedByField, "model")
-}
-
-type fakeVersionService struct {
-	diff      *agentversionapp.VersionDiff
-	diffErr   error
-	diffCalls []struct {
-		tenantID      string
-		agentID       string
-		versionID     string
-		baseVersionID string
-	}
-}
-
-func (f *fakeVersionService) ListVersions(ctx context.Context, tenantID, agentID string) ([]agentversionapp.VersionSummary, error) {
-	return nil, nil
-}
-
-func (f *fakeVersionService) GetVersion(ctx context.Context, tenantID, agentID, versionID string) (*agentversionapp.VersionDetail, error) {
-	return nil, nil
-}
-
-func (f *fakeVersionService) GetVersionDiff(ctx context.Context, tenantID, agentID, versionID, baseVersionID string) (*agentversionapp.VersionDiff, error) {
-	f.diffCalls = append(f.diffCalls, struct {
-		tenantID      string
-		agentID       string
-		versionID     string
-		baseVersionID string
-	}{tenantID: tenantID, agentID: agentID, versionID: versionID, baseVersionID: baseVersionID})
-	return f.diff, f.diffErr
-}
-
-func (f *fakeVersionService) CreateDraft(ctx context.Context, cmd agentversionapp.CreateDraft) (*agentversionapp.CreateDraftResponse, error) {
-	return nil, nil
-}
-
-func (f *fakeVersionService) StartEvaluation(ctx context.Context, principal identityapp.Principal, cmd agentversionapp.StartEvaluation) error {
-	return nil
-}
-
-func (f *fakeVersionService) Promote(ctx context.Context, cmd agentversionapp.Promote) error {
-	return nil
-}
-
-func (f *fakeVersionService) Rollback(ctx context.Context, cmd agentversionapp.Rollback) error {
-	return nil
 }

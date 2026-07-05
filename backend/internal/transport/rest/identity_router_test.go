@@ -192,6 +192,50 @@ func TestSnakeCaseFieldNames(t *testing.T) {
 	require.NotContains(t, body, `"ServerTime"`)
 }
 
+func TestListAgentsReturnsSnakeCaseFields(t *testing.T) {
+	now := time.Date(2026, 7, 5, 10, 0, 0, 0, time.UTC)
+	app := &fakeIdentityApplication{
+		list: identityapp.Envelope[identityapp.AgentPage]{
+			Data: identityapp.AgentPage{
+				Items: []identityapp.AgentView{
+					{
+						ID:          "agent-1",
+						TenantID:    "tenant-1",
+						Name:        "Builder",
+						Description: "does work",
+						Status:      identitydomain.AgentPendingActivation,
+						OwnerID:     "owner-1",
+						OwnerEmail:  "owner@example.com",
+						Scopes:      []string{"tasks:read"},
+						RepoScope:   []string{"acme/*"},
+						BudgetCents: 1500,
+						CreatedAt:   now,
+						UpdatedAt:   now,
+					},
+				},
+			},
+			Meta: identityapp.Meta{ServerTime: now, ResourceVersion: 1},
+		},
+	}
+	server := newIdentityTestServer(app)
+
+	res := getWithSession(t, server, "/v1/agents", sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusOK, res.Code)
+	body := res.Body.String()
+	require.Contains(t, body, `"items":`)
+	require.Contains(t, body, `"tenant_id":`)
+	require.Contains(t, body, `"owner_email":`)
+	require.Contains(t, body, `"repo_scope":`)
+	require.Contains(t, body, `"budget_cents":`)
+	require.Contains(t, body, `"server_time":`)
+	require.NotContains(t, body, `"TenantID"`)
+	require.NotContains(t, body, `"OwnerEmail"`)
+	require.NotContains(t, body, `"RepoScope"`)
+	require.NotContains(t, body, `"BudgetCents"`)
+	require.NotContains(t, body, `"ServerTime"`)
+}
+
 func TestOIDCLoginRedirectsWithSignedStateCookie(t *testing.T) {
 	provider := &fakeOIDCProvider{}
 	server := newIdentityOIDCTestServer(&fakeIdentityApplication{}, provider)
