@@ -3,11 +3,12 @@
 ## Current Task
 
 - Plan task: Task 9: React 审核页面骨架与 Diff 展示
-- Stage: final-fix
+- Stage: final-review
 - Review mode: thorough
 - Implementer: agent-29 (DONE, commit 8f58584)
 - Reviewer: agent-30 (FAIL: 2 IMPORTANT)
-- Fixer: agent-31 (task_id: agent-b399b810, running)
+- Fixer: agent-31 (DONE, commit 906209f)
+- Final Reviewer: agent-32 (task_id: agent-egh2bddq, running)
 - Base commit: 0e01d5a
 
 ## Previous Tasks
@@ -17,5 +18,6 @@
 
 ## Next
 
-- Wait for agent-31 fix result.
-- After fix, regenerate review package and re-dispatch reviewer (final review round 1).
+- Wait for agent-32 final review result.
+- If PASS: check off Task 9, then proceed to Task 10.
+- If FAIL with CRITICAL/IMPORTANT findings: this is final review round 1; one more fix round allowed per thorough mode.
