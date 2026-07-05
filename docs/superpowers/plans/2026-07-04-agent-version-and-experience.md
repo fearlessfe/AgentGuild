@@ -6,7 +6,7 @@ base-ref: 9bfdf6900305421ec222063adde41d98960b4943
 
 # Agent Version and Experience Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在 AgentGuild Coding MVP 中实现 Agent Version 的不可变快照、版本谱系、状态机生命周期、晋级/回滚，以及从已验收任务中提取并治理 ExperienceCandidate 的机制；通过 BenchmarkSet 与 EvaluationRun 为版本晋级提供可审计的硬门槛证据。
 
@@ -97,7 +97,7 @@ openspec/changes/agent-version-and-experience/tasks.md  任务边界勾选更新
 
 ## Task 1: 建立 agentversion 领域模型与不可变版本
 
-- [ ] **Completion gate: Task 1 agentversion domain + repository**
+- [x] **Completion gate: Task 1 agentversion domain + repository**
 
 **Files:**
 - Create: `backend/internal/agentversion/domain/agent_version.go`
@@ -130,7 +130,7 @@ openspec/changes/agent-version-and-experience/tasks.md  任务边界勾选更新
 - Produces: `queries.GetVersion(ctx, tenantID, agentID, versionID) (*VersionDetail, error)`
 - Produces: `queries.GetVersionDiff(ctx, tenantID, agentID, versionID, baseVersionID) (*VersionDiff, error)`
 
-- [ ] **Step 1: 写领域模型失败测试**
+- [x] **Step 1: 写领域模型失败测试**
 
 ```go
 func TestAgentVersionStatusMachine(t *testing.T) {
@@ -163,40 +163,40 @@ func TestRollbackTargetStates(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行领域测试并确认失败**
+- [x] **Step 2: 运行领域测试并确认失败**
 
 Run: `cd backend && go test ./internal/agentversion/domain -count=1`
 
 Expected: 全部失败（未实现）。
 
-- [ ] **Step 3: 实现 AgentVersion 领域模型**
+- [x] **Step 3: 实现 AgentVersion 领域模型**
 
 Implement in `backend/internal/agentversion/domain/agent_version.go`:
 - 结构体包含：ID、TenantID、AgentID、VersionNumber、ParentVersionID、Status、Runtime、Model、Capabilities、ConfigFingerprint、ContentHash、EnvironmentDigest、PromptRef、SkillRefs、MemoryRef、ToolRefs、CreatedBy、CreatedAt、PromotedAt、RetiredAt。
 - 状态迁移方法内部校验合法性，非法迁移返回 `ErrStateConflict`。
 - 所有 setter 仅允许在 `draft` 状态且未持久化前调用；持久化后返回 `ErrImmutableResource`。
 
-- [ ] **Step 4: 实现 content_hash 与 config_fingerprint 计算**
+- [x] **Step 4: 实现 content_hash 与 config_fingerprint 计算**
 
 Implement in `backend/internal/agentversion/domain/content_hash.go`:
 - 规范化 `runtime`、`model`、`capabilities`（排序后数组）、`prompt_ref`、`skill_refs`（排序）、`memory_ref`、`tool_refs`（排序）。
 - 使用 SHA256 计算 `content_hash`。
 - 计算 `config_fingerprint` 作为轻量变化检测（可复用 `content_hash` 前 16 位或单独摘要）。
 
-- [ ] **Step 5: 实现 lifecycle 规则**
+- [x] **Step 5: 实现 lifecycle 规则**
 
 Implement in `backend/internal/agentversion/domain/lifecycle.go`:
 - Promote/Rollback 的纯领域规则（不访问 DB）。
 - `CanRollbackTo(status)` 判定。
 - 旧 Active 版本 Retire 的领域规则。
 
-- [ ] **Step 6: 运行领域测试并确认通过**
+- [x] **Step 6: 运行领域测试并确认通过**
 
 Run: `cd backend && go test ./internal/agentversion/domain -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 7: 实现 Repository 与 migration**
+- [x] **Step 7: 实现 Repository 与 migration**
 
 Implement in `backend/internal/agentversion/postgres/repository.go`:
 - `Create(ctx, tx, version) error`
@@ -212,7 +212,7 @@ Create migration `backend/migrations/000003_agent_version_and_experience.up.sql`
 - 添加自引用外键：`(tenant_id, parent_version_id) -> agent_versions(tenant_id, id)`。
 - 将现有初始版本状态设为 `active`，`parent_version_id = NULL`，`version_number = 1`（若表中已有数据）。
 
-- [ ] **Step 8: 写 Repository 集成测试**
+- [x] **Step 8: 写 Repository 集成测试**
 
 Test in `backend/internal/agentversion/postgres/repository_test.go`:
 - 创建 Draft 后可按 ID 查询；
@@ -222,7 +222,7 @@ Test in `backend/internal/agentversion/postgres/repository_test.go`:
 
 Run: `cd backend && go test ./internal/agentversion/postgres -count=1`
 
-- [ ] **Step 9: 实现 Application 命令与查询**
+- [x] **Step 9: 实现 Application 命令与查询**
 
 Implement in `backend/internal/agentversion/application/commands.go`:
 - `CreateDraft(ctx, cmd)`: 获取当前 active 版本，计算 fingerprint，相同则 `ErrNoChange`；生成 `version_number = latest + 1`；创建 Draft 并持久化。
@@ -236,7 +236,7 @@ Implement in `backend/internal/agentversion/application/queries.go`:
 Implement in `backend/internal/agentversion/application/policy.go`:
 - `RequireOwnerOrAdmin(ctx, tenantID, agentID, actorID) error`。
 
-- [ ] **Step 10: 写 Application 服务集成测试**
+- [x] **Step 10: 写 Application 服务集成测试**
 
 Test in `backend/internal/agentversion/application/commands_test.go`:
 - Draft → Evaluation → Eligible → Active 完整链路（配合 mock EvaluationRun）。
@@ -246,7 +246,7 @@ Test in `backend/internal/agentversion/application/commands_test.go`:
 
 Run: `cd backend && go test ./internal/agentversion/application -count=1`
 
-- [ ] **Step 11: 更新 tasks.md 勾选 Task 1**
+- [x] **Step 11: 更新 tasks.md 勾选 Task 1**
 
 File: `openspec/changes/agent-version-and-experience/tasks.md`
 
@@ -254,7 +254,7 @@ File: `openspec/changes/agent-version-and-experience/tasks.md`
 
 ## Task 2: 建立 evaluation 模块与硬门槛评测
 
-- [ ] **Completion gate: Task 2 evaluation domain + repository**
+- [x] **Completion gate: Task 2 evaluation domain + repository**
 
 **Files:**
 - Create: `backend/internal/evaluation/domain/benchmark_set.go`
@@ -282,7 +282,7 @@ File: `openspec/changes/agent-version-and-experience/tasks.md`
 - Produces: `queries.GetBenchmarkSet(ctx, tenantID, id)`, `queries.ListBenchmarkSets(ctx, tenantID)`
 - Produces: `queries.GetEvaluationRun(ctx, tenantID, id)`, `queries.ListEvaluationRuns(ctx, tenantID, agentVersionID)`
 
-- [ ] **Step 1: 写领域模型失败测试**
+- [x] **Step 1: 写领域模型失败测试**
 
 ```go
 func TestEvaluationRunFreeze(t *testing.T) {
@@ -313,7 +313,7 @@ Run: `cd backend && go test ./internal/evaluation/domain -count=1`
 
 Expected: 全部失败。
 
-- [ ] **Step 2: 实现 BenchmarkSet 与 EvaluationRun 领域模型**
+- [x] **Step 2: 实现 BenchmarkSet 与 EvaluationRun 领域模型**
 
 Implement in `backend/internal/evaluation/domain/benchmark_set.go`:
 - 字段：ID、TenantID、VersionNumber、Name、Description、IsActive、CreatedBy、CreatedAt。
@@ -329,13 +329,13 @@ Implement in `backend/internal/evaluation/domain/scoring.go`:
 - 初版硬门槛：安全回归 pass、通过率 ≥ 阈值、平均延迟 ≤ 阈值。
 - `threshold_results` 保存每个门槛的名称、结果、证据。
 
-- [ ] **Step 3: 运行领域测试并确认通过**
+- [x] **Step 3: 运行领域测试并确认通过**
 
 Run: `cd backend && go test ./internal/evaluation/domain -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 4: 实现 Repository 与 migration 新增表**
+- [x] **Step 4: 实现 Repository 与 migration 新增表**
 
 Add to `backend/migrations/000003_agent_version_and_experience.up.sql`:
 - `benchmark_sets` 表，含 `(tenant_id, version_number)` 唯一索引。
@@ -348,7 +348,7 @@ Implement in `backend/internal/evaluation/postgres/repository.go`:
 - `CreateEvaluationRun`, `GetEvaluationRun`, `ListEvaluationRunsByVersion`, `CompleteEvaluationRun`
 - `CreateEvaluationRunResult`, `ListEvaluationRunResults`
 
-- [ ] **Step 5: 写 Repository 集成测试**
+- [x] **Step 5: 写 Repository 集成测试**
 
 Test:
 - 创建 BenchmarkSet 后 version_number 正确且可标记 active；
@@ -358,7 +358,7 @@ Test:
 
 Run: `cd backend && go test ./internal/evaluation/postgres -count=1`
 
-- [ ] **Step 6: 实现 Application 命令与查询**
+- [x] **Step 6: 实现 Application 命令与查询**
 
 Implement in `backend/internal/evaluation/application/commands.go`:
 - `CreateBenchmarkSet(ctx, cmd)`: 生成 version_number，持久化，可选设置 is_active。
@@ -367,7 +367,7 @@ Implement in `backend/internal/evaluation/application/commands.go`:
 
 说明：初版 EvaluationRun 执行器使用同步/可注入方式；实际 benchmark 任务执行可先在 `commands.StartEvaluationRun` 中同步完成并调用 `CompleteEvaluationRun`，便于测试，后续可拆分为异步 worker。
 
-- [ ] **Step 7: 写 Application 服务集成测试**
+- [x] **Step 7: 写 Application 服务集成测试**
 
 Test:
 - BenchmarkSet 创建与 active 切换；
@@ -377,13 +377,13 @@ Test:
 
 Run: `cd backend && go test ./internal/evaluation/application -count=1`
 
-- [ ] **Step 8: 更新 tasks.md 勾选 Task 2 的 3.1**
+- [x] **Step 8: 更新 tasks.md 勾选 Task 2 的 3.1**
 
 ---
 
 ## Task 3: 建立 agentexperience 模块与经验治理
 
-- [ ] **Completion gate: Task 3 agentexperience domain + repository + integration**
+- [x] **Completion gate: Task 3 agentexperience domain + repository + integration**
 
 **Files:**
 - Create: `backend/internal/agentexperience/domain/candidate.go`
@@ -407,7 +407,7 @@ Run: `cd backend && go test ./internal/evaluation/application -count=1`
 - Produces: `commands.ReviewCandidate(ctx, cmd) error`
 - Produces: `queries.ListCandidates(ctx, tenantID, agentID, status)`, `queries.GetCandidate(ctx, tenantID, agentID, candidateID)`
 
-- [ ] **Step 1: 写领域模型失败测试**
+- [x] **Step 1: 写领域模型失败测试**
 
 ```go
 func TestCandidateAutoRejectForbidden(t *testing.T) {
@@ -437,7 +437,7 @@ Run: `cd backend && go test ./internal/agentexperience/domain -count=1`
 
 Expected: 全部失败。
 
-- [ ] **Step 2: 实现 ExperienceCandidate 领域模型**
+- [x] **Step 2: 实现 ExperienceCandidate 领域模型**
 
 Implement in `backend/internal/agentexperience/domain/candidate.go`:
 - 字段：ID、TenantID、AgentID、SourceTaskID、SourceSubmissionID、SourceReviewID、EvidenceRef、ContentHash、ApplicableCapabilities、TenantScope、SensitivityClass、Status、PolicyReason、ReviewedBy、ReviewedAt、CreatedAt。
@@ -449,13 +449,13 @@ Implement in `backend/internal/agentexperience/domain/sensitivity.go`:
 - 接口 `SensitivityPolicy` + 初版基于规则的实现：检查 evidence 中是否包含关键字/正则模式（如密码、密钥、token 模式）以判定 forbidden/restricted/internal/public。
 - 预留扩展点，后续可替换为 NLP 管线。
 
-- [ ] **Step 3: 运行领域测试并确认通过**
+- [x] **Step 3: 运行领域测试并确认通过**
 
 Run: `cd backend && go test ./internal/agentexperience/domain -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 4: 实现 Repository 与 migration 新增表**
+- [x] **Step 4: 实现 Repository 与 migration 新增表**
 
 Add to `backend/migrations/000003_agent_version_and_experience.up.sql`:
 - `experience_candidates` 表，含 status CHECK、tenant_id。
@@ -464,7 +464,7 @@ Add to `backend/migrations/000003_agent_version_and_experience.up.sql`:
 Implement in `backend/internal/agentexperience/postgres/repository.go`:
 - `Create`, `GetByID`, `ListByAgent`, `UpdateStatus`, `ListApprovedByAgent`。
 
-- [ ] **Step 5: 写 Repository 集成测试**
+- [x] **Step 5: 写 Repository 集成测试**
 
 Test:
 - 创建后状态为 pending_review（若策略非 forbidden）；
@@ -474,7 +474,7 @@ Test:
 
 Run: `cd backend && go test ./internal/agentexperience/postgres -count=1`
 
-- [ ] **Step 6: 实现 Application 命令与查询**
+- [x] **Step 6: 实现 Application 命令与查询**
 
 Implement in `backend/internal/agentexperience/application/commands.go`:
 - `ExtractCandidate(ctx, cmd)`: 从 Accepted Submission 读取 execution，生成 evidence 摘要与 content_hash，创建 candidate。
@@ -484,7 +484,7 @@ Implement in `backend/internal/agentexperience/application/commands.go`:
 Implement in `backend/internal/agentexperience/application/queries.go`:
 - `ListCandidates`, `GetCandidate`。
 
-- [ ] **Step 7: 实现经验与新版本的绑定**
+- [x] **Step 7: 实现经验与新版本的绑定**
 
 Modify `backend/internal/agentversion/application/commands.go` 的 `CreateDraft`：
 - 命令支持可选 `approved_experience_ids []string`。
@@ -492,7 +492,7 @@ Modify `backend/internal/agentversion/application/commands.go` 的 `CreateDraft`
 - 将候选的 `evidence_ref` 合并进新版本的 `memory_ref` 或 `skill_refs`（初版统一放入 `memory_ref`，多个 approved 经验合并为数组后计算 content_hash）。
 - 这些引用随版本切换和回滚自然失效。
 
-- [ ] **Step 8: 写 Application 集成测试**
+- [x] **Step 8: 写 Application 集成测试**
 
 Test:
 - 从 Accepted Submission 提取 candidate；
@@ -502,13 +502,13 @@ Test:
 
 Run: `cd backend && go test ./internal/agentexperience/application -count=1`
 
-- [ ] **Step 9: 更新 tasks.md 勾选 Task 3 的 2.1–2.3**
+- [x] **Step 9: 更新 tasks.md 勾选 Task 3 的 2.1–2.3**
 
 ---
 
 ## Task 4: REST、MCP Transport 与权限策略
 
-- [ ] **Completion gate: Task 4 transport wired and manually tested**
+- [x] **Completion gate: Task 4 transport wired and manually tested**
 
 **Files:**
 - Create: `backend/internal/transport/rest/agent_version_router.go`
@@ -543,7 +543,7 @@ Run: `cd backend && go test ./internal/agentexperience/application -count=1`
   - `experience_candidate_list`, `experience_candidate_review`
   - `evaluation_run_start`, `evaluation_run_get`
 
-- [ ] **Step 1: 实现 REST routers**
+- [x] **Step 1: 实现 REST routers**
 
 Each router:
 - 从请求上下文提取 `Principal`（人类 OIDC session 或 Agent JWT）。
@@ -551,20 +551,20 @@ Each router:
 - 转换 DTO，调用 command/query。
 - 统一错误映射：domain/app 错误 → HTTP status + code。
 
-- [ ] **Step 2: 实现 MCP tools**
+- [x] **Step 2: 实现 MCP tools**
 
 Each tool:
 - 从 MCP 上下文提取 `Principal`。
 - 校验权限。
 - 返回结构化 JSON，避免一次性凭证暴露。
 
-- [ ] **Step 3: 预留 ContentStore 接口**
+- [x] **Step 3: 预留 ContentStore 接口**
 
 Implement in `backend/internal/transport/mcp/content_store.go`:
 - 接口 `ContentStore { Get(ref string) ([]byte, error); Put(content []byte) (string, error) }`
 - 初版 `MemoryContentStore` 实现，用于测试和本地开发。
 
-- [ ] **Step 4: 写 Router 集成测试**
+- [x] **Step 4: 写 Router 集成测试**
 
 Test:
 - 创建 Draft 成功并返回 version_id；
@@ -574,7 +574,7 @@ Test:
 
 Run: `cd backend && go test ./internal/transport/rest -run 'AgentVersion|Experience|Evaluation' -count=1`
 
-- [ ] **Step 5: 更新 OpenAPI 文档**
+- [x] **Step 5: 更新 OpenAPI 文档**
 
 Update `backend/internal/transport/rest/openapi.yaml`:
 - 新增版本、经验、评测相关 paths 和 schemas。
@@ -583,7 +583,7 @@ Update `backend/internal/transport/rest/openapi.yaml`:
 
 ## Task 5: React 管理界面
 
-- [ ] **Completion gate: Task 5 frontend pages render and E2E pass**
+- [x] **Completion gate: Task 5 frontend pages render and E2E pass**
 
 **Files:**
 - Create: `frontend/src/features/versions/VersionTree.tsx`
@@ -603,29 +603,29 @@ Update `backend/internal/transport/rest/openapi.yaml`:
 - Update: `frontend/src/App.tsx` 或路由配置，注册新页面
 - Create: `frontend/e2e/agent-version-and-experience.spec.ts`
 
-- [ ] **Step 1: 实现 Versions 页面**
+- [x] **Step 1: 实现 Versions 页面**
 
 - `VersionTree`: 使用 `/v1/agents/:id/versions` 构建谱系树（按 `parent_version_id` 递归）。
 - `VersionDetail`: 展示内容引用、状态、评测结果；调用 `/diff` 展示与父版本差异。
 - `VersionActions`: 根据状态展示「启动评测」「晋级」「回滚」按钮。
 
-- [ ] **Step 2: 实现 Experiences 页面**
+- [x] **Step 2: 实现 Experiences 页面**
 
 - `ExperienceList`: 列出 pending_review / approved / rejected 候选，显示来源任务和敏感级别。
 - `ExperienceReview`: 审批或拒绝候选，填写原因。
 
-- [ ] **Step 3: 实现 Evaluations 页面**
+- [x] **Step 3: 实现 Evaluations 页面**
 
 - `BenchmarkSetForm`: 创建基准集，上传/选择任务列表，标记 is_active。
 - `EvaluationList` / `EvaluationDetail`: 展示评测运行状态与门槛结果。
 
-- [ ] **Step 4: 写组件测试**
+- [x] **Step 4: 写组件测试**
 
 Run: `cd frontend && npm run test -- versions.test.tsx experiences.test.tsx evaluations.test.tsx`
 
 Expected: PASS。
 
-- [ ] **Step 5: 写 Playwright E2E 验收测试**
+- [x] **Step 5: 写 Playwright E2E 验收测试**
 
 In `frontend/e2e/agent-version-and-experience.spec.ts`:
 - Draft → EvaluationRun passed → Eligible → Active 完整链路；
@@ -638,13 +638,13 @@ Run: `cd frontend && npx playwright test e2e/agent-version-and-experience.spec.t
 
 Expected: PASS。
 
-- [ ] **Step 6: 更新 tasks.md 勾选 Task 3 的 3.2–3.3**
+- [x] **Step 6: 更新 tasks.md 勾选 Task 3 的 3.2–3.3**
 
 ---
 
 ## Task 6: 端到端验证与任务收尾
 
-- [ ] **Step 1: 运行全量后端测试**
+- [x] **Step 1: 运行全量后端测试**
 
 Run:
 ```bash
@@ -654,7 +654,7 @@ go test ./... -count=1
 
 Expected: PASS（或仅与未实现依赖相关的已知 skip）。
 
-- [ ] **Step 2: 运行全量前端测试**
+- [x] **Step 2: 运行全量前端测试**
 
 Run:
 ```bash
@@ -664,7 +664,7 @@ npm run test
 
 Expected: PASS。
 
-- [ ] **Step 3: 运行 Playwright 验收测试**
+- [x] **Step 3: 运行 Playwright 验收测试**
 
 Run:
 ```bash
@@ -674,7 +674,7 @@ npx playwright test
 
 Expected: PASS（包括新 E2E）。
 
-- [ ] **Step 4: 数据库迁移可回滚验证**
+- [x] **Step 4: 数据库迁移可回滚验证**
 
 Run:
 ```bash
@@ -686,11 +686,11 @@ migrate -path migrations -database "$DATABASE_URL" up 1
 
 Expected: 成功 down/up，应用状态一致。
 
-- [ ] **Step 5: 更新 CHANGELOG / release notes（如项目有）**
+- [x] **Step 5: 更新 CHANGELOG / release notes（如项目有）**
 
 - 记录新增 capability：Agent Version 不可变快照、ExperienceCandidate 治理、EvaluationRun 硬门槛。
 
-- [ ] **Step 6: 最终检查 tasks.md 全部勾选**
+- [x] **Step 6: 最终检查 tasks.md 全部勾选**
 
 File: `openspec/changes/agent-version-and-experience/tasks.md`
 
@@ -725,14 +725,14 @@ Rollback: `backend/migrations/000003_agent_version_and_experience.down.sql` 删�
 
 ## Key Verification Checklist
 
-- [ ] `agentversion` 状态机单测全部通过。
-- [ ] `content_hash` 对相同配置返回相同值，不同配置返回不同值。
-- [ ] 已创建版本的内容字段无法通过 UPDATE 修改。
-- [ ] Promote 事务原子切换 `current_version_id`；并发 Promote 仅一个成功。
-- [ ] Rollback 不删除历史，旧任务仍绑定原版本。
-- [ ] EvaluationRun 冻结 version/benchmark/scoring_rule/environment。
-- [ ] 硬门槛失败时 EvaluationRun 状态为 failed 并保留证据。
-- [ ] forbidden 经验候选自动 reject；approved 候选可纳入 Draft。
-- [ ] 版本回滚后旧版本 memory_ref/skill_refs 不包含新经验。
-- [ ] 所有查询均受 tenant_id 隔离。
-- [ ] REST 与 MCP 接口均实现并手动/E2E 验证。
+- [x] `agentversion` 状态机单测全部通过。
+- [x] `content_hash` 对相同配置返回相同值，不同配置返回不同值。
+- [x] 已创建版本的内容字段无法通过 UPDATE 修改。
+- [x] Promote 事务原子切换 `current_version_id`；并发 Promote 仅一个成功。
+- [x] Rollback 不删除历史，旧任务仍绑定原版本。
+- [x] EvaluationRun 冻结 version/benchmark/scoring_rule/environment。
+- [x] 硬门槛失败时 EvaluationRun 状态为 failed 并保留证据。
+- [x] forbidden 经验候选自动 reject；approved 候选可纳入 Draft。
+- [x] 版本回滚后旧版本 memory_ref/skill_refs 不包含新经验。
+- [x] 所有查询均受 tenant_id 隔离。
+- [x] REST 与 MCP 接口均实现并手动/E2E 验证。
