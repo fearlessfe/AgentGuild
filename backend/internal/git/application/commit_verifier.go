@@ -165,6 +165,11 @@ func validateVerifyCommit(cmd VerifyCommit) error {
 	return nil
 }
 
+// ChangedFiles returns the files changed between base and head.
+func (v *CommitVerifier) ChangedFiles(ctx context.Context, repo, base, head string) ([]git.ChangedFile, error) {
+	return v.driver.CompareCommits(ctx, repo, base, head)
+}
+
 func (v *CommitVerifier) verifyBranch(ctx context.Context, cmd VerifyCommit) error {
 	branchHead, err := v.driver.GetCommit(ctx, cmd.Repo, cmd.Branch)
 	if err != nil {

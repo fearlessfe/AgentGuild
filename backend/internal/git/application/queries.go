@@ -12,7 +12,7 @@ type GetCredential struct {
 // GetCredential returns the credential metadata if the caller is authorized.
 func (s *CredentialService) GetCredential(ctx context.Context, principal Principal, query GetCredential) (Envelope[CredentialView], error) {
 	var result Envelope[CredentialView]
-	if err := s.requireCaller(principal); err != nil {
+	if err := requireCaller(principal); err != nil {
 		return result, err
 	}
 	if query.ExecutionID == "" {

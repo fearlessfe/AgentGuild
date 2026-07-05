@@ -34,7 +34,7 @@ const restrictedBranchPrefix = "agentguild/"
 // returns a fresh token unless the credential has been revoked.
 func (s *CredentialService) IssueCredential(ctx context.Context, principal Principal, cmd IssueCredential) (Envelope[IssueCredentialResponse], error) {
 	var result Envelope[IssueCredentialResponse]
-	if err := s.requireCaller(principal); err != nil {
+	if err := requireCaller(principal); err != nil {
 		return result, err
 	}
 	if cmd.ExecutionID == "" {
@@ -194,7 +194,7 @@ func (s *CredentialService) RevokeCredential(ctx context.Context, principal Prin
 	return result, err
 }
 
-func (s *CredentialService) requireCaller(principal Principal) error {
+func requireCaller(principal Principal) error {
 	if principal.TenantID == "" {
 		return domain.ErrForbidden
 	}

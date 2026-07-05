@@ -296,10 +296,11 @@ func (f *fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branc
 type memoryStore struct {
 	now         time.Time
 	credentials map[string]*application.CredentialRecord
+	submissions map[string]*gitdomain.Submission
 }
 
 func newMemoryStore(now time.Time) *memoryStore {
-	return &memoryStore{now: now, credentials: map[string]*application.CredentialRecord{}}
+	return &memoryStore{now: now, credentials: map[string]*application.CredentialRecord{}, submissions: map[string]*gitdomain.Submission{}}
 }
 
 func (s *memoryStore) WithTx(ctx context.Context, fn func(application.Tx) error) error {
@@ -334,7 +335,7 @@ func (tx *memoryTx) Credentials() application.CredentialRepository {
 }
 
 func (tx *memoryTx) Submissions() application.SubmissionRepository {
-	return &memorySubmissionRepository{}
+	return &memorySubmissionRepository{store: tx.store}
 }
 
 func (tx *memoryTx) Now(context.Context) (time.Time, error) { return tx.now, nil }
@@ -420,18 +421,31 @@ func cloneRecord(record *application.CredentialRecord) *application.CredentialRe
 	return &clone
 }
 
-type memorySubmissionRepository struct{}
+type memorySubmissionRepository struct {
+	store *memoryStore
+}
 
-func (r *memorySubmissionRepository) Save(context.Context, *gitdomain.Submission) error {
+func (r *memorySubmissionRepository) Save(_ context.Context, sub *gitdomain.Submission) error {
+	r.store.submissions[sub.ID] = sub
 	return nil
 }
 
-func (r *memorySubmissionRepository) GetByID(context.Context, string, string) (*gitdomain.Submission, error) {
-	return nil, git.ErrSubmissionNotFound
+func (r *memorySubmissionRepository) GetByID(_ context.Context, tenantID, id string) (*gitdomain.Submission, error) {
+	sub := r.store.submissions[id]
+	if sub == nil || sub.TenantID != tenantID {
+		return nil, git.ErrSubmissionNotFound
+	}
+	return sub, nil
 }
 
-func (r *memorySubmissionRepository) GetByExecutionID(context.Context, string, string) ([]*gitdomain.Submission, error) {
-	return nil, nil
+func (r *memorySubmissionRepository) GetByExecutionID(_ context.Context, tenantID, executionID string) ([]*gitdomain.Submission, error) {
+	var out []*gitdomain.Submission
+	for _, sub := range r.store.submissions {
+		if sub.TenantID == tenantID && sub.ExecutionID == executionID {
+			out = append(out, sub)
+		}
+	}
+	return out, nil
 }
 
 func sequenceIDs(values ...string) func() string {

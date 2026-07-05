@@ -60,13 +60,13 @@ type Principal struct {
 
 // Envelope wraps a response with transaction-level metadata.
 type Envelope[T any] struct {
-	Data T
-	Meta Meta
+	Data T   `json:"data"`
+	Meta Meta `json:"meta"`
 }
 
 // Meta carries metadata about the response.
 type Meta struct {
-	ServerTime time.Time
+	ServerTime time.Time `json:"server_time"`
 }
 
 // CredentialRecord is the persistent metadata for a Git credential. It MUST
@@ -105,4 +105,65 @@ type CredentialView struct {
 type IssueCredentialResponse struct {
 	Credential CredentialView
 	Token      string
+}
+
+// SubmissionService creates and queries code submissions.
+type SubmissionService struct {
+	store    Store
+	verifier *CommitVerifier
+	newID    func() string
+}
+
+// NewSubmissionService creates a SubmissionService.
+func NewSubmissionService(store Store, verifier *CommitVerifier, newID func() string) (*SubmissionService, error) {
+	if store == nil {
+		return nil, invalid("store")
+	}
+	if verifier == nil {
+		return nil, invalid("verifier")
+	}
+	if newID == nil {
+		newID = randomID
+	}
+	return &SubmissionService{store: store, verifier: verifier, newID: newID}, nil
+}
+
+// CreateSubmission creates a new submission for the current execution.
+type CreateSubmission struct {
+	RequestID      string
+	ExecutionID    string
+	TaskID         string
+	Repo           string
+	Branch         string
+	CommitSHA      string
+	BaseCommitSHA  string
+	Summary        string
+	Tests          *string
+	Evidence       []byte
+	AllowedPaths   []string
+	ForbiddenPaths []string
+}
+
+// GetSubmission retrieves a submission by ID.
+type GetSubmission struct {
+	SubmissionID string
+}
+
+// SubmissionView is the public shape of a submission.
+type SubmissionView struct {
+	ID              string                    `json:"id"`
+	TenantID        string                    `json:"tenant_id"`
+	TaskID          string                    `json:"task_id"`
+	ExecutionID     string                    `json:"execution_id"`
+	Branch          string                    `json:"branch"`
+	CommitSHA       string                    `json:"commit_sha"`
+	BaseCommitSHA   string                    `json:"base_commit_sha"`
+	Summary         string                    `json:"summary"`
+	Tests           *string                   `json:"tests,omitempty"`
+	Evidence        []byte                    `json:"evidence,omitempty"`
+	DiffFingerprint string                    `json:"diff_fingerprint"`
+	Status          gitdomain.SubmissionStatus `json:"status"`
+	ValidationJobID *string                   `json:"validation_job_id,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
 }

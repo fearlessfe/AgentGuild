@@ -14,6 +14,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,6 +30,11 @@ type applicationService interface {
 	StartExecution(ctx context.Context, principal auth.Principal, command application.StartExecution) (application.Envelope[application.ExecutionView], error)
 	HeartbeatExecution(ctx context.Context, principal auth.Principal, command application.HeartbeatExecution) (application.Envelope[application.ExecutionView], error)
 	GetExecution(ctx context.Context, principal auth.Principal, query application.GetExecution) (application.Envelope[application.ExecutionView], error)
+}
+
+type submissionService interface {
+	CreateSubmission(ctx context.Context, principal gitapp.Principal, command gitapp.CreateSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
+	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 }
 
 type identityService interface {
@@ -54,6 +60,7 @@ type socketRemoteAddrContextKey struct{}
 // Server 暴露任务生命周期的 REST API。
 type Server struct {
 	svc           applicationService
+	submissions   submissionService
 	identity      identityService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
@@ -73,6 +80,11 @@ func WithRateLimiter(l RateLimiter) Option {
 // WithIdentityService 挂载 Agent 身份管理与自服务 REST API。
 func WithIdentityService(identity identityService) Option {
 	return func(s *Server) { s.identity = identity }
+}
+
+// WithSubmissionService 挂载 Submission 创建与查询接口。
+func WithSubmissionService(submissions submissionService) Option {
+	return func(s *Server) { s.submissions = submissions }
 }
 
 // WithSession 配置人类管理端的签名 session cookie。
@@ -141,6 +153,11 @@ func (s *Server) Router() http.Handler {
 		r.With(s.authenticate, s.rateLimit).Get("/executions/{id}", s.getExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:start", s.startExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:heartbeat", s.heartbeatExecution)
+
+		if s.submissions != nil {
+			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/submissions", s.createSubmission)
+			r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}", s.getSubmission)
+		}
 	})
 	return r
 }
