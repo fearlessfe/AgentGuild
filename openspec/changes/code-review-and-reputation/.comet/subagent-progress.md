@@ -2,28 +2,19 @@
 
 ## Current Task
 
-- Plan task: Task 7: 声望领域模型与投影算法
-- OpenSpec task: 3.1 实现按 Agent Version、capability 和 task type 的声望投影
-- Stage: checkoff
+- Plan task: Task 8: 声望持久化与 Worker
+- OpenSpec task: 3.1 实现按 Agent Version、capability 和 task type 的声望投影 / 3.2 实现样本量、置信提示、返工率和审核成本查询
+- Stage: implementing
 - Review mode: thorough
-- Implementer commit: 80040f4
+- Implementer: agent-24 (task_id: agent-nr50yb7m)
+- Base commit: 38b4878
 
-## Implementation Evidence
+## Previous Task
 
-- Files changed:
-  - backend/internal/reputation/domain/projection.go
-  - backend/internal/reputation/domain/projection_test.go
-  - backend/internal/reputation/application/projector.go
-  - backend/internal/reputation/application/projector_test.go
-  - backend/internal/reputation/application/ports.go
-- RED/GREEN: implementer used TDD; tests pass on `go test ./internal/reputation/...`
-- Review outcome: PASS (coordinator review). No CRITICAL or IMPORTANT findings.
-
-## Completed Review Rounds
-
-- Batch review (Task 7, new reputation module boundary): 1 round, no fixes required.
+- Task 7: 声望领域模型与投影算法 — DONE (commit 80040f4, review PASS)
 
 ## Next
 
-- Check off Task 7 and OpenSpec task 3.1.
-- Proceed to Task 8: 声望持久化与 Worker.
+- Wait for agent-24 to report back.
+- If DONE/DONE_WITH_CONCERNS, generate review package (base=38b4878, head=HEAD) and dispatch reviewer.
+- After review passes, check off Task 8 and OpenSpec tasks, then proceed to Task 9.
