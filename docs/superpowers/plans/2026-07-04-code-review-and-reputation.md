@@ -702,7 +702,7 @@ git commit -m "feat(reputation): add projection persistence and async worker"
   - `Review`、`FileDiff`、`LineComment`、`RubricScore` TypeScript 类型
   - `ReviewPage`、`FileTree`、`DiffViewer` 组件
 
-- [ ] **Step 1: 定义类型**
+- [x] **Step 1: 定义类型**
 
 ```ts
 export type ReviewStatus = "pending" | "submitted";
@@ -719,7 +719,7 @@ export type ReviewView = {
 };
 ```
 
-- [ ] **Step 2: 实现 DiffViewer（支持 split/unified 两种模式）**
+- [x] **Step 2: 实现 DiffViewer（支持 split/unified 两种模式）**
 
 ```tsx
 export function DiffViewer({
@@ -733,14 +733,14 @@ export function DiffViewer({
 }) { ... }
 ```
 
-- [ ] **Step 3: 运行前端测试**
+- [x] **Step 3: 运行前端测试**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild/frontend
 npm test -- --run
 ```
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交 Task 9**
 
 ```bash
 git add frontend/src/features/reviews
@@ -794,7 +794,7 @@ const submit = useMutation({
 });
 ```
 
-- [ ] **Step 4: 运行测试并提交**
+- [ ] **Step 4: 提交 Task 10**
 
 ```bash
 npm test -- --run
@@ -830,7 +830,7 @@ export type ProjectionView = {
 };
 ```
 
-- [ ] **Step 2: 实现页面并测试**
+- [ ] **Step 2: 实现页面并测试 Task 11**
 
 ```bash
 npm test -- --run
@@ -882,7 +882,7 @@ cd /Users/pengzhen/work/AgentGuild/frontend
 npm run e2e -- review.spec.ts
 ```
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 4: 提交 Task 12**
 
 ```bash
 git add backend/internal/acceptance frontend/e2e
