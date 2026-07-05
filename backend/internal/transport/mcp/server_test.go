@@ -897,3 +897,141 @@ func TestSubmissionToolsMapGitPrincipal(t *testing.T) {
 	require.Equal(t, "agent-1-v1", p.AgentVersionID)
 	require.Equal(t, []string{"tasks:claim", "tasks:execute", "tasks:read", "tasks:publish", "tasks:cancel"}, p.Scopes)
 }
+
+type fakeCredentialService struct {
+	calls []credentialCall
+
+	issue  gitapp.Envelope[gitapp.IssueCredentialResponse]
+	issueErr error
+	get    gitapp.Envelope[gitapp.CredentialView]
+	getErr error
+	revoke gitapp.Envelope[gitapp.CredentialView]
+	revokeErr error
+}
+
+type credentialCall struct {
+	method    string
+	principal gitapp.Principal
+	payload   any
+}
+
+func (f *fakeCredentialService) IssueCredential(_ context.Context, p gitapp.Principal, cmd gitapp.IssueCredential) (gitapp.Envelope[gitapp.IssueCredentialResponse], error) {
+	f.calls = append(f.calls, credentialCall{method: "IssueCredential", principal: p, payload: cmd})
+	return f.issue, f.issueErr
+}
+
+func (f *fakeCredentialService) GetCredential(_ context.Context, p gitapp.Principal, q gitapp.GetCredential) (gitapp.Envelope[gitapp.CredentialView], error) {
+	f.calls = append(f.calls, credentialCall{method: "GetCredential", principal: p, payload: q})
+	return f.get, f.getErr
+}
+
+func (f *fakeCredentialService) RevokeCredential(_ context.Context, p gitapp.Principal, cmd gitapp.RevokeCredential) (gitapp.Envelope[gitapp.CredentialView], error) {
+	f.calls = append(f.calls, credentialCall{method: "RevokeCredential", principal: p, payload: cmd})
+	return f.revoke, f.revokeErr
+}
+
+func newMCPServerWithAppAndCredentials(t *testing.T, app *fakeApplication, creds *fakeCredentialService) *mcp.Server {
+	t.Helper()
+	verifier := &fakeVerifier{principal: testPrincipal("tasks:claim", "tasks:execute", "tasks:read", "tasks:publish", "tasks:cancel")}
+	s := NewServer(app, verifier, WithCredentialService(creds))
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), verifier.principal))
+	return s.mcpServer(req)
+}
+
+func TestCredentialIssueToolMapsToService(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	creds := &fakeCredentialService{
+		issue: gitapp.Envelope[gitapp.IssueCredentialResponse]{
+			Data: gitapp.IssueCredentialResponse{
+				Credential: gitapp.CredentialView{ID: "cred-1", ExecutionID: "exe-1"},
+				Token:      "tok-1",
+			},
+			Meta: gitapp.Meta{ServerTime: now},
+		},
+	}
+	server := newMCPServerWithAppAndCredentials(t, &fakeApplication{}, creds)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "credential_issue",
+		Arguments: map[string]any{
+			"execution_id": "exe-1",
+			"repo":         "owner/repo",
+			"base_commit":  "abc",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, creds.calls, 1)
+	cmd := creds.calls[0].payload.(gitapp.IssueCredential)
+	require.Equal(t, "exe-1", cmd.ExecutionID)
+	require.Equal(t, "owner/repo", cmd.Repo)
+	require.Equal(t, "abc", cmd.BaseCommit)
+}
+
+func TestCredentialGetToolMapsToService(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	creds := &fakeCredentialService{
+		get: gitapp.Envelope[gitapp.CredentialView]{
+			Data: gitapp.CredentialView{ID: "cred-1", ExecutionID: "exe-1"},
+			Meta: gitapp.Meta{ServerTime: now},
+		},
+	}
+	server := newMCPServerWithAppAndCredentials(t, &fakeApplication{}, creds)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "credential_get",
+		Arguments: map[string]any{"execution_id": "exe-1"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, creds.calls, 1)
+	require.Equal(t, "exe-1", creds.calls[0].payload.(gitapp.GetCredential).ExecutionID)
+}
+
+func TestCredentialRevokeToolMapsToService(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	creds := &fakeCredentialService{
+		revoke: gitapp.Envelope[gitapp.CredentialView]{
+			Data: gitapp.CredentialView{ID: "cred-1", ExecutionID: "exe-1"},
+			Meta: gitapp.Meta{ServerTime: now},
+		},
+	}
+	server := newMCPServerWithAppAndCredentials(t, &fakeApplication{}, creds)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "credential_revoke",
+		Arguments: map[string]any{"execution_id": "exe-1"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, creds.calls, 1)
+	require.Equal(t, "exe-1", creds.calls[0].payload.(gitapp.RevokeCredential).ExecutionID)
+}

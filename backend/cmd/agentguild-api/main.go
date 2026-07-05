@@ -15,16 +15,23 @@ import (
 	"syscall"
 	"time"
 
-	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
-	agentversionpostgres "agentguild.dev/agentguild/backend/internal/agentversion/postgres"
 	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
 	agentexperiencedomain "agentguild.dev/agentguild/backend/internal/agentexperience/domain"
 	agentexperiencepostgres "agentguild.dev/agentguild/backend/internal/agentexperience/postgres"
+	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
+	agentversionpostgres "agentguild.dev/agentguild/backend/internal/agentversion/postgres"
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/config"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	evaluationpostgres "agentguild.dev/agentguild/backend/internal/evaluation/postgres"
+	"agentguild.dev/agentguild/backend/internal/git"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	gitgithub "agentguild.dev/agentguild/backend/internal/git/github"
+	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
+	"agentguild.dev/agentguild/backend/internal/git/validation"
+	gitworker "agentguild.dev/agentguild/backend/internal/git/worker"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
@@ -77,56 +84,74 @@ func run() error {
 		return err
 	}
 
-	restOptions := make([]resttransport.Option, 0, 6)
+	gitRuntime, err := buildGitRuntime(cfg, pool, service)
+	if err != nil {
+		return err
+	}
+
+	restOptions := make([]resttransport.Option, 0, 8)
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
 	}
 	if oidcProvider != nil {
 		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
 	}
-		if versionService != nil {
-			restOptions = append(restOptions, resttransport.WithVersionService(versionService))
-		}
-		if evaluationService != nil {
-			restOptions = append(restOptions, resttransport.WithEvaluationService(evaluationService))
-		}
-		if experienceService != nil {
-			restOptions = append(restOptions, resttransport.WithExperienceService(experienceService))
-		}
+	if versionService != nil {
+		restOptions = append(restOptions, resttransport.WithVersionService(versionService))
+	}
+	if evaluationService != nil {
+		restOptions = append(restOptions, resttransport.WithEvaluationService(evaluationService))
+	}
+	if experienceService != nil {
+		restOptions = append(restOptions, resttransport.WithExperienceService(experienceService))
+	}
 
-		reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), reviewapp.SyntheticDiffProvider{}, reviewapp.AlwaysPassValidationProvider{}, reviewapp.Options{})
-		if err != nil {
-			return err
-		}
-		reputationSvc := application.NewReputationQueryService(postgres.NewStore(pool))
+	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), reviewapp.SyntheticDiffProvider{}, reviewapp.AlwaysPassValidationProvider{}, reviewapp.Options{})
+	if err != nil {
+		return err
+	}
+	reputationSvc := application.NewReputationQueryService(postgres.NewStore(pool))
 
+	restOptions = append(restOptions,
+		resttransport.WithReviewService(reviewSvc),
+		resttransport.WithRubricService(reviewSvc),
+		resttransport.WithReputationService(reputationSvc),
+	)
+	if gitRuntime != nil {
 		restOptions = append(restOptions,
-			resttransport.WithReviewService(reviewSvc),
-			resttransport.WithRubricService(reviewSvc),
-			resttransport.WithReputationService(reputationSvc),
+			resttransport.WithSubmissionService(gitRuntime.submissionService),
+			resttransport.WithCredentialService(gitRuntime.credentialService),
 		)
-		restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
-		mcpOptions := make([]mcptransport.Option, 0, 5)
-		if versionService != nil {
-			mcpOptions = append(mcpOptions, mcptransport.WithVersionService(versionService))
-		}
-		if evaluationService != nil {
-			mcpOptions = append(mcpOptions, mcptransport.WithEvaluationService(evaluationService))
-		}
-		if experienceService != nil {
-			mcpOptions = append(mcpOptions, mcptransport.WithExperienceService(experienceService))
-		}
-		mcpOptions = append(mcpOptions,
-			mcptransport.WithReviewService(reviewSvc),
-			mcptransport.WithReputationService(reputationSvc),
-		)
-		mcpHandler := mcptransport.NewServer(service, verifier, mcpOptions...).Handler()
+	}
+	restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
 
-		if cfg.ReviewSeedTenantID != "" {
-			if err := reviewpostgres.SeedReviewDefaults(ctx, pool, cfg.ReviewSeedTenantID); err != nil {
-				return fmt.Errorf("seed review defaults: %w", err)
-			}
+	mcpOptions := make([]mcptransport.Option, 0, 7)
+	if versionService != nil {
+		mcpOptions = append(mcpOptions, mcptransport.WithVersionService(versionService))
+	}
+	if evaluationService != nil {
+		mcpOptions = append(mcpOptions, mcptransport.WithEvaluationService(evaluationService))
+	}
+	if experienceService != nil {
+		mcpOptions = append(mcpOptions, mcptransport.WithExperienceService(experienceService))
+	}
+	mcpOptions = append(mcpOptions,
+		mcptransport.WithReviewService(reviewSvc),
+		mcptransport.WithReputationService(reputationSvc),
+	)
+	if gitRuntime != nil {
+		mcpOptions = append(mcpOptions,
+			mcptransport.WithSubmissionService(gitRuntime.submissionService),
+			mcptransport.WithCredentialService(gitRuntime.credentialService),
+		)
+	}
+	mcpHandler := mcptransport.NewServer(service, verifier, mcpOptions...).Handler()
+
+	if cfg.ReviewSeedTenantID != "" {
+		if err := reviewpostgres.SeedReviewDefaults(ctx, pool, cfg.ReviewSeedTenantID); err != nil {
+			return fmt.Errorf("seed review defaults: %w", err)
 		}
+	}
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: adapterHandler(cfg.WebEnabled, cfg.MCPEnabled, restHandler, mcpHandler), ReadHeaderTimeout: 5 * time.Second}
 
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
@@ -138,6 +163,11 @@ func run() error {
 	runWorker(workerCtx, &wg, cfg.OutboxInterval, "outbox", outbox.RunOnce)
 	reputation := reputationworker.NewWorker(postgres.NewStore(pool), cfg.ReputationWorkerInterval, 100, slog.Default())
 	runWorker(workerCtx, &wg, cfg.ReputationWorkerInterval, "reputation", reputation.RunOnce)
+	if gitRuntime != nil {
+		runWorker(workerCtx, &wg, cfg.ValidationWorkerInterval, "validation", func(ctx context.Context) error {
+			return runValidationWorker(ctx, gitRuntime.validationWorker, pool)
+		})
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -400,4 +430,127 @@ func repeat(ctx context.Context, interval time.Duration, name string, fn func(co
 		case <-ticker.C:
 		}
 	}
+}
+
+// gitRuntime holds the git delivery and validation services initialized for
+// this process. It is nil when GitHub App configuration is not provided.
+type gitRuntime struct {
+	credentialService *gitapp.CredentialService
+	submissionService *gitapp.SubmissionService
+	validationWorker  *gitworker.ValidationWorker
+}
+
+func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, error) {
+	if cfg.GitHub.AppID == 0 || cfg.GitHub.PrivateKey == "" || cfg.GitHub.InstallationID == 0 {
+		slog.Info("github app configuration missing; git delivery and validation disabled")
+		return nil, nil
+	}
+
+	driver, err := gitgithub.NewDriver(gitgithub.Config{
+		AppID:          cfg.GitHub.AppID,
+		PrivateKey:     cfg.GitHub.PrivateKey,
+		InstallationID: cfg.GitHub.InstallationID,
+		BaseURL:        cfg.GitHub.BaseURL,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build github driver: %w", err)
+	}
+
+	gitStore := gitpostgres.NewStore(pool)
+	issuer := git.NewIssuer(driver)
+
+	credentialService, err := gitapp.NewCredentialService(gitStore, gitapp.Options{
+		Issuer:   issuer,
+		Provider: "github",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build credential service: %w", err)
+	}
+
+	verifier := gitapp.NewCommitVerifier(driver, &submissionRepoAdapter{store: gitStore})
+	notifier := application.NewCoreExecutionNotifier(service)
+	submissionService, err := gitapp.NewSubmissionService(gitStore, verifier, notifier, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build submission service: %w", err)
+	}
+
+	runner := validation.NewRunner(validation.DefaultRegistry(), &validation.TempWorkspaceFactory{}, nil)
+	validationWorker := gitworker.NewValidationWorker(
+		gitStore,
+		"validation-worker",
+		cfg.ValidationLease,
+		cfg.ValidationMaxAttempts,
+		runner,
+		notifier,
+	)
+
+	return &gitRuntime{
+		credentialService: credentialService,
+		submissionService: submissionService,
+		validationWorker:  validationWorker,
+	}, nil
+}
+
+func runValidationWorker(ctx context.Context, w *gitworker.ValidationWorker, pool *pgxpool.Pool) error {
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT tenant_id
+		FROM validation_jobs
+		WHERE status IN ('pending','running')
+		LIMIT 100`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var lastErr error
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			lastErr = err
+			continue
+		}
+		if _, err := w.RunOnce(ctx, tenantID); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			lastErr = err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		lastErr = err
+	}
+	return lastErr
+}
+
+// submissionRepoAdapter exposes git/application.SubmissionRepository by
+// opening a short transaction on the git store. It is used by CommitVerifier
+// for duplicate-submission detection.
+type submissionRepoAdapter struct {
+	store gitapp.Store
+}
+
+func (a *submissionRepoAdapter) Save(ctx context.Context, sub *gitdomain.Submission) error {
+	return a.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		return tx.Submissions().Save(ctx, sub)
+	})
+}
+
+func (a *submissionRepoAdapter) GetByID(ctx context.Context, tenantID, id string) (*gitdomain.Submission, error) {
+	var result *gitdomain.Submission
+	err := a.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		var err error
+		result, err = tx.Submissions().GetByID(ctx, tenantID, id)
+		return err
+	})
+	return result, err
+}
+
+func (a *submissionRepoAdapter) GetByExecutionID(ctx context.Context, tenantID, executionID string) ([]*gitdomain.Submission, error) {
+	var result []*gitdomain.Submission
+	err := a.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		var err error
+		result, err = tx.Submissions().GetByExecutionID(ctx, tenantID, executionID)
+		return err
+	})
+	return result, err
 }

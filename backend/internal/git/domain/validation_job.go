@@ -68,6 +68,7 @@ type ValidationJob struct {
 	ID            string
 	TenantID      string
 	SubmissionID  string
+	ExecutionID   string
 	Repo          string
 	Branch        string
 	CommitSHA     string
@@ -94,12 +95,15 @@ type Step struct {
 }
 
 // NewValidationJob creates a pending validation job for the submission.
-func NewValidationJob(tenantID, submissionID, repo, branch, commitSHA, configVersion string, now time.Time, newID func() string) (*ValidationJob, error) {
+func NewValidationJob(tenantID, submissionID, executionID, repo, branch, commitSHA, configVersion string, now time.Time, newID func() string) (*ValidationJob, error) {
 	if tenantID == "" {
 		return nil, validationJobInvalidArgument("tenant_id")
 	}
 	if submissionID == "" {
 		return nil, validationJobInvalidArgument("submission_id")
+	}
+	if executionID == "" {
+		return nil, validationJobInvalidArgument("execution_id")
 	}
 	if repo == "" {
 		return nil, validationJobInvalidArgument("repo")
@@ -126,13 +130,14 @@ func NewValidationJob(tenantID, submissionID, repo, branch, commitSHA, configVer
 
 	steps := make([]Step, len(DefaultValidationSteps))
 	for i, s := range DefaultValidationSteps {
-		steps[i] = Step{Step: s, Status: ValidationStepStatusPending, CreatedAt: now}
+		steps[i] = Step{Step: s, Status: ValidationStepStatusPending, HardGate: defaultHardGate(s), CreatedAt: now}
 	}
 
 	return &ValidationJob{
 		ID:            id,
 		TenantID:      tenantID,
 		SubmissionID:  submissionID,
+		ExecutionID:   executionID,
 		Repo:          repo,
 		Branch:        branch,
 		CommitSHA:     commitSHA,
@@ -143,6 +148,17 @@ func NewValidationJob(tenantID, submissionID, repo, branch, commitSHA, configVer
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}, nil
+}
+
+func defaultHardGate(step ValidationStep) bool {
+	switch step {
+	case ValidationStepBuild, ValidationStepPublicTests, ValidationStepHiddenTests, ValidationStepSecurityScan:
+		return true
+	case ValidationStepStaticAnalysis:
+		return false
+	default:
+		return false
+	}
 }
 
 // Claim records that a worker has claimed the job for processing.

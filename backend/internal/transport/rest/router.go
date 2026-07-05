@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"agentguild.dev/agentguild/backend/internal/application"
-	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
-	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
+	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
+	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	"github.com/go-chi/chi/v5"
@@ -38,6 +38,12 @@ type applicationService interface {
 type submissionService interface {
 	CreateSubmission(ctx context.Context, principal gitapp.Principal, command gitapp.CreateSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
+}
+
+type credentialService interface {
+	IssueCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.IssueCredential) (gitapp.Envelope[gitapp.IssueCredentialResponse], error)
+	GetCredential(ctx context.Context, principal gitapp.Principal, query gitapp.GetCredential) (gitapp.Envelope[gitapp.CredentialView], error)
+	RevokeCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.RevokeCredential) (gitapp.Envelope[gitapp.CredentialView], error)
 }
 
 type identityService interface {
@@ -90,6 +96,7 @@ type socketRemoteAddrContextKey struct{}
 type Server struct {
 	svc           applicationService
 	submissions   submissionService
+	credentials   credentialService
 	identity      identityService
 	reviewSvc     ReviewService
 	rubricSvc     RubricService
@@ -120,6 +127,11 @@ func WithIdentityService(identity identityService) Option {
 // WithSubmissionService 挂载 Submission 创建与查询接口。
 func WithSubmissionService(submissions submissionService) Option {
 	return func(s *Server) { s.submissions = submissions }
+}
+
+// WithCredentialService 挂载 Git 凭证签发/查询/撤销接口。
+func WithCredentialService(credentials credentialService) Option {
+	return func(s *Server) { s.credentials = credentials }
 }
 
 // WithSession 配置人类管理端的签名 session cookie。
@@ -242,6 +254,12 @@ func (s *Server) Router() http.Handler {
 			r.With(s.requireSession, s.rateLimit).Get("/benchmarks/{id}", s.getBenchmark)
 			r.With(s.requireSession, s.rateLimit).Get("/evaluations", s.listEvaluations)
 			r.With(s.requireSession, s.rateLimit).Get("/evaluations/{id}", s.getEvaluation)
+		}
+
+		if s.credentials != nil {
+			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/credentials", s.issueCredential)
+			r.With(s.authenticate, s.rateLimit).Get("/executions/{id}/credentials", s.getCredential)
+			r.With(s.authenticate, s.rateLimit).Delete("/executions/{id}/credentials", s.revokeCredential)
 		}
 	})
 	return r

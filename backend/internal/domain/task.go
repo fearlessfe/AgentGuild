@@ -28,6 +28,10 @@ const (
 	IntentReject
 	IntentRequestRevision
 	IntentSubmitForReview
+	IntentSubmit
+	IntentStartValidation
+	IntentFailValidation
+	IntentMarkReviewing
 )
 
 type ActorType string

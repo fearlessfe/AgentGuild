@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
+	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
@@ -33,6 +33,13 @@ type applicationService interface {
 type submissionService interface {
 	CreateSubmission(ctx context.Context, principal gitapp.Principal, command gitapp.CreateSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
+}
+
+// credentialService 是 MCP 层消费的 Git 凭证应用服务边界。
+type credentialService interface {
+	IssueCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.IssueCredential) (gitapp.Envelope[gitapp.IssueCredentialResponse], error)
+	GetCredential(ctx context.Context, principal gitapp.Principal, query gitapp.GetCredential) (gitapp.Envelope[gitapp.CredentialView], error)
+	RevokeCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.RevokeCredential) (gitapp.Envelope[gitapp.CredentialView], error)
 }
 
 // versionService 是 MCP 层消费的版本应用服务边界。
@@ -65,10 +72,11 @@ type noopRateLimiter struct{}
 
 func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true, 0 }
 
-// Server 暴露任务生命周期、Submission、代码评审、版本管理与经验治理的 MCP 工具。
+// Server 暴露任务生命周期、Submission、Credential、代码评审、版本管理与经验治理的 MCP 工具。
 type Server struct {
 	svc           applicationService
 	submissions   submissionService
+	credentials   credentialService
 	reviewSvc     reviewService
 	reputationSvc ReputationService
 	versions      versionService
@@ -89,6 +97,11 @@ func WithRateLimiter(l RateLimiter) Option {
 // WithSubmissionService 挂载 Submission 创建与查询工具。
 func WithSubmissionService(submissions submissionService) Option {
 	return func(s *Server) { s.submissions = submissions }
+}
+
+// WithCredentialService 挂载 Git 凭证 MCP 工具。
+func WithCredentialService(credentials credentialService) Option {
+	return func(s *Server) { s.credentials = credentials }
 }
 
 // WithReviewService 挂载代码评审 MCP 工具。
@@ -158,7 +171,7 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 		nil,
 	)
 	principal, _ := auth.PrincipalFrom(r.Context())
-	registerTools(server, s.svc, s.submissions, s.reviewSvc, s.reputationSvc, principal)
+	registerTools(server, s.svc, s.submissions, s.credentials, s.reviewSvc, s.reputationSvc, principal)
 	if s.versions != nil {
 		registerAgentVersionTools(server, s.versions, principal)
 	}

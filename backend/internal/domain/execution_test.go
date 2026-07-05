@@ -174,24 +174,30 @@ func TestExecutionAcceptRequiresReviewingStateAndReviewer(t *testing.T) {
 		"exe-1", "task-1", "tenant-1", "agent-1", now, 3,
 	)
 
-	if err := execution.Apply(domain.IntentAccept, reviewer, now.Add(time.Minute)); !errors.Is(err, domain.ErrStateConflict) {
-		t.Fatalf("Apply(accept leased) error = %v, want %v", err, domain.ErrStateConflict)
-	}
 	if err := execution.Start(now.Add(time.Minute), 3, nil, nil); err != nil {
 		t.Fatalf("Start() error = %v", err)
+	}
+	if err := execution.Apply(domain.IntentAccept, reviewer, now.Add(2*time.Minute)); !errors.Is(err, domain.ErrStateConflict) {
+		t.Fatalf("Apply(accept from running) error = %v, want %v", err, domain.ErrStateConflict)
+	}
+	if err := execution.Submit(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if err := execution.StartValidation(domain.SystemActor(), now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("StartValidation() error = %v", err)
+	}
+	if err := execution.MarkReviewing(domain.SystemActor(), now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("MarkReviewing() error = %v", err)
+	}
+	if execution.Status != domain.ExecutionReviewing {
+		t.Fatalf("status before accept = %q, want %q", execution.Status, domain.ExecutionReviewing)
 	}
 	if err := execution.Apply(
 		domain.IntentAccept,
 		domain.Actor{Type: domain.ActorAgent, ID: "agent-1"},
-		now.Add(2*time.Minute),
-	); !errors.Is(err, domain.ErrStateConflict) {
-		t.Fatalf("Apply(accept from running) error = %v, want %v", err, domain.ErrStateConflict)
-	}
-	if err := execution.SubmitForReview(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(2*time.Minute)); err != nil {
-		t.Fatalf("SubmitForReview() error = %v", err)
-	}
-	if execution.Status != domain.ExecutionReviewing {
-		t.Fatalf("status after submit for review = %q, want %q", execution.Status, domain.ExecutionReviewing)
+		now.Add(3*time.Minute),
+	); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("Apply(accept by agent) error = %v, want %v", err, domain.ErrForbidden)
 	}
 	if err := execution.Apply(domain.IntentAccept, reviewer, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("Apply(accept by reviewer) error = %v", err)
@@ -481,6 +487,82 @@ func TestExecutionCancelCoversEveryActiveStatus(t *testing.T) {
 		if err := execution.Cancel(domain.SystemActor(), now); err != nil {
 			t.Errorf("Cancel() status %q error = %v", status, err)
 		}
+	}
+}
+
+func TestExecutionCanSubmitFromRunning(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	e, _ := domain.NewLeasedExecution("exec-1", "task-1", "tenant-1", "agent-1", now, 1)
+	if err := e.Start(now, 1, nil, nil); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := e.Submit(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(time.Minute)); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if e.Status != domain.ExecutionSubmitted {
+		t.Fatalf("status = %s, want submitted", e.Status)
+	}
+	if !e.SubmittedAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("SubmittedAt not set")
+	}
+}
+
+func TestExecutionCannotSubmitFromLeased(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	e, _ := domain.NewLeasedExecution("exec-1", "task-1", "tenant-1", "agent-1", now, 1)
+	err := e.Submit(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now)
+	if !errors.Is(err, domain.ErrStateConflict) {
+		t.Fatalf("error = %v, want ErrStateConflict", err)
+	}
+}
+
+func TestExecutionValidationLifecycle(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	e, _ := domain.NewLeasedExecution("exec-1", "task-1", "tenant-1", "agent-1", now, 1)
+	_ = e.Start(now, 1, nil, nil)
+	_ = e.Submit(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(time.Minute))
+
+	if err := e.StartValidation(domain.Actor{Type: domain.ActorSystem, ID: "system"}, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("StartValidation() error = %v", err)
+	}
+	if e.Status != domain.ExecutionValidating {
+		t.Fatalf("status = %s, want validating", e.Status)
+	}
+
+	if err := e.FailValidation(domain.Actor{Type: domain.ActorSystem, ID: "system"}, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("FailValidation() error = %v", err)
+	}
+	if e.Status != domain.ExecutionValidationFailed {
+		t.Fatalf("status = %s, want validation_failed", e.Status)
+	}
+
+	// A successful validation would move to reviewing
+	e2, _ := domain.NewLeasedExecution("exec-2", "task-1", "tenant-1", "agent-1", now, 1)
+	_ = e2.Start(now, 1, nil, nil)
+	_ = e2.Submit(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(time.Minute))
+	_ = e2.StartValidation(domain.Actor{Type: domain.ActorSystem, ID: "system"}, now.Add(2*time.Minute))
+	if err := e2.MarkReviewing(domain.Actor{Type: domain.ActorSystem, ID: "system"}, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("MarkReviewing() error = %v", err)
+	}
+	if e2.Status != domain.ExecutionReviewing {
+		t.Fatalf("status = %s, want reviewing", e2.Status)
+	}
+}
+
+func TestExecutionCanSubmitForReviewFromRunning(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	e, _ := domain.NewLeasedExecution("exec-1", "task-1", "tenant-1", "agent-1", now, 1)
+	if err := e.Start(now, 1, nil, nil); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := e.SubmitForReview(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(time.Minute)); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
+	}
+	if e.Status != domain.ExecutionReviewing {
+		t.Fatalf("status = %s, want reviewing", e.Status)
+	}
+	if !e.SubmittedAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("SubmittedAt not set")
 	}
 }
 

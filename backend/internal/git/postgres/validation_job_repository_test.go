@@ -16,7 +16,7 @@ import (
 func TestValidationJobRepositoryRoundTrip(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
 
 	repo := postgres.NewValidationJobRepository(db)
@@ -37,7 +37,7 @@ func TestValidationJobRepositoryRoundTrip(t *testing.T) {
 func TestValidationJobRepositoryTenantIsolation(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, postgres.NewValidationJobRepository(db).Insert(ctx, job))
 
@@ -48,7 +48,7 @@ func TestValidationJobRepositoryTenantIsolation(t *testing.T) {
 func TestValidationJobRepositoryClaimNextPending(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
 
 	store := postgres.NewStore(db)
@@ -81,7 +81,7 @@ func TestValidationJobRepositoryClaimNextPending(t *testing.T) {
 func TestValidationJobRepositoryClaimNextPendingAfterExpiry(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
 
 	store := postgres.NewStore(db)
@@ -111,11 +111,11 @@ func TestValidationJobRepositoryClaimNextPendingAfterExpiry(t *testing.T) {
 func TestValidationJobRepositoryRejectsDuplicateSubmissionJob(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, postgres.NewValidationJobRepository(db).Insert(ctx, job))
 
-	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-2" })
+	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-2" })
 	require.NoError(t, err)
 	err = postgres.NewValidationJobRepository(db).Insert(ctx, job2)
 	require.Error(t, err)
@@ -124,7 +124,7 @@ func TestValidationJobRepositoryRejectsDuplicateSubmissionJob(t *testing.T) {
 func TestValidationJobRepositoryUpdateStep(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
 	now := time.Now()
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))

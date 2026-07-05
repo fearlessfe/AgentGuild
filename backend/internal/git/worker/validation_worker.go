@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
@@ -20,15 +21,16 @@ type StepRunner interface {
 
 // ValidationWorker consumes validation_jobs using PostgreSQL advisory leases.
 type ValidationWorker struct {
-	store      gitapp.Store
-	workerID   string
-	lease      time.Duration
+	store       gitapp.Store
+	workerID    string
+	lease       time.Duration
 	maxAttempts int
-	runner     StepRunner
+	runner      StepRunner
+	notifier    gitapp.ExecutionNotifier
 }
 
 // NewValidationWorker creates a worker.
-func NewValidationWorker(store gitapp.Store, workerID string, lease time.Duration, maxAttempts int, runner StepRunner) *ValidationWorker {
+func NewValidationWorker(store gitapp.Store, workerID string, lease time.Duration, maxAttempts int, runner StepRunner, notifier gitapp.ExecutionNotifier) *ValidationWorker {
 	if store == nil {
 		panic("store is required")
 	}
@@ -41,12 +43,16 @@ func NewValidationWorker(store gitapp.Store, workerID string, lease time.Duratio
 	if maxAttempts <= 0 {
 		maxAttempts = 3
 	}
+	if notifier == nil {
+		notifier = gitapp.NopExecutionNotifier{}
+	}
 	return &ValidationWorker{
 		store:       store,
 		workerID:    workerID,
 		lease:       lease,
 		maxAttempts: maxAttempts,
 		runner:      runner,
+		notifier:    notifier,
 	}
 }
 
@@ -94,6 +100,13 @@ func (w *ValidationWorker) runOne(ctx context.Context, tenantID string) (bool, e
 		return false, w.recordFailure(ctx, job, fmt.Errorf("max attempts %d exceeded", w.maxAttempts))
 	}
 
+	_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+		TenantID:    job.TenantID,
+		ExecutionID: job.ExecutionID,
+		Intent:      domain.IntentStartValidation,
+		Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+	}, time.Now())
+
 	if err := w.process(ctx, job); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return false, err
@@ -112,8 +125,22 @@ func (w *ValidationWorker) process(ctx context.Context, job *gitdomain.Validatio
 			return err
 		}
 		if job.Status == gitdomain.ValidationStatusFailed {
+			_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+				TenantID:    job.TenantID,
+				ExecutionID: job.ExecutionID,
+				Intent:      domain.IntentFailValidation,
+				Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+			}, time.Now())
 			return nil
 		}
+	}
+	if job.Status == gitdomain.ValidationStatusSucceeded {
+		_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+			TenantID:    job.TenantID,
+			ExecutionID: job.ExecutionID,
+			Intent:      domain.IntentMarkReviewing,
+			Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+		}, time.Now())
 	}
 	return nil
 }
@@ -175,12 +202,19 @@ func (w *ValidationWorker) runStep(ctx context.Context, job *gitdomain.Validatio
 		if err := tx.ValidationJobs().UpdateStep(ctx, fresh.TenantID, fresh.ID, result); err != nil {
 			return err
 		}
-		return tx.ValidationJobs().Update(ctx, fresh)
+		if err := tx.ValidationJobs().Update(ctx, fresh); err != nil {
+			return err
+		}
+		// Keep the in-memory job pointer in sync with the persisted state so
+		// callers can inspect the updated status after the step finishes.
+		*job = *fresh
+		return nil
 	})
 }
 
 func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.ValidationJob, cause error) error {
-	return w.store.WithTx(ctx, func(tx gitapp.Tx) error {
+	failed := false
+	err := w.store.WithTx(ctx, func(tx gitapp.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -194,6 +228,7 @@ func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.Val
 		}
 		if fresh.Attempt >= w.maxAttempts {
 			fresh.Status = gitdomain.ValidationStatusFailed
+			failed = true
 		} else {
 			fresh.Status = gitdomain.ValidationStatusPending
 		}
@@ -202,6 +237,18 @@ func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.Val
 		fresh.UpdatedAt = now
 		return tx.ValidationJobs().Update(ctx, fresh)
 	})
+	if err != nil {
+		return err
+	}
+	if failed {
+		_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+			TenantID:    job.TenantID,
+			ExecutionID: job.ExecutionID,
+			Intent:      domain.IntentFailValidation,
+			Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+		}, time.Now())
+	}
+	return nil
 }
 
 // ValidationJobError is a simple error type for worker configuration issues.

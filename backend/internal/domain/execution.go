@@ -14,6 +14,7 @@ const (
 	ExecutionRunning           ExecutionStatus = "running"
 	ExecutionSubmitted         ExecutionStatus = "submitted"
 	ExecutionValidating        ExecutionStatus = "validating"
+	ExecutionValidationFailed  ExecutionStatus = "validation_failed"
 	ExecutionReviewing         ExecutionStatus = "reviewing"
 	ExecutionRevisionRequested ExecutionStatus = "revision_requested"
 	ExecutionAccepted          ExecutionStatus = "accepted"
@@ -151,6 +152,14 @@ func (e *Execution) Apply(intent Intent, actor Actor, now time.Time) error {
 		return e.Cancel(actor, now)
 	case IntentSubmitForReview:
 		return e.SubmitForReview(actor, now)
+	case IntentSubmit:
+		return e.Submit(actor, now)
+	case IntentStartValidation:
+		return e.StartValidation(actor, now)
+	case IntentFailValidation:
+		return e.FailValidation(actor, now)
+	case IntentMarkReviewing:
+		return e.MarkReviewing(actor, now)
 	default:
 		return ErrStateConflict
 	}
@@ -167,6 +176,54 @@ func (e *Execution) Cancel(actor Actor, _ time.Time) error {
 		return ErrForbidden
 	}
 	e.Status = ExecutionCancelled
+	return nil
+}
+
+func (e *Execution) Submit(actor Actor, now time.Time) error {
+	if e.Status != ExecutionRunning {
+		return ErrStateConflict
+	}
+	if actor.ID == "" || (actor.Type != ActorPublisher && actor.Type != ActorAgent && actor.Type != ActorSystem) {
+		return ErrForbidden
+	}
+	if !now.Before(e.Lease.HardExpiry) {
+		return ErrLeaseExpired
+	}
+	e.Status = ExecutionSubmitted
+	e.SubmittedAt = now
+	return nil
+}
+
+func (e *Execution) StartValidation(actor Actor, now time.Time) error {
+	if e.Status != ExecutionSubmitted {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorSystem || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionValidating
+	return nil
+}
+
+func (e *Execution) FailValidation(actor Actor, now time.Time) error {
+	if e.Status != ExecutionValidating {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorSystem || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionValidationFailed
+	return nil
+}
+
+func (e *Execution) MarkReviewing(actor Actor, now time.Time) error {
+	if e.Status != ExecutionValidating {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorSystem || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionReviewing
 	return nil
 }
 
