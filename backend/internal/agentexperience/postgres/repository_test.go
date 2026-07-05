@@ -22,7 +22,7 @@ func TestExperienceCandidateRepository_CreateAndGet(t *testing.T) {
 
 	c, err := domain.NewExperienceCandidate(
 		"c1", "tenant-1", "agent-1", "task-1", "sub-1", "rev-1",
-		"sha256:evidence", []string{"code"}, "tenant-1", time.Now(),
+		[]byte("sha256:evidence"), []string{"code"}, "tenant-1", time.Now(),
 	)
 	require.NoError(t, err)
 
@@ -49,10 +49,10 @@ func TestExperienceCandidateRepository_ForbiddenAutoRejected(t *testing.T) {
 
 	c, err := domain.NewExperienceCandidate(
 		"c1", "tenant-1", "agent-1", "task-1", "sub-1", "rev-1",
-		"password = secret", []string{"code"}, "tenant-1", time.Now(),
+		[]byte("password = secret"), []string{"code"}, "tenant-1", time.Now(),
 	)
 	require.NoError(t, err)
-	_ = c.ClassifyAndApply(domain.NewRuleBasedSensitivityPolicy())
+	_ = c.ClassifyAndApply(domain.NewRuleBasedSensitivityPolicy(), []byte("password = secret"))
 
 	err = store.WithTx(ctx, func(tx application.Tx) error {
 		return repo.Create(ctx, tx, c)
@@ -75,8 +75,8 @@ func TestExperienceCandidateRepository_ListByAgentAndStatus(t *testing.T) {
 	store := NewStore(pool)
 
 	now := time.Now()
-	c1, _ := domain.NewExperienceCandidate("c1", "t1", "a1", "task", "sub1", "rev", "ev1", nil, "t1", now)
-	c2, _ := domain.NewExperienceCandidate("c2", "t1", "a1", "task", "sub2", "rev", "ev2", nil, "t1", now)
+	c1, _ := domain.NewExperienceCandidate("c1", "t1", "a1", "task", "sub1", "rev", []byte("ev1"), nil, "t1", now)
+	c2, _ := domain.NewExperienceCandidate("c2", "t1", "a1", "task", "sub2", "rev", []byte("ev2"), nil, "t1", now)
 	require.NoError(t, c2.Approve("owner", now))
 
 	err := store.WithTx(ctx, func(tx application.Tx) error {
@@ -111,7 +111,7 @@ func TestExperienceCandidateRepository_UpdateStatus(t *testing.T) {
 	repo := NewExperienceCandidateRepository(pool)
 	store := NewStore(pool)
 
-	c, _ := domain.NewExperienceCandidate("c1", "t1", "a1", "task", "sub", "rev", "ev", nil, "t1", time.Now())
+	c, _ := domain.NewExperienceCandidate("c1", "t1", "a1", "task", "sub", "rev", []byte("ev"), nil, "t1", time.Now())
 	err := store.WithTx(ctx, func(tx application.Tx) error {
 		return repo.Create(ctx, tx, c)
 	})
@@ -139,7 +139,7 @@ func TestExperienceCandidateRepository_TenantIsolation(t *testing.T) {
 	repo := NewExperienceCandidateRepository(pool)
 	store := NewStore(pool)
 
-	c, _ := domain.NewExperienceCandidate("c1", "t1", "a1", "task", "sub", "rev", "ev", nil, "t1", time.Now())
+	c, _ := domain.NewExperienceCandidate("c1", "t1", "a1", "task", "sub", "rev", []byte("ev"), nil, "t1", time.Now())
 	err := store.WithTx(ctx, func(tx application.Tx) error {
 		return repo.Create(ctx, tx, c)
 	})

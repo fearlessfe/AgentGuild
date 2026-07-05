@@ -62,20 +62,8 @@ func (s *VersionService) CreateDraft(
 		return nil, err
 	}
 
-	memoryRef := cmd.MemoryRef
-	if len(cmd.ApprovedExperienceIDs) > 0 {
-		if s.xpProvider == nil {
-			return nil, invalidArgument("approved_experience_ids")
-		}
-		approved, err := s.xpProvider.ListApprovedByAgent(ctx, cmd.TenantID, cmd.AgentID)
-		if err != nil {
-			return nil, err
-		}
-		selected, err := filterApprovedExperiences(cmd.ApprovedExperienceIDs, approved)
-		if err != nil {
-			return nil, err
-		}
-		memoryRef = mergeExperienceRefs(memoryRef, selected)
+	if len(cmd.ApprovedExperienceIDs) > 0 && s.xpProvider == nil {
+		return nil, invalidArgument("approved_experience_ids")
 	}
 
 	cfg := domain.DraftConfig{
@@ -84,7 +72,7 @@ func (s *VersionService) CreateDraft(
 		Capabilities:      cmd.Capabilities,
 		PromptRef:         cmd.PromptRef,
 		SkillRefs:         cmd.SkillRefs,
-		MemoryRef:         memoryRef,
+		MemoryRef:         cmd.MemoryRef,
 		ToolRefs:          cmd.ToolRefs,
 		EnvironmentDigest: cmd.EnvironmentDigest,
 		CreatedBy:         cmd.CreatedBy,
@@ -96,6 +84,21 @@ func (s *VersionService) CreateDraft(
 		if err != nil {
 			return err
 		}
+
+		memoryRef := cfg.MemoryRef
+		if len(cmd.ApprovedExperienceIDs) > 0 {
+			approved, err := s.xpProvider.ListApprovedByAgentTx(ctx, tx, cmd.TenantID, cmd.AgentID)
+			if err != nil {
+				return err
+			}
+			selected, err := filterApprovedExperiences(cmd.ApprovedExperienceIDs, approved)
+			if err != nil {
+				return err
+			}
+			memoryRef = mergeExperienceRefs(memoryRef, selected)
+		}
+		cfg.MemoryRef = memoryRef
+
 		latest, err := s.versions.GetLatestByAgent(ctx, cmd.TenantID, cmd.AgentID)
 		if err != nil && !isNotFound(err) {
 			return err

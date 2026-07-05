@@ -47,6 +47,7 @@ type EvaluationRunProvider interface {
 // draft can bind approved experience evidence references.
 type ExperienceCandidateProvider interface {
 	ListApprovedByAgent(ctx context.Context, tenantID, agentID string) ([]ExperienceCandidateRef, error)
+	ListApprovedByAgentTx(ctx context.Context, tx Tx, tenantID, agentID string) ([]ExperienceCandidateRef, error)
 }
 
 // ExperienceCandidateRef contains the minimal information needed to bind an

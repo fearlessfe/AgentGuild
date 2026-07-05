@@ -158,6 +158,36 @@ func (r *experienceCandidateRepository) ListApprovedByAgent(ctx context.Context,
 	return r.ListByAgentAndStatus(ctx, tenantID, agentID, domain.StatusApproved)
 }
 
+func (r *experienceCandidateRepository) ListApprovedByAgentTx(ctx context.Context, tx application.Tx, tenantID, agentID string) ([]domain.ExperienceCandidate, error) {
+	return r.listApprovedByAgent(ctx, tx, tenantID, agentID)
+}
+
+func (r *experienceCandidateRepository) listApprovedByAgent(ctx context.Context, q queryer, tenantID, agentID string) ([]domain.ExperienceCandidate, error) {
+	rows, err := q.Query(ctx, `
+		SELECT id, tenant_id, agent_id, source_task_id, source_submission_id, source_review_id,
+		       evidence_ref, content_hash, applicable_capabilities, tenant_scope,
+		       sensitivity_class, status, policy_reason, reviewed_by, reviewed_at, created_at
+		FROM experience_candidates
+		WHERE tenant_id=$1 AND agent_id=$2 AND status=$3
+		ORDER BY created_at DESC`,
+		tenantID, agentID, string(domain.StatusApproved),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var candidates []domain.ExperienceCandidate
+	for rows.Next() {
+		c, err := scanCandidateRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, *c)
+	}
+	return candidates, rows.Err()
+}
+
 var _ application.ExperienceCandidateRepository = (*experienceCandidateRepository)(nil)
 
 type candidateScanner interface {

@@ -22,7 +22,7 @@ func NewTestCandidate(t testing.TB) *ExperienceCandidate {
 	c, err := NewExperienceCandidate(
 		"candidate-id", "tenant-id", "agent-id",
 		"task-id", "submission-id", "review-id",
-		"sha256:evidence",
+		[]byte("evidence-content"),
 		[]string{"code", "review"},
 		"tenant-id", now,
 	)

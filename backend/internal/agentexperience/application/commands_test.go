@@ -24,11 +24,11 @@ func TestExtractCandidateFromAcceptedSubmission(t *testing.T) {
 	insertAgent(t, db, "t1", "a1", "owner")
 
 	resp, err := svc.ExtractCandidate(ctx, application.ExtractCandidate{
-		TenantID:     "t1",
-		AgentID:      "a1",
-		SubmissionID: "sub-1",
-		EvidenceRef:  "sha256:evidence",
-		CreatedBy:    "owner",
+		TenantID:      "t1",
+		AgentID:       "a1",
+		SubmissionID:  "sub-1",
+		EvidenceBytes: []byte("sha256:evidence"),
+		CreatedBy:     "owner",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "sub-1", resp.Candidate.SourceSubmissionID)
@@ -46,11 +46,11 @@ func TestExtractCandidateForbiddenAutoRejected(t *testing.T) {
 	insertAgent(t, db, "t1", "a1", "owner")
 
 	resp, err := svc.ExtractCandidate(ctx, application.ExtractCandidate{
-		TenantID:     "t1",
-		AgentID:      "a1",
-		SubmissionID: "sub-1",
-		EvidenceRef:  "password = super-secret",
-		CreatedBy:    "owner",
+		TenantID:      "t1",
+		AgentID:       "a1",
+		SubmissionID:  "sub-1",
+		EvidenceBytes: []byte("password = super-secret"),
+		CreatedBy:     "owner",
 	})
 	require.NoError(t, err)
 	require.Equal(t, domain.StatusRejected, resp.Candidate.Status)
@@ -67,11 +67,11 @@ func TestReviewCandidate(t *testing.T) {
 	insertAgent(t, db, "t1", "a1", "owner")
 
 	resp, err := svc.ExtractCandidate(ctx, application.ExtractCandidate{
-		TenantID:     "t1",
-		AgentID:      "a1",
-		SubmissionID: "sub-1",
-		EvidenceRef:  "sha256:evidence",
-		CreatedBy:    "owner",
+		TenantID:      "t1",
+		AgentID:       "a1",
+		SubmissionID:  "sub-1",
+		EvidenceBytes: []byte("sha256:evidence"),
+		CreatedBy:     "owner",
 	})
 	require.NoError(t, err)
 
@@ -100,11 +100,11 @@ func TestApprovedCandidateBoundToNewDraft(t *testing.T) {
 	insertAgent(t, db, "t1", "a1", "owner")
 
 	resp, err := xpSvc.ExtractCandidate(ctx, application.ExtractCandidate{
-		TenantID:     "t1",
-		AgentID:      "a1",
-		SubmissionID: "sub-1",
-		EvidenceRef:  "sha256:experience-memory",
-		CreatedBy:    "owner",
+		TenantID:      "t1",
+		AgentID:       "a1",
+		SubmissionID:  "sub-1",
+		EvidenceBytes: []byte("sha256:experience-memory"),
+		CreatedBy:     "owner",
 	})
 	require.NoError(t, err)
 	require.NoError(t, xpSvc.ReviewCandidate(ctx, application.ReviewCandidate{
@@ -135,7 +135,7 @@ func TestApprovedCandidateBoundToNewDraft(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Contains(t, draftResp.Version.MemoryRef, "sha256:base-memory")
-	require.Contains(t, draftResp.Version.MemoryRef, "sha256:experience-memory")
+	require.Contains(t, draftResp.Version.MemoryRef, resp.Candidate.EvidenceRef)
 }
 
 func TestRollbackLeavesOldMemoryRef(t *testing.T) {
@@ -175,11 +175,11 @@ func TestRollbackLeavesOldMemoryRef(t *testing.T) {
 	}))
 
 	resp, err := xpSvc.ExtractCandidate(ctx, application.ExtractCandidate{
-		TenantID:     "t1",
-		AgentID:      "a1",
-		SubmissionID: "sub-1",
-		EvidenceRef:  "sha256:experience-memory",
-		CreatedBy:    "owner",
+		TenantID:      "t1",
+		AgentID:       "a1",
+		SubmissionID:  "sub-1",
+		EvidenceBytes: []byte("sha256:experience-memory"),
+		CreatedBy:     "owner",
 	})
 	require.NoError(t, err)
 	require.NoError(t, xpSvc.ReviewCandidate(ctx, application.ReviewCandidate{
@@ -235,7 +235,7 @@ func TestRollbackLeavesOldMemoryRef(t *testing.T) {
 	rolledBack, err := avSvc.GetVersion(ctx, "t1", "a1", base.Version.ID)
 	require.NoError(t, err)
 	require.Equal(t, "sha256:base-memory", rolledBack.MemoryRef)
-	require.NotContains(t, rolledBack.MemoryRef, "sha256:experience-memory")
+	require.NotContains(t, rolledBack.MemoryRef, resp.Candidate.EvidenceRef)
 }
 
 type fakeSubmissionStore struct {
@@ -271,7 +271,19 @@ type xpProvider struct {
 }
 
 func (p *xpProvider) ListApprovedByAgent(ctx context.Context, tenantID, agentID string) ([]avapplication.ExperienceCandidateRef, error) {
-	candidates, err := p.repo.ListApprovedByAgent(ctx, tenantID, agentID)
+	return p.mapRefs(func() ([]domain.ExperienceCandidate, error) {
+		return p.repo.ListApprovedByAgent(ctx, tenantID, agentID)
+	})
+}
+
+func (p *xpProvider) ListApprovedByAgentTx(ctx context.Context, tx avapplication.Tx, tenantID, agentID string) ([]avapplication.ExperienceCandidateRef, error) {
+	return p.mapRefs(func() ([]domain.ExperienceCandidate, error) {
+		return p.repo.ListApprovedByAgentTx(ctx, tx, tenantID, agentID)
+	})
+}
+
+func (p *xpProvider) mapRefs(fn func() ([]domain.ExperienceCandidate, error)) ([]avapplication.ExperienceCandidateRef, error) {
+	candidates, err := fn()
 	if err != nil {
 		return nil, err
 	}

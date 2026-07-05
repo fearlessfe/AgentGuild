@@ -31,6 +31,7 @@ type ExperienceCandidateRepository interface {
 	ListByAgentAndStatus(context.Context, string, string, domain.CandidateStatus) ([]domain.ExperienceCandidate, error)
 	UpdateStatus(context.Context, Tx, *domain.ExperienceCandidate) error
 	ListApprovedByAgent(context.Context, string, string) ([]domain.ExperienceCandidate, error)
+	ListApprovedByAgentTx(context.Context, Tx, string, string) ([]domain.ExperienceCandidate, error)
 }
 
 // SubmissionStore abstracts the git-delivery-and-validation / code-review
@@ -91,13 +92,12 @@ type CandidateOptions struct {
 // Command DTOs
 
 type ExtractCandidate struct {
-	TenantID       string
-	AgentID        string
-	SubmissionID   string
-	EvidenceRef    string
-	EvidenceBytes  []byte
-	CreatedBy      string
-	IsAdmin        bool
+	TenantID      string
+	AgentID       string
+	SubmissionID  string
+	EvidenceBytes []byte
+	CreatedBy     string
+	IsAdmin       bool
 }
 
 type ExtractCandidateResponse struct {

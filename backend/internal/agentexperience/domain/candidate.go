@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/json"
 	"sort"
 	"time"
 )
@@ -39,12 +38,13 @@ type ExperienceCandidate struct {
 	CreatedAt              time.Time
 }
 
-// NewExperienceCandidate creates a candidate in pending_review. The content
-// hash is computed from the evidence reference and the candidate metadata.
+// NewExperienceCandidate creates a candidate in pending_review. The evidence
+// content is content-addressed: EvidenceRef and ContentHash are both derived
+// from the SHA256 fingerprint of evidenceBytes.
 func NewExperienceCandidate(
 	id, tenantID, agentID,
-	sourceTaskID, sourceSubmissionID, sourceReviewID,
-	evidenceRef string,
+	sourceTaskID, sourceSubmissionID, sourceReviewID string,
+	evidenceBytes []byte,
 	applicableCapabilities []string,
 	tenantScope string,
 	createdAt time.Time,
@@ -64,8 +64,8 @@ func NewExperienceCandidate(
 	if sourceSubmissionID == "" {
 		return nil, invalidArgument("source_submission_id")
 	}
-	if evidenceRef == "" {
-		return nil, invalidArgument("evidence_ref")
+	if len(evidenceBytes) == 0 {
+		return nil, invalidArgument("evidence_bytes")
 	}
 	if tenantScope == "" {
 		tenantScope = tenantID
@@ -78,10 +78,7 @@ func NewExperienceCandidate(
 	copy(caps, applicableCapabilities)
 	sort.Strings(caps)
 
-	payload, _ := json.Marshal([8]any{
-		id, tenantID, agentID, sourceTaskID, sourceSubmissionID, sourceReviewID,
-		evidenceRef, caps,
-	})
+	contentHash := ComputeContentHash(evidenceBytes)
 
 	return &ExperienceCandidate{
 		ID:                     id,
@@ -90,8 +87,8 @@ func NewExperienceCandidate(
 		SourceTaskID:           sourceTaskID,
 		SourceSubmissionID:     sourceSubmissionID,
 		SourceReviewID:         sourceReviewID,
-		EvidenceRef:            evidenceRef,
-		ContentHash:            ComputeContentHash(payload),
+		EvidenceRef:            contentHash,
+		ContentHash:            contentHash,
 		ApplicableCapabilities: caps,
 		TenantScope:            tenantScope,
 		SensitivityClass:       SensitivityPublic,
@@ -103,16 +100,17 @@ func NewExperienceCandidate(
 // StatusValue returns the current lifecycle status.
 func (c *ExperienceCandidate) StatusValue() CandidateStatus { return c.Status }
 
-// ClassifyAndApply applies the sensitivity policy. If the policy classifies the
-// evidence as forbidden, the candidate is automatically rejected.
-func (c *ExperienceCandidate) ClassifyAndApply(policy SensitivityPolicy) error {
+// ClassifyAndApply applies the sensitivity policy to the actual evidence bytes.
+// If the policy classifies the evidence as forbidden, the candidate is
+// automatically rejected.
+func (c *ExperienceCandidate) ClassifyAndApply(policy SensitivityPolicy, evidence []byte) error {
 	if policy == nil {
 		return invalidArgument("policy")
 	}
 	if c.Status != StatusPendingReview {
 		return ErrStateConflict
 	}
-	class, reason := policy.Classify([]byte(c.EvidenceRef))
+	class, reason := policy.Classify(evidence)
 	c.SensitivityClass = class
 	if class == SensitivityForbidden {
 		c.Status = StatusRejected

@@ -53,7 +53,8 @@ func NewCandidateService(
 
 // ExtractCandidate creates an ExperienceCandidate from an accepted submission.
 // It reads the submission, resolves capabilities from its execution, computes
-// the evidence content hash, and applies the sensitivity policy.
+// the evidence content hash from EvidenceBytes, and applies the sensitivity
+// policy to the actual evidence content.
 func (s *CandidateService) ExtractCandidate(
 	ctx context.Context,
 	cmd ExtractCandidate,
@@ -65,6 +66,9 @@ func (s *CandidateService) ExtractCandidate(
 	}
 	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
 		return nil, err
+	}
+	if len(cmd.EvidenceBytes) == 0 {
+		return nil, invalidArg("evidence_bytes")
 	}
 
 	submission, err := s.submissions.GetAcceptedSubmission(ctx, cmd.TenantID, cmd.SubmissionID)
@@ -96,12 +100,12 @@ func (s *CandidateService) ExtractCandidate(
 		candidate, err = domain.NewExperienceCandidate(
 			s.newID(), cmd.TenantID, cmd.AgentID,
 			submission.TaskID, submission.ID, submission.ReviewID,
-			cmd.EvidenceRef, capabilities, cmd.TenantID, now,
+			cmd.EvidenceBytes, capabilities, cmd.TenantID, now,
 		)
 		if err != nil {
 			return err
 		}
-		if err := candidate.ClassifyAndApply(s.classifier); err != nil {
+		if err := candidate.ClassifyAndApply(s.classifier, cmd.EvidenceBytes); err != nil {
 			return err
 		}
 		return s.candidates.Create(ctx, tx, candidate)
