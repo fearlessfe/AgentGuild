@@ -19,6 +19,12 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/git"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
+	gitvalidation "agentguild.dev/agentguild/backend/internal/git/validation"
+	gitworker "agentguild.dev/agentguild/backend/internal/git/worker"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
@@ -40,16 +46,20 @@ import (
 
 // Env 是端到端验收测试的共享 harness，包含真实 PostgreSQL、应用服务与两个 transport。
 type Env struct {
-	T          *testing.T
-	DB         *pgxpool.Pool
-	Service    *application.Service
-	ReviewSvc  *reviewapp.Service
-	Validation *acceptanceValidationProvider
-	Worker     *reputationworker.Worker
-	MCP        *MCPClient
-	REST       *RESTClient
-	Identity   *IdentityClient
-	publishSeq int64
+	T                 *testing.T
+	DB                *pgxpool.Pool
+	Service           *application.Service
+	ReviewSvc         *reviewapp.Service
+	Validation        *acceptanceValidationProvider
+	Worker            *reputationworker.Worker
+	CredentialService *gitapp.CredentialService
+	SubmissionService *gitapp.SubmissionService
+	ValidationWorker  *gitworker.ValidationWorker
+	GitStore          gitapp.Store
+	MCP               *MCPClient
+	REST              *RESTClient
+	Identity          *IdentityClient
+	publishSeq        int64
 }
 
 // Start 启动一个隔离的验收环境。
@@ -70,6 +80,36 @@ func Start(t *testing.T) *Env {
 	require.NoError(t, err)
 	worker := reputationworker.NewWorker(store, time.Hour, 100, slog.Default())
 
+	gitStore := gitpostgres.NewStore(db)
+	gitDriver := newAcceptanceGitDriver("golang/example", "7c3f4e9a8b2d1c0f5e6a7b8c9d0e1f2a3b4c5d6e", "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", "", "hello/hello.go")
+	gitIssuer := git.NewIssuer(gitDriver)
+	credentialService, err := gitapp.NewCredentialService(gitStore, gitapp.Options{
+		Issuer:   gitIssuer,
+		Provider: "github",
+		NewID:    acceptanceSequenceIDs("cred-1"),
+	})
+	require.NoError(t, err)
+
+	verifierAdapter := &acceptanceSubmissionRepoAdapter{store: gitStore}
+	commitVerifier := gitapp.NewCommitVerifier(gitDriver, verifierAdapter)
+	notifier := application.NewCoreExecutionNotifier(store)
+	submissionService, err := gitapp.NewSubmissionService(gitStore, commitVerifier, notifier, acceptanceSequenceIDs("sub-1"))
+	require.NoError(t, err)
+
+	registry := gitvalidation.Registry{
+		"acceptance": {
+			Steps: map[gitdomain.ValidationStep]gitvalidation.StepConfig{
+				gitdomain.ValidationStepBuild:          {Command: []string{"echo", "build ok"}, HardGate: true},
+				gitdomain.ValidationStepPublicTests:    {Command: []string{"echo", "public tests ok"}, HardGate: true},
+				gitdomain.ValidationStepHiddenTests:    {Command: []string{"echo", "hidden tests ok"}, HardGate: true},
+				gitdomain.ValidationStepStaticAnalysis: {Command: []string{"echo", "lint ok"}, HardGate: false},
+				gitdomain.ValidationStepSecurityScan:   {Command: []string{"echo", "security ok"}, HardGate: true},
+			},
+		},
+	}
+	runner := gitvalidation.NewRunner(registry, &gitvalidation.StaticWorkspaceFactory{Dir: t.TempDir()}, nil)
+	validationWorker := gitworker.NewValidationWorker(gitStore, "acceptance-validation-worker", 5*time.Minute, 3, runner, notifier)
+
 	verifier, tokenIssuer := newAcceptanceIdentityRuntime(t)
 	identitySvc, err := identityapp.NewIdentityService(identityStore, identityapp.IdentityOptions{
 		NewID:       acceptanceSequenceIDs("agent-1", "version-1", "agent-2", "version-2", "agent-3", "version-3"),
@@ -85,24 +125,32 @@ func Start(t *testing.T) *Env {
 	mcpHandler := transportmcp.NewServer(svc, verifier,
 		transportmcp.WithReviewService(reviewSvc),
 		transportmcp.WithReputationService(reputationSvc),
+		transportmcp.WithSubmissionService(submissionService),
+		transportmcp.WithCredentialService(credentialService),
 	).Handler()
 	restHandler := rest.NewServer(svc, verifier,
 		rest.WithIdentityService(identitySvc),
 		rest.WithReviewService(reviewSvc),
 		rest.WithRubricService(reviewSvc),
 		rest.WithReputationService(reputationSvc),
+		rest.WithSubmissionService(submissionService),
+		rest.WithCredentialService(credentialService),
 		rest.WithSession("acceptance-session-secret-0123456789abcdef", false),
 	).Router()
 
 	return &Env{
-		T:          t,
-		DB:         db,
-		Service:    svc,
-		ReviewSvc:  reviewSvc,
-		Validation: validation,
-		Worker:     worker,
-		MCP:        &MCPClient{t: t, handler: mcpHandler, db: db, token: "token-agent"},
-		REST:       &RESTClient{t: t, handler: restHandler, db: db, token: "token-agent"},
+		T:                 t,
+		DB:                db,
+		Service:           svc,
+		ReviewSvc:         reviewSvc,
+		Validation:        validation,
+		Worker:            worker,
+		CredentialService: credentialService,
+		SubmissionService: submissionService,
+		ValidationWorker:  validationWorker,
+		GitStore:          gitStore,
+		MCP:               &MCPClient{t: t, handler: mcpHandler, db: db, token: "token-agent"},
+		REST:              &RESTClient{t: t, handler: restHandler, db: db, token: "token-agent"},
 		Identity: &IdentityClient{
 			t:             t,
 			handler:       restHandler,
@@ -277,6 +325,187 @@ func (env *Env) ListComments(tenantID, reviewID string) []reviewdomain.LineComme
 func (env *Env) WorkerTick() {
 	env.T.Helper()
 	require.NoError(env.T, env.Worker.RunOnce(context.Background()))
+}
+
+// RunValidation 手动触发一次 validation worker。
+func (env *Env) RunValidation(tenantID string) {
+	env.T.Helper()
+	_, err := env.ValidationWorker.RunOnce(context.Background(), tenantID)
+	require.NoError(env.T, err)
+}
+
+// ExecutionRecord 是从数据库读取的 execution 行。
+type ExecutionRecord struct {
+	ID             string
+	TaskID         string
+	AgentVersionID string
+	Status         string
+	StateVersion   int64
+}
+
+// GetExecution 直接读取 execution 记录。
+func (env *Env) GetExecution(tenantID, executionID string) *ExecutionRecord {
+	env.T.Helper()
+	var r ExecutionRecord
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT id, task_id, agent_version_id, status, state_version
+		FROM executions
+		WHERE tenant_id=$1 AND id=$2`, tenantID, executionID).Scan(
+		&r.ID, &r.TaskID, &r.AgentVersionID, &r.Status, &r.StateVersion)
+	require.NoError(env.T, err)
+	return &r
+}
+
+// SubmissionRecord 是从数据库读取的 submission 行。
+type SubmissionRecord struct {
+	ID              string
+	TaskID          string
+	ExecutionID     string
+	Repo            string
+	Branch          string
+	CommitSHA       string
+	BaseCommitSHA   string
+	Summary         string
+	DiffFingerprint string
+	Status          string
+	ValidationJobID *string
+}
+
+// GetSubmission 直接读取 submission 记录。
+func (env *Env) GetSubmission(tenantID, submissionID string) *SubmissionRecord {
+	env.T.Helper()
+	var r SubmissionRecord
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT id, task_id, execution_id, repo, branch, commit_sha, base_commit_sha,
+		       summary, diff_fingerprint, status, validation_job_id
+		FROM submissions
+		WHERE tenant_id=$1 AND id=$2`, tenantID, submissionID).Scan(
+		&r.ID, &r.TaskID, &r.ExecutionID, &r.Repo, &r.Branch, &r.CommitSHA,
+		&r.BaseCommitSHA, &r.Summary, &r.DiffFingerprint, &r.Status, &r.ValidationJobID)
+	require.NoError(env.T, err)
+	return &r
+}
+
+// ValidationJobRecord 是从数据库读取的 validation job 行。
+type ValidationJobRecord struct {
+	ID            string
+	SubmissionID  string
+	ExecutionID   string
+	Repo          string
+	Branch        string
+	CommitSHA     string
+	Status        string
+	Attempt       int
+	ConfigVersion string
+}
+
+// GetValidationJob 直接读取 validation job 记录。
+func (env *Env) GetValidationJob(tenantID, jobID string) *ValidationJobRecord {
+	env.T.Helper()
+	var r ValidationJobRecord
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT id, submission_id, execution_id, repo, branch, commit_sha, status, attempt, config_version
+		FROM validation_jobs
+		WHERE tenant_id=$1 AND id=$2`, tenantID, jobID).Scan(
+		&r.ID, &r.SubmissionID, &r.ExecutionID, &r.Repo, &r.Branch, &r.CommitSHA,
+		&r.Status, &r.Attempt, &r.ConfigVersion)
+	require.NoError(env.T, err)
+	return &r
+}
+
+// CredentialRecord 是从数据库读取的 credential 元数据（不含 token）。
+type CredentialRecord struct {
+	ID             string
+	ExecutionID    string
+	Provider       string
+	RepoURL        string
+	Branch         string
+	BaseCommit     string
+	Status         string
+	TokenPlaintext *string
+}
+
+// GetCredential 直接读取 credential 元数据，并验证 token 未以明文存储。
+func (env *Env) GetCredential(tenantID, executionID string) *CredentialRecord {
+	env.T.Helper()
+	var r CredentialRecord
+	var tokenPlaintext *string
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT id, execution_id, provider, repo_url, branch, base_commit_sha, status,
+		       (SELECT column_name FROM information_schema.columns
+		        WHERE table_name='git_credentials' AND column_name='token') AS token_col
+		FROM git_credentials
+		WHERE tenant_id=$1 AND execution_id=$2`, tenantID, executionID).Scan(
+		&r.ID, &r.ExecutionID, &r.Provider, &r.RepoURL, &r.Branch, &r.BaseCommit, &r.Status, &tokenPlaintext)
+	require.NoError(env.T, err)
+	r.TokenPlaintext = tokenPlaintext
+	return &r
+}
+
+// ProjectionRecord 是从数据库读取的声望投影行。
+type ProjectionRecord struct {
+	TenantID               string
+	ID                     string
+	AgentVersionID         string
+	Capability             string
+	TaskType               string
+	TotalReviews           int
+	AcceptedCount          int
+	RejectedCount          int
+	RevisionRequestedCount int
+	PassRate               float64
+	AlgorithmVersion       string
+}
+
+// GetReputationProjection 直接读取声望投影记录。
+func (env *Env) GetReputationProjection(tenantID, agentVersionID, capability, taskType string) *ProjectionRecord {
+	env.T.Helper()
+	var r ProjectionRecord
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT tenant_id, id, agent_version_id, capability, task_type,
+		       total_reviews, accepted_count, rejected_count, revision_requested_count,
+		       pass_rate, algorithm_version
+		FROM reputation_projections
+		WHERE tenant_id=$1 AND agent_version_id=$2 AND capability=$3 AND task_type=$4`,
+		tenantID, agentVersionID, capability, taskType).Scan(
+		&r.TenantID, &r.ID, &r.AgentVersionID, &r.Capability, &r.TaskType,
+		&r.TotalReviews, &r.AcceptedCount, &r.RejectedCount, &r.RevisionRequestedCount,
+		&r.PassRate, &r.AlgorithmVersion)
+	require.NoError(env.T, err)
+	return &r
+}
+
+// acceptanceSubmissionRepoAdapter exposes git/application.SubmissionRepository by
+// opening a short transaction on the git store. It is used by CommitVerifier
+// for duplicate-submission detection.
+type acceptanceSubmissionRepoAdapter struct {
+	store gitapp.Store
+}
+
+func (a *acceptanceSubmissionRepoAdapter) Save(ctx context.Context, sub *gitdomain.Submission) error {
+	return a.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		return tx.Submissions().Save(ctx, sub)
+	})
+}
+
+func (a *acceptanceSubmissionRepoAdapter) GetByID(ctx context.Context, tenantID, id string) (*gitdomain.Submission, error) {
+	var result *gitdomain.Submission
+	err := a.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		var err error
+		result, err = tx.Submissions().GetByID(ctx, tenantID, id)
+		return err
+	})
+	return result, err
+}
+
+func (a *acceptanceSubmissionRepoAdapter) GetByExecutionID(ctx context.Context, tenantID, executionID string) ([]*gitdomain.Submission, error) {
+	var result []*gitdomain.Submission
+	err := a.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		var err error
+		result, err = tx.Submissions().GetByExecutionID(ctx, tenantID, executionID)
+		return err
+	})
+	return result, err
 }
 
 // GetProjection 读取指定 key 的声望投影。
@@ -1356,15 +1585,16 @@ func (i acceptanceFixedIssuer) IssueAccessToken(_ context.Context, agent *identi
 	}, nil
 }
 
-func acceptanceSequenceIDs(values ...string) func() string {
-	index := 0
+func acceptanceSequenceIDs(first string, rest ...string) func() string {
+	seq := append([]string{first}, rest...)
+	i := 0
 	return func() string {
-		if index >= len(values) {
-			return values[len(values)-1]
+		if i < len(seq) {
+			id := seq[i]
+			i++
+			return id
 		}
-		value := values[index]
-		index++
-		return value
+		return fmt.Sprintf("seq-%d", i)
 	}
 }
 
