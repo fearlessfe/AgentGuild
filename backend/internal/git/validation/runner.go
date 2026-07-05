@@ -7,11 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
+
+// secretPatterns redacts likely credentials and keys from runner output.
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`gh[ps]_[A-Za-z0-9_]{36,}`),
+	regexp.MustCompile(`token=[A-Za-z0-9_\-]+`),
+	regexp.MustCompile(`(?i)authorization:\s*bearer\s+\S+`),
+	regexp.MustCompile(`(?i)password=\S+`),
+	regexp.MustCompile(`-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----`),
+}
 
 // WorkspaceFactory prepares a directory containing the code under validation.
 type WorkspaceFactory interface {
@@ -25,9 +35,10 @@ type Executor interface {
 
 // StepConfig describes how to run one validation step.
 type StepConfig struct {
-	Command []string
-	Timeout time.Duration
-	Env     map[string]string
+	Command  []string
+	Timeout  time.Duration
+	HardGate bool
+	Env      map[string]string
 }
 
 // Config maps validation steps to their execution configuration for one
@@ -130,20 +141,30 @@ func (r *Runner) RunStep(ctx context.Context, job *gitdomain.ValidationJob, step
 
 	output, runErr := r.executor.Execute(stepCtx, dir, stepCfg.Env, stepCfg.Command...)
 	finishedAt := r.now()
+	elapsed := finishedAt.Sub(startedAt)
 
 	result := gitdomain.Step{
 		Step:       step,
+		HardGate:   stepCfg.HardGate,
 		StartedAt:  &startedAt,
 		FinishedAt: &finishedAt,
+		ResourceUsage: []byte(fmt.Sprintf(`{"elapsed_ms":%d}`, elapsed.Milliseconds())),
 	}
 	if runErr != nil {
 		result.Status = gitdomain.ValidationStepStatusFailed
-		result.LogSummary = r.summarise(output, runErr)
+		result.LogSummary = r.redact(r.summarise(output, runErr))
 	} else {
 		result.Status = gitdomain.ValidationStepStatusSucceeded
-		result.LogSummary = r.truncate(string(output), 2000)
+		result.LogSummary = r.redact(r.truncate(string(output), 2000))
 	}
 	return result, nil
+}
+
+func (r *Runner) redact(s string) string {
+	for _, re := range secretPatterns {
+		s = re.ReplaceAllString(s, "[REDACTED]")
+	}
+	return s
 }
 
 func (r *Runner) summarise(output []byte, err error) string {
@@ -206,11 +227,11 @@ func DefaultRegistry() Registry {
 	return Registry{
 		"default": {
 			Steps: map[gitdomain.ValidationStep]StepConfig{
-				gitdomain.ValidationStepBuild:            {Command: []string{"make", "build"}, Timeout: 5 * time.Minute},
-				gitdomain.ValidationStepPublicTests:      {Command: []string{"make", "test-public"}, Timeout: 10 * time.Minute},
-				gitdomain.ValidationStepHiddenTests:      {Command: []string{"make", "test-hidden"}, Timeout: 10 * time.Minute},
-				gitdomain.ValidationStepStaticAnalysis:   {Command: []string{"make", "lint"}, Timeout: 5 * time.Minute},
-				gitdomain.ValidationStepSecurityScan:     {Command: []string{"make", "security-scan"}, Timeout: 5 * time.Minute},
+				gitdomain.ValidationStepBuild:          {Command: []string{"make", "build"}, Timeout: 5 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepPublicTests:    {Command: []string{"make", "test-public"}, Timeout: 10 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepHiddenTests:    {Command: []string{"make", "test-hidden"}, Timeout: 10 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepStaticAnalysis: {Command: []string{"make", "lint"}, Timeout: 5 * time.Minute, HardGate: false},
+				gitdomain.ValidationStepSecurityScan:   {Command: []string{"make", "security-scan"}, Timeout: 5 * time.Minute, HardGate: true},
 			},
 		},
 	}

@@ -85,6 +85,7 @@ type ValidationJob struct {
 type Step struct {
 	Step          ValidationStep
 	Status        ValidationStepStatus
+	HardGate      bool
 	LogSummary    string
 	ResourceUsage []byte
 	StartedAt     *time.Time
@@ -217,8 +218,8 @@ func (j *ValidationJob) FinishStep(step ValidationStep, status ValidationStepSta
 	j.Steps[i].FinishedAt = &now
 	j.UpdatedAt = now
 
-	// If a hard-gate step fails, the whole job fails immediately.
-	if status == ValidationStepStatusFailed {
+	// A hard-gate step failure fails the whole job immediately.
+	if status == ValidationStepStatusFailed && j.Steps[i].HardGate {
 		j.Status = ValidationStatusFailed
 		j.ClaimedBy = nil
 		j.ClaimedUntil = nil
@@ -227,14 +228,23 @@ func (j *ValidationJob) FinishStep(step ValidationStep, status ValidationStepSta
 
 	// Check whether all steps are terminal.
 	complete := true
+	anyFailed := false
 	for _, s := range j.Steps {
+		if s.Status == ValidationStepStatusFailed {
+			anyFailed = true
+			continue
+		}
 		if s.Status != ValidationStepStatusSucceeded && s.Status != ValidationStepStatusSkipped {
 			complete = false
 			break
 		}
 	}
 	if complete {
-		j.Status = ValidationStatusSucceeded
+		if anyFailed {
+			j.Status = ValidationStatusFailed
+		} else {
+			j.Status = ValidationStatusSucceeded
+		}
 		j.ClaimedBy = nil
 		j.ClaimedUntil = nil
 	}

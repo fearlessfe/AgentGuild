@@ -96,6 +96,63 @@ func TestRunnerFailsWhenWorkspaceFactoryFails(t *testing.T) {
 	require.Contains(t, result.LogSummary, "workspace preparation failed")
 }
 
+func TestRunnerPropagatesHardGateFromConfig(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	job := newJob(now)
+	registry := validation.Registry{
+		"default": {
+			Steps: map[gitdomain.ValidationStep]validation.StepConfig{
+				gitdomain.ValidationStepBuild: {Command: []string{"echo", "ok"}, Timeout: time.Minute, HardGate: true},
+			},
+		},
+	}
+	executor := &fakeExecutor{output: []byte("ok")}
+	runner := validation.NewRunner(registry, &validation.StaticWorkspaceFactory{Dir: "/tmp"}, executor, validation.WithClock(func() time.Time { return now }))
+
+	result, err := runner.RunStep(context.Background(), job, gitdomain.ValidationStepBuild)
+	require.NoError(t, err)
+	require.True(t, result.HardGate)
+}
+
+func TestRunnerRedactsSecretsFromOutput(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	job := newJob(now)
+	registry := validation.Registry{
+		"default": {
+			Steps: map[gitdomain.ValidationStep]validation.StepConfig{
+				gitdomain.ValidationStepBuild: {Command: []string{"echo", "token"}, Timeout: time.Minute},
+			},
+		},
+	}
+	executor := &fakeExecutor{output: []byte("using token=ghp_123456789012345678901234567890123456 and password=secret")}
+	runner := validation.NewRunner(registry, &validation.StaticWorkspaceFactory{Dir: "/tmp"}, executor, validation.WithClock(func() time.Time { return now }))
+
+	result, err := runner.RunStep(context.Background(), job, gitdomain.ValidationStepBuild)
+	require.NoError(t, err)
+	require.NotContains(t, result.LogSummary, "ghp_123456789012345678901234567890123456")
+	require.NotContains(t, result.LogSummary, "password=secret")
+	require.Contains(t, result.LogSummary, "[REDACTED]")
+}
+
+func TestRunnerCapturesElapsedResourceUsage(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	job := newJob(now)
+	registry := validation.Registry{
+		"default": {
+			Steps: map[gitdomain.ValidationStep]validation.StepConfig{
+				gitdomain.ValidationStepBuild: {Command: []string{"echo", "ok"}, Timeout: time.Minute},
+			},
+		},
+	}
+	executor := &fakeExecutor{output: []byte("ok")}
+	clk := now
+	runner := validation.NewRunner(registry, &validation.StaticWorkspaceFactory{Dir: "/tmp"}, executor, validation.WithClock(func() time.Time { clk = clk.Add(10 * time.Millisecond); return clk }))
+
+	result, err := runner.RunStep(context.Background(), job, gitdomain.ValidationStepBuild)
+	require.NoError(t, err)
+	require.Contains(t, string(result.ResourceUsage), "elapsed_ms")
+}
+
 func newJob(now time.Time) *gitdomain.ValidationJob {
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-1" })
 	if err != nil {

@@ -110,8 +110,28 @@ func TestFinishStepFailsHardGate(t *testing.T) {
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 	require.NoError(t, job.StartStep(gitdomain.ValidationStepBuild, now))
 
+	job.Steps[0].HardGate = true
 	err = job.FinishStep(gitdomain.ValidationStepBuild, gitdomain.ValidationStepStatusFailed, "compile error", nil, now)
 	require.NoError(t, err)
+	require.Equal(t, gitdomain.ValidationStatusFailed, job.Status)
+	require.Nil(t, job.ClaimedBy)
+}
+
+func TestFinishStepSoftFailureDoesNotFailJobImmediately(t *testing.T) {
+	now := time.Now()
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
+	require.NoError(t, err)
+	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
+	require.NoError(t, job.StartStep(gitdomain.ValidationStepBuild, now))
+
+	job.Steps[0].HardGate = false
+	require.NoError(t, job.FinishStep(gitdomain.ValidationStepBuild, gitdomain.ValidationStepStatusFailed, "lint warning", nil, now))
+	require.Equal(t, gitdomain.ValidationStatusRunning, job.Status)
+
+	for i := 1; i < len(job.Steps); i++ {
+		require.NoError(t, job.StartStep(job.Steps[i].Step, now))
+		require.NoError(t, job.FinishStep(job.Steps[i].Step, gitdomain.ValidationStepStatusSucceeded, "ok", nil, now))
+	}
 	require.Equal(t, gitdomain.ValidationStatusFailed, job.Status)
 	require.Nil(t, job.ClaimedBy)
 }

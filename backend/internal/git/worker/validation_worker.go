@@ -163,6 +163,12 @@ func (w *ValidationWorker) runStep(ctx context.Context, job *gitdomain.Validatio
 		if len(result.ResourceUsage) > 0 {
 			usage = result.ResourceUsage
 		}
+		for i, s := range fresh.Steps {
+			if s.Step == step {
+				fresh.Steps[i].HardGate = result.HardGate
+				break
+			}
+		}
 		if err := fresh.FinishStep(step, result.Status, result.LogSummary, usage, *result.FinishedAt); err != nil {
 			return err
 		}
