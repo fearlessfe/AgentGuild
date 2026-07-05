@@ -16,12 +16,12 @@ import (
 
 // Service orchestrates the code-review lifecycle.
 type Service struct {
-	store       application.Store
-	policy      Policy
-	allocator   Allocator
-	diff        DiffProvider
-	validation  ValidationProvider
-	newID       func() string
+	store      application.Store
+	policy     Policy
+	allocator  Allocator
+	diff       DiffProvider
+	validation ValidationProvider
+	newID      func() string
 }
 
 // Options configures a new Service.
@@ -105,6 +105,25 @@ type ReviewView struct {
 	FinalDecision   string
 	SubmittedAt     time.Time
 	CreatedAt       time.Time
+}
+
+// RubricDimensionView is the serialized representation of a rubric dimension.
+type RubricDimensionView struct {
+	ID   string
+	Name string
+}
+
+// RubricView is the serialized representation of the active rubric.
+type RubricView struct {
+	ID               string
+	TenantID         string
+	VersionNumber    int
+	Name             string
+	Dimensions       []RubricDimensionView
+	Weights          map[string]float64
+	AlgorithmVersion string
+	IsActive         bool
+	CreatedAt        time.Time
 }
 
 // CommentView is the serialized representation of a line comment.
@@ -341,6 +360,30 @@ func (s *Service) AddComment(ctx context.Context, principal auth.Principal, cmd 
 	return result, err
 }
 
+// GetActiveRubric returns the currently active rubric version for the tenant.
+func (s *Service) GetActiveRubric(ctx context.Context, principal auth.Principal) (application.Envelope[RubricView], error) {
+	var result application.Envelope[RubricView]
+	if err := requireTenant(principal); err != nil {
+		return result, err
+	}
+	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		rubric, err := tx.Rubrics().GetActive(ctx, principal.TenantID)
+		if err != nil {
+			return err
+		}
+		result = application.Envelope[RubricView]{
+			Data: rubricView(rubric),
+			Meta: application.Meta{ServerTime: now},
+		}
+		return nil
+	})
+	return result, err
+}
+
 // GetReview returns a review by ID.
 func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query GetReview) (application.Envelope[ReviewView], error) {
 	var result application.Envelope[ReviewView]
@@ -549,6 +592,28 @@ func commentView(comment *reviewdomain.LineComment) CommentView {
 		DiffFingerprint: comment.DiffFingerprint,
 		Text:            comment.Text,
 		CreatedAt:       comment.CreatedAt,
+	}
+}
+
+func rubricView(rubric *reviewdomain.RubricVersion) RubricView {
+	dims := make([]RubricDimensionView, len(rubric.Dimensions))
+	for i, d := range rubric.Dimensions {
+		dims[i] = RubricDimensionView{ID: d.ID, Name: d.Name}
+	}
+	weights := make(map[string]float64, len(rubric.Weights))
+	for k, v := range rubric.Weights {
+		weights[k] = v
+	}
+	return RubricView{
+		ID:               rubric.ID,
+		TenantID:         rubric.TenantID,
+		VersionNumber:    rubric.VersionNumber,
+		Name:             rubric.Name,
+		Dimensions:       dims,
+		Weights:          weights,
+		AlgorithmVersion: rubric.AlgorithmVersion,
+		IsActive:         rubric.IsActive,
+		CreatedAt:        rubric.CreatedAt,
 	}
 }
 

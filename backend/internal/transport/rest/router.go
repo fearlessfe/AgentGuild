@@ -55,6 +55,9 @@ type socketRemoteAddrContextKey struct{}
 type Server struct {
 	svc           applicationService
 	identity      identityService
+	reviewSvc     ReviewService
+	rubricSvc     RubricService
+	reputationSvc ReputationService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
 	sessionSecret string
@@ -141,6 +144,13 @@ func (s *Server) Router() http.Handler {
 		r.With(s.authenticate, s.rateLimit).Get("/executions/{id}", s.getExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:start", s.startExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:heartbeat", s.heartbeatExecution)
+
+		r.With(s.authenticate, s.rateLimit).Post("/submissions/{id}/reviews", s.createReview)
+		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/decision", s.submitDecision)
+		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/comments", s.addComment)
+		r.With(s.authenticate, s.rateLimit).Get("/reviews/{id}", s.getReview)
+		r.With(s.authenticate, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
+		r.With(s.authenticate, s.rateLimit).Get("/reputation", s.getReputation)
 	})
 	return r
 }

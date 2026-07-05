@@ -15,6 +15,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
 	"github.com/stretchr/testify/require"
 )
@@ -87,6 +88,63 @@ func (f *fakeApplication) GetExecution(ctx context.Context, p auth.Principal, q 
 	return f.getExecution, f.getExecutionErr
 }
 
+// fakeReviewService 记录 review 应用服务调用参数并按预置值返回。
+type fakeReviewService struct {
+	calls             []call
+	createReview      application.Envelope[reviewapp.ReviewView]
+	createReviewErr   error
+	submitDecision    application.Envelope[reviewapp.ReviewView]
+	submitDecisionErr error
+	addComment        application.Envelope[reviewapp.CommentView]
+	addCommentErr     error
+	getReview         application.Envelope[reviewapp.ReviewView]
+	getReviewErr      error
+}
+
+func (f *fakeReviewService) CreateReview(ctx context.Context, p auth.Principal, cmd reviewapp.CreateReview) (application.Envelope[reviewapp.ReviewView], error) {
+	f.calls = append(f.calls, call{method: "CreateReview", principal: p, payload: cmd})
+	return f.createReview, f.createReviewErr
+}
+
+func (f *fakeReviewService) SubmitDecision(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitDecision) (application.Envelope[reviewapp.ReviewView], error) {
+	f.calls = append(f.calls, call{method: "SubmitDecision", principal: p, payload: cmd})
+	return f.submitDecision, f.submitDecisionErr
+}
+
+func (f *fakeReviewService) AddComment(ctx context.Context, p auth.Principal, cmd reviewapp.AddComment) (application.Envelope[reviewapp.CommentView], error) {
+	f.calls = append(f.calls, call{method: "AddComment", principal: p, payload: cmd})
+	return f.addComment, f.addCommentErr
+}
+
+func (f *fakeReviewService) GetReview(ctx context.Context, p auth.Principal, q reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error) {
+	f.calls = append(f.calls, call{method: "GetReview", principal: p, payload: q})
+	return f.getReview, f.getReviewErr
+}
+
+// fakeRubricService 记录 rubric 应用服务调用参数并按预置值返回。
+type fakeRubricService struct {
+	calls     []call
+	active    application.Envelope[reviewapp.RubricView]
+	activeErr error
+}
+
+func (f *fakeRubricService) GetActiveRubric(ctx context.Context, p auth.Principal) (application.Envelope[reviewapp.RubricView], error) {
+	f.calls = append(f.calls, call{method: "GetActiveRubric", principal: p, payload: nil})
+	return f.active, f.activeErr
+}
+
+// fakeReputationService 记录 reputation 占位服务调用参数并按预置值返回。
+type fakeReputationService struct {
+	calls         []call
+	projection    application.Envelope[rest.ProjectionView]
+	projectionErr error
+}
+
+func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, q rest.ReputationQuery) (application.Envelope[rest.ProjectionView], error) {
+	f.calls = append(f.calls, call{method: "GetProjection", principal: p, payload: q})
+	return f.projection, f.projectionErr
+}
+
 // fakeVerifier 按 token 字符串返回预置 Principal，用于路由层测试隔离 OAuth 实现。
 type fakeVerifier struct {
 	principal auth.Principal
@@ -117,8 +175,8 @@ func (v *tokenVerifier) Verify(ctx context.Context, rawToken string) (auth.Princ
 	}
 }
 
-func newTestServer(app *fakeApplication) http.Handler {
-	return rest.NewServer(app, &tokenVerifier{}).Router()
+func newTestServer(app *fakeApplication, opts ...rest.Option) http.Handler {
+	return rest.NewServer(app, &tokenVerifier{}, opts...).Router()
 }
 
 func postJSON(t *testing.T, server http.Handler, path, body, token string, headers ...string) *httptest.ResponseRecorder {
@@ -391,6 +449,110 @@ func TestEnvelopeResponse(t *testing.T) {
 	require.Equal(t, "task-1", envelope.Data.ID)
 	require.Equal(t, domain.TaskOpen, envelope.Data.Status)
 	require.Equal(t, now, envelope.Meta.ServerTime)
+}
+
+func TestGetReview(t *testing.T) {
+	review := &fakeReviewService{
+		getReview: application.Envelope[reviewapp.ReviewView]{
+			Data: reviewapp.ReviewView{ID: "review-1", SubmissionID: "sub-1"},
+		},
+	}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+	res := get(t, server, "/v1/reviews/review-1", "token-publisher")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, review.calls, 1)
+	require.Equal(t, "review-1", review.calls[0].payload.(reviewapp.GetReview).ReviewID)
+}
+
+func TestCreateReview(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+	res := postJSON(t, server, "/v1/submissions/sub-1/reviews", `{"capabilities":["go"]}`, "token-publisher", "Idempotency-Key", "req-r")
+	require.Equal(t, http.StatusCreated, res.Code)
+	require.Len(t, review.calls, 1)
+	cmd := review.calls[0].payload.(reviewapp.CreateReview)
+	require.Equal(t, "req-r", cmd.RequestID)
+	require.Equal(t, "sub-1", cmd.SubmissionID)
+	require.Equal(t, []string{"go"}, cmd.Capabilities)
+}
+
+func TestCreateReviewRequiresIdempotencyKey(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+	res := postJSON(t, server, "/v1/submissions/sub-1/reviews", `{}`, "token-publisher")
+	require.Equal(t, http.StatusBadRequest, res.Code)
+	require.Contains(t, res.Body.String(), "idempotency_key")
+}
+
+func TestSubmitDecision(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+	body := `{"request_id":"req-d","decision":"accepted","scores":[{"dimension":"correctness","score":90}],"summary":"lgtm"}`
+	res := postJSON(t, server, "/v1/reviews/review-1/decision", body, "token-publisher", "Idempotency-Key", "req-d")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, review.calls, 1)
+	cmd := review.calls[0].payload.(reviewapp.SubmitDecision)
+	require.Equal(t, "req-d", cmd.RequestID)
+	require.Equal(t, "review-1", cmd.ReviewID)
+	require.Equal(t, "accepted", string(cmd.Decision))
+	require.Len(t, cmd.Scores, 1)
+	require.Equal(t, "correctness", cmd.Scores[0].Dimension)
+	require.Equal(t, 90, cmd.Scores[0].Score)
+	require.Equal(t, "lgtm", cmd.Summary)
+}
+
+func TestAddComment(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+	body := `{"request_id":"req-c","submission_id":"sub-1","file_path":"main.go","side":"right","line_number":42,"hunk_hash":"h1","diff_fingerprint":"d1","text":"fix this"}`
+	res := postJSON(t, server, "/v1/reviews/review-1/comments", body, "token-publisher", "Idempotency-Key", "req-c")
+	require.Equal(t, http.StatusCreated, res.Code)
+	require.Len(t, review.calls, 1)
+	cmd := review.calls[0].payload.(reviewapp.AddComment)
+	require.Equal(t, "req-c", cmd.RequestID)
+	require.Equal(t, "review-1", cmd.ReviewID)
+	require.Equal(t, "sub-1", cmd.SubmissionID)
+	require.Equal(t, "main.go", cmd.FilePath)
+	require.Equal(t, "right", cmd.Side)
+	require.Equal(t, 42, cmd.LineNumber)
+	require.Equal(t, "h1", cmd.HunkHash)
+	require.Equal(t, "d1", cmd.DiffFingerprint)
+	require.Equal(t, "fix this", cmd.Text)
+}
+
+func TestGetActiveRubric(t *testing.T) {
+	rubric := &fakeRubricService{
+		active: application.Envelope[reviewapp.RubricView]{
+			Data: reviewapp.RubricView{ID: "rubric-1", Name: "Default"},
+		},
+	}
+	server := newTestServer(&fakeApplication{}, rest.WithRubricService(rubric))
+	res := get(t, server, "/v1/rubrics/active", "token-publisher")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, rubric.calls, 1)
+}
+
+func TestGetReputationWithoutServiceReturns501(t *testing.T) {
+	server := newTestServer(&fakeApplication{})
+	res := get(t, server, "/v1/reputation?agent_version_id=av-1&capability=go&task_type=code", "token-publisher")
+	require.Equal(t, http.StatusNotImplemented, res.Code)
+	require.Contains(t, res.Body.String(), "NOT_IMPLEMENTED")
+}
+
+func TestGetReputationWithService(t *testing.T) {
+	reputation := &fakeReputationService{
+		projection: application.Envelope[rest.ProjectionView]{
+			Data: rest.ProjectionView{},
+		},
+	}
+	server := newTestServer(&fakeApplication{}, rest.WithReputationService(reputation))
+	res := get(t, server, "/v1/reputation?agent_version_id=av-1&capability=go&task_type=code", "token-publisher")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, reputation.calls, 1)
+	q := reputation.calls[0].payload.(rest.ReputationQuery)
+	require.Equal(t, "av-1", q.AgentVersionID)
+	require.Equal(t, "go", q.Capability)
+	require.Equal(t, "code", q.TaskType)
 }
 
 // fakeRateLimiter 模拟固定重试时间的限流器。

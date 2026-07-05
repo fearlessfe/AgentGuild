@@ -106,9 +106,9 @@ func TestSubmitDecisionAcceptsWhenHardGatesPass(t *testing.T) {
 	got, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
 		RequestID: "req-submit",
 		ReviewID:  review.ID,
-		Decision: reviewdomain.DecisionAccepted,
-		Scores:   []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
-		Summary:  "lgtm",
+		Decision:  reviewdomain.DecisionAccepted,
+		Scores:    []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
+		Summary:   "lgtm",
 	})
 
 	require.NoError(t, err)
@@ -127,8 +127,8 @@ func TestSubmitDecisionRejectsWithoutHardGateValidation(t *testing.T) {
 	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
 		RequestID: "req-submit",
 		ReviewID:  review.ID,
-		Decision: reviewdomain.DecisionAccepted,
-		Scores:   []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
+		Decision:  reviewdomain.DecisionAccepted,
+		Scores:    []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
 	})
 
 	require.Equal(t, "hard_gates_failed", domain.CodeOf(err))
@@ -142,8 +142,8 @@ func TestSubmitDecisionRequiresCompleteScoresForAccept(t *testing.T) {
 	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
 		RequestID: "req-submit",
 		ReviewID:  review.ID,
-		Decision: reviewdomain.DecisionAccepted,
-		Scores:   []reviewdomain.RubricScore{},
+		Decision:  reviewdomain.DecisionAccepted,
+		Scores:    []reviewdomain.RubricScore{},
 	})
 
 	require.Equal(t, "invalid_argument", domain.CodeOf(err))
@@ -157,7 +157,7 @@ func TestSubmitDecisionRejectsUnauthorizedReviewer(t *testing.T) {
 	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-2"), reviewapp.SubmitDecision{
 		RequestID: "req-submit",
 		ReviewID:  review.ID,
-		Decision: reviewdomain.DecisionRejected,
+		Decision:  reviewdomain.DecisionRejected,
 	})
 
 	require.ErrorIs(t, err, domain.ErrForbidden)
@@ -170,7 +170,7 @@ func TestSubmitDecisionRequestsRevision(t *testing.T) {
 	got, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
 		RequestID: "req-submit",
 		ReviewID:  review.ID,
-		Decision: reviewdomain.DecisionRevisionRequested,
+		Decision:  reviewdomain.DecisionRevisionRequested,
 	})
 
 	require.NoError(t, err)
@@ -556,7 +556,9 @@ type reviewMemoryTx struct {
 
 func (tx *reviewMemoryTx) Now(context.Context) (time.Time, error) { return tx.store.now, nil }
 
-func (tx *reviewMemoryTx) InsertTask(context.Context, application.TaskRecord) error       { panic("not implemented") }
+func (tx *reviewMemoryTx) InsertTask(context.Context, application.TaskRecord) error {
+	panic("not implemented")
+}
 func (tx *reviewMemoryTx) GetTask(_ context.Context, tenantID, id string) (*application.TaskRecord, error) {
 	r, ok := tx.store.tasks[taskKey(tenantID, id)]
 	if !ok {
@@ -564,11 +566,19 @@ func (tx *reviewMemoryTx) GetTask(_ context.Context, tenantID, id string) (*appl
 	}
 	return &r, nil
 }
-func (tx *reviewMemoryTx) ListTaskRecords(context.Context, application.TaskListQuery) ([]application.TaskRecord, error) { panic("not implemented") }
-func (tx *reviewMemoryTx) UpdateTask(context.Context, application.TaskRecord, int64, string) (bool, error) { panic("not implemented") }
-func (tx *reviewMemoryTx) ClaimTask(context.Context, string, string, int64, string) (bool, error) { panic("not implemented") }
+func (tx *reviewMemoryTx) ListTaskRecords(context.Context, application.TaskListQuery) ([]application.TaskRecord, error) {
+	panic("not implemented")
+}
+func (tx *reviewMemoryTx) UpdateTask(context.Context, application.TaskRecord, int64, string) (bool, error) {
+	panic("not implemented")
+}
+func (tx *reviewMemoryTx) ClaimTask(context.Context, string, string, int64, string) (bool, error) {
+	panic("not implemented")
+}
 
-func (tx *reviewMemoryTx) InsertExecution(context.Context, *domain.Execution, []byte) error { panic("not implemented") }
+func (tx *reviewMemoryTx) InsertExecution(context.Context, *domain.Execution, []byte) error {
+	panic("not implemented")
+}
 func (tx *reviewMemoryTx) GetExecution(_ context.Context, tenantID, id string) (*domain.Execution, int64, error) {
 	e, ok := tx.store.executions[execKey(tenantID, id)]
 	if !ok {
@@ -580,7 +590,9 @@ func (tx *reviewMemoryTx) GetExecution(_ context.Context, tenantID, id string) (
 func (tx *reviewMemoryTx) GetExecutionForUpdate(_ context.Context, tenantID, id string) (*domain.Execution, int64, error) {
 	return tx.GetExecution(context.Background(), tenantID, id)
 }
-func (tx *reviewMemoryTx) ListActiveExecutions(context.Context, string, string) ([]application.ExecutionRecord, error) { panic("not implemented") }
+func (tx *reviewMemoryTx) ListActiveExecutions(context.Context, string, string) ([]application.ExecutionRecord, error) {
+	panic("not implemented")
+}
 func (tx *reviewMemoryTx) UpdateExecution(_ context.Context, e *domain.Execution, _ int64) (bool, error) {
 	key := execKey(e.TenantID, e.ID)
 	if _, ok := tx.store.executions[key]; !ok {
@@ -590,8 +602,12 @@ func (tx *reviewMemoryTx) UpdateExecution(_ context.Context, e *domain.Execution
 	tx.store.executions[key] = &copy
 	return true, nil
 }
-func (tx *reviewMemoryTx) UpdateOwnedExecution(context.Context, *domain.Execution, int64, string, int64) (bool, error) { panic("not implemented") }
-func (tx *reviewMemoryTx) GetExecutionUsage(context.Context, string, string) (*application.UsageView, error) { panic("not implemented") }
+func (tx *reviewMemoryTx) UpdateOwnedExecution(context.Context, *domain.Execution, int64, string, int64) (bool, error) {
+	panic("not implemented")
+}
+func (tx *reviewMemoryTx) GetExecutionUsage(context.Context, string, string) (*application.UsageView, error) {
+	panic("not implemented")
+}
 
 func (tx *reviewMemoryTx) AcquireIdempotency(_ context.Context, key application.IdempotencyKey, hash [32]byte, expires time.Time) (*application.IdempotencyRecord, error) {
 	if r := tx.store.idem[key]; r != nil {
@@ -617,15 +633,31 @@ func (tx *reviewMemoryTx) CompleteIdempotency(_ context.Context, key application
 	return nil
 }
 
-func (tx *reviewMemoryTx) AppendTaskEvent(context.Context, application.TaskEvent) error { panic("not implemented") }
-func (tx *reviewMemoryTx) AppendOutboxEvent(context.Context, application.OutboxEvent) error { panic("not implemented") }
-func (tx *reviewMemoryTx) ListTaskEvents(context.Context, string, string, int64, int) ([]application.TaskEventSummary, error) { panic("not implemented") }
-func (tx *reviewMemoryTx) GetLatestExecutionEvent(context.Context, string, string) (application.TaskEventSummary, error) { panic("not implemented") }
+func (tx *reviewMemoryTx) AppendTaskEvent(context.Context, application.TaskEvent) error {
+	panic("not implemented")
+}
+func (tx *reviewMemoryTx) AppendOutboxEvent(context.Context, application.OutboxEvent) error {
+	panic("not implemented")
+}
+func (tx *reviewMemoryTx) ListTaskEvents(context.Context, string, string, int64, int) ([]application.TaskEventSummary, error) {
+	panic("not implemented")
+}
+func (tx *reviewMemoryTx) GetLatestExecutionEvent(context.Context, string, string) (application.TaskEventSummary, error) {
+	panic("not implemented")
+}
 
-func (tx *reviewMemoryTx) Reviews() application.ReviewRepository      { return reviewMemoryReviewRepository{store: tx.store} }
-func (tx *reviewMemoryTx) LineComments() application.LineCommentRepository { return reviewMemoryCommentRepository{store: tx.store} }
-func (tx *reviewMemoryTx) Rubrics() application.RubricRepository      { return reviewMemoryRubricRepository{store: tx.store} }
-func (tx *reviewMemoryTx) Reviewers() application.ReviewerRepository  { return reviewMemoryReviewerRepository{store: tx.store} }
+func (tx *reviewMemoryTx) Reviews() application.ReviewRepository {
+	return reviewMemoryReviewRepository{store: tx.store}
+}
+func (tx *reviewMemoryTx) LineComments() application.LineCommentRepository {
+	return reviewMemoryCommentRepository{store: tx.store}
+}
+func (tx *reviewMemoryTx) Rubrics() application.RubricRepository {
+	return reviewMemoryRubricRepository{store: tx.store}
+}
+func (tx *reviewMemoryTx) Reviewers() application.ReviewerRepository {
+	return reviewMemoryReviewerRepository{store: tx.store}
+}
 
 func (tx *reviewMemoryTx) RequireLiveAgent(context.Context, auth.Principal) error { return nil }
 
@@ -657,7 +689,9 @@ func (r reviewMemoryReviewRepository) GetByID(_ context.Context, tenantID, id st
 	return &copy, nil
 }
 
-func (r reviewMemoryReviewRepository) ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error) { panic("not implemented") }
+func (r reviewMemoryReviewRepository) ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error) {
+	panic("not implemented")
+}
 
 type reviewMemoryCommentRepository struct{ store *reviewMemoryStore }
 
@@ -666,7 +700,9 @@ func (r reviewMemoryCommentRepository) Insert(_ context.Context, comment *review
 	return nil
 }
 
-func (r reviewMemoryCommentRepository) ListByReview(context.Context, string, string) ([]reviewdomain.LineComment, error) { panic("not implemented") }
+func (r reviewMemoryCommentRepository) ListByReview(context.Context, string, string) ([]reviewdomain.LineComment, error) {
+	panic("not implemented")
+}
 
 type reviewMemoryRubricRepository struct{ store *reviewMemoryStore }
 
@@ -689,8 +725,12 @@ func (r reviewMemoryRubricRepository) GetByID(_ context.Context, tenantID, id st
 	return &copy, nil
 }
 
-func (r reviewMemoryRubricRepository) ListVersions(context.Context, string) ([]reviewdomain.RubricVersion, error) { panic("not implemented") }
-func (r reviewMemoryRubricRepository) CreateVersion(context.Context, *reviewdomain.RubricVersion) error { panic("not implemented") }
+func (r reviewMemoryRubricRepository) ListVersions(context.Context, string) ([]reviewdomain.RubricVersion, error) {
+	panic("not implemented")
+}
+func (r reviewMemoryRubricRepository) CreateVersion(context.Context, *reviewdomain.RubricVersion) error {
+	panic("not implemented")
+}
 
 type reviewMemoryReviewerRepository struct{ store *reviewMemoryStore }
 
@@ -750,12 +790,12 @@ func (r reviewMemoryReviewerRepository) DecrementLoad(_ context.Context, tenantI
 
 // --- helpers ---
 
-func taskKey(tenantID, id string) string   { return tenantID + "/" + id }
-func execKey(tenantID, id string) string   { return tenantID + "/" + id }
+func taskKey(tenantID, id string) string     { return tenantID + "/" + id }
+func execKey(tenantID, id string) string     { return tenantID + "/" + id }
 func reviewerKey(tenantID, id string) string { return tenantID + "/" + id }
-func rubricKey(tenantID, id string) string  { return tenantID + "/" + id }
-func reviewKey(tenantID, id string) string  { return tenantID + "/" + id }
-func commentKey(tenantID, id string) string { return tenantID + "/" + id }
+func rubricKey(tenantID, id string) string   { return tenantID + "/" + id }
+func reviewKey(tenantID, id string) string   { return tenantID + "/" + id }
+func commentKey(tenantID, id string) string  { return tenantID + "/" + id }
 
 func cloneReviewerProfile(p reviewdomain.ReviewerProfile) reviewdomain.ReviewerProfile {
 	p.Capabilities = slices.Clone(p.Capabilities)
