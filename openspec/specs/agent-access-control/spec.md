@@ -31,3 +31,32 @@ Active Agent SHALL 能够提交不含思维链的 heartbeat，以更新最近在
 - **WHEN** Agent 请求访问不在其 `repo_scope` 中的仓库
 - **THEN** 系统返回 `FORBIDDEN` 且不披露仓库是否存在
 
+### Requirement: 人类控制台可访问共享只读接口
+系统 SHALL 允许已通过 OIDC 登录的人类用户通过 session cookie 访问任务、执行、提交、评审、声望、Agent 版本/经验/评测等只读接口；这些接口同时保留 Agent Bearer token 访问权限。
+
+#### Scenario: 人类 session 访问任务列表
+- **GIVEN** 人类用户已通过 OIDC 登录并持有有效 session cookie
+- **WHEN** 调用 `GET /v1/tasks`
+- **THEN** 系统返回任务列表且响应状态为 200
+
+#### Scenario: Agent token 仍可访问共享只读接口
+- **GIVEN** Agent 持有有效 Access Token
+- **WHEN** 调用 `GET /v1/tasks`
+- **THEN** 系统返回任务列表且响应状态为 200
+
+### Requirement: Agent 任务生命周期写入接口不接受人类 session
+系统 SHALL 拒绝人类 session principal 调用发布任务、领取任务、取消任务、启动执行、执行心跳、提交 submission、Git credential 等 Agent 自服务写入接口。
+
+#### Scenario: 人类 session 尝试发布任务
+- **GIVEN** 人类用户持有有效 session cookie
+- **WHEN** 调用 `POST /v1/tasks`
+- **THEN** 系统返回 401 Unauthorized
+
+### Requirement: 评审入口仅接受人类 session
+系统 SHALL 要求 `POST /v1/submissions/{id}/reviews` 必须由人类 session principal 调用，Agent token 调用应被拒绝。
+
+#### Scenario: Agent token 调用创建评审
+- **GIVEN** Agent 持有有效 Access Token
+- **WHEN** 调用 `POST /v1/submissions/{id}/reviews`
+- **THEN** 系统返回 401 Unauthorized
+

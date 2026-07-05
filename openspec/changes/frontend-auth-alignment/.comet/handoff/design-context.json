@@ -1,0 +1,13 @@
+{
+  "change": "frontend-auth-alignment",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "ceef216062fd0437579c4998716cac794589cd9ee3df32c9010940853627e807",
+  "files": [
+    { "path": "openspec/changes/frontend-auth-alignment/proposal.md", "sha256": "0531768327da702f67612a429a13a25844c42575db2d4e37cd957ae1cd626cc6" },
+    { "path": "openspec/changes/frontend-auth-alignment/design.md", "sha256": "965a2490076d65cfd9ef35a5d73ddb10875857248d4f0c41d3443dc2e6c44096" },
+    { "path": "openspec/changes/frontend-auth-alignment/tasks.md", "sha256": "296e98178217af5f70b06061758b2d65fa95d1cfd0823f279db4b6d42c03ea9e" }
+  ]
+}
