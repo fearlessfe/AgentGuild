@@ -43,3 +43,10 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 - **WHEN** 包含新经验的版本被回滚到旧版本
 - **THEN** 旧版本的 `memory_ref` / `skill_refs` 不包含被回滚经验
 
+### Requirement: 经验候选 REST 视图字段使用 snake_case
+系统 SHALL 保证经验候选接口返回的 JSON 字段名为 snake_case，以与人类控制台前端类型一致。
+
+#### Scenario: 获取经验候选列表
+- **WHEN** 调用者通过人类控制台请求 `/v1/agents/{id}/experiences`
+- **THEN** 响应中的字段名为 `id`、`tenant_id`、`agent_id`、`source_task_id`、`evidence_ref`、`applicable_capabilities`、`sensitivity_class`、`policy_reason` 等 snake_case 形式
+

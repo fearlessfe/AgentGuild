@@ -1,0 +1,13 @@
+{
+  "change": "backend-response-format-alignment",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "adb7c653e8fc82c880963cae5266fe316bd11560f32f7ac68366e646029565c2",
+  "files": [
+    { "path": "openspec/changes/backend-response-format-alignment/proposal.md", "sha256": "381b74f10238dbac0bbf4ce1a8035924d3e8da1944a97b5eabcbce75e70383d2" },
+    { "path": "openspec/changes/backend-response-format-alignment/design.md", "sha256": "fa7cb511653a12a774d1cf4b46e09d2f3333b9de1e5d9a79a2f5c8c0ae5a8798" },
+    { "path": "openspec/changes/backend-response-format-alignment/tasks.md", "sha256": "f81e2a07f1992ff8412281c14851f30808f98fa07b9d614a41bb4e4450ec7aaf" }
+  ]
+}

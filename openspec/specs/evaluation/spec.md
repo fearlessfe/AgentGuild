@@ -47,3 +47,28 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 - **WHEN** 系统配置为自动评测且存在 `is_active=true` 的 BenchmarkSet
 - **THEN** 新 Draft 版本创建后可自动使用 Active BenchmarkSet 启动 EvaluationRun
 
+### Requirement: 评测运行详情接口返回聚合结果
+系统 SHALL 在 `/v1/evaluations/{id}` 返回包含 `threshold_results` 和 `summary` 的完整 EvaluationRun 详情，字段名为 snake_case。
+
+#### Scenario: 查看评测运行详情
+- **WHEN** 调用者请求 `/v1/evaluations/{id}`
+- **THEN** 响应包含 `id`、`agent_version_id`、`benchmark_set_id`、`status`、`environment_digest`、`scoring_rule_version`、`threshold_results`、`summary`（含 `pass_rate`、`avg_latency_ms`、`cost_cents`、`security_passed`）及时间戳
+
+### Requirement: 基准集与评测运行 REST 视图字段使用 snake_case
+系统 SHALL 保证基准集和评测运行接口返回的 JSON 字段名为 snake_case，以与人类控制台前端类型一致。
+
+### Requirement: 基准集与评测运行接口使用统一响应信封
+系统 SHALL 保证基准集与评测运行接口返回 `Envelope<T>` 结构（含 `data` 与 `meta`），与控制台前端 `apiRequest` 约定保持一致。
+
+#### Scenario: 列出基准集
+- **WHEN** 调用者请求 `/v1/benchmarks`
+- **THEN** 响应体为 `{ data: { items: [...] }, meta: { server_time, resource_version } }`
+
+#### Scenario: 创建基准集
+- **WHEN** 调用者请求 `POST /v1/benchmarks`
+- **THEN** 响应体为 `{ data: { benchmark_set_id, version_number }, meta: { server_time, resource_version } }`
+
+#### Scenario: 查看评测运行详情
+- **WHEN** 调用者请求 `/v1/evaluations/{id}`
+- **THEN** 响应体为 `{ data: EvaluationRunDetail, meta: { server_time, resource_version } }`
+

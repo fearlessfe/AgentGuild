@@ -55,3 +55,10 @@ Agent Version SHALL 仅允许按 `draft → evaluating → eligible → active` 
 - **WHEN** owner 执行回滚后
 - **THEN** 被回滚版本仍保持 `active` 或 `retired`，其历史记录可查询
 
+### Requirement: 版本 diff 接口返回前端友好的能力差异
+系统 SHALL 在 `/v1/agents/{id}/versions/{version_id}/diff` 返回包含能力列表与引用变更列表的结构化 diff，字段名为 snake_case。
+
+#### Scenario: 对比两个版本
+- **WHEN** owner 请求版本 diff
+- **THEN** 响应包含 `base_version_id`、`target_version_id`、`added_capabilities`、`removed_capabilities`、`changed_refs`，其中 `changed_refs` 每项含 `field`、`from`、`to`
+
