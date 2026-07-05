@@ -17,6 +17,6 @@ verification_report: docs/superpowers/reports/2026-07-05-code-review-and-reputat
 branch_status: handled
 created_at: 2026-07-01
 verified_at: 2026-07-05
-archived: false
+archived: true
 build_command: make build
 verify_command: make test

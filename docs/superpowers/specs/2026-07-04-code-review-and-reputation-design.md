@@ -2,6 +2,8 @@
 change: code-review-and-reputation
 design-doc: docs/superpowers/specs/2026-07-04-code-review-and-reputation-design.md
 base-ref: 9bfdf6900305421ec222063adde41d98960b4943
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 Language: 中文
@@ -16,6 +18,8 @@ Language: 中文
 
 **Tech Stack:** Go 1.26.4、PostgreSQL 18.4、chi/v5、pgx/v5、modelcontextprotocol/go-sdk、React 19 + react-router-dom + @tanstack/react-query、Vitest + Playwright。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## Global Constraints
@@ -28,6 +32,8 @@ Language: 中文
 - 不实现自动合并、GitLab/GitHub 评论双向同步、单一全局总分、多审仲裁、实时事件总线。
 - Diff/Validation 模块接口若未就绪，先以内存 stub 实现，并在端口处标注 TODO。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 1. 文件结构
@@ -86,6 +92,8 @@ frontend/src/features/reputation/ReputationPage.tsx
 frontend/src/app/routes.tsx                      # 注册新路由（若存在）
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 2. 任务拆分
@@ -159,6 +167,8 @@ git add backend/internal/review/domain
 git commit -m "feat(review): add review, comment, rubric and reviewer domain models"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 2: 数据库迁移与 Review 持久化
@@ -294,6 +304,8 @@ git add backend/migrations backend/internal/review/postgres backend/internal/rev
 git commit -m "feat(review): add review persistence and migrations"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 3: Execution 状态机扩展以支持审核决策
@@ -378,6 +390,8 @@ git add backend/internal/domain
 git commit -m "feat(domain): extend execution state machine for review decisions"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 4: Review 应用服务与权限策略
@@ -462,6 +476,8 @@ git add backend/internal/review/application backend/internal/application/ports.g
 git commit -m "feat(review): add review application service, policy and allocator"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 5: REST 路由：Review / Comment / Rubric / Reputation
@@ -517,6 +533,8 @@ git add backend/internal/transport/rest
 git commit -m "feat(rest): add review, rubric and reputation routes"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 6: MCP 工具
@@ -570,6 +588,8 @@ git add backend/internal/transport/mcp
 git commit -m "feat(mcp): add review_submit, review_get and reputation_get tools"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 7: 声望领域模型与投影算法
@@ -628,6 +648,8 @@ git add backend/internal/reputation/domain backend/internal/reputation/applicati
 git commit -m "feat(reputation): add projection domain and projector"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 8: 声望持久化与 Worker
@@ -683,6 +705,8 @@ git add backend/internal/reputation/postgres backend/internal/reputation/worker 
 git commit -m "feat(reputation): add projection persistence and async worker"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 9: React 审核页面骨架与 Diff 展示
@@ -747,6 +771,8 @@ git add frontend/src/features/reviews
 git commit -m "feat(frontend): add review page, file tree and diff viewer"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 10: React 行级评论、Rubric 评分与决策提交
@@ -802,6 +828,8 @@ git add frontend/src/features/reviews
 git commit -m "feat(frontend): line comments, rubric scoring and decision submission"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 11: React 声望页面
@@ -838,6 +866,8 @@ git add frontend/src/features/reputation
 git commit -m "feat(frontend): add reputation projection page"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ### Task 12: 集成测试与验收测试
@@ -889,6 +919,8 @@ git add backend/internal/acceptance frontend/e2e
 git commit -m "test: add review and reputation acceptance tests"
 ```
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 3. 接口清单
@@ -910,6 +942,8 @@ git commit -m "test: add review and reputation acceptance tests"
 - `review_get`：查询 Review
 - `reputation_get`：查询声望投影
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 4. 数据模型与迁移
@@ -924,6 +958,8 @@ git commit -m "test: add review and reputation acceptance tests"
 
 迁移文件命名：`backend/migrations/000003_code_review_and_reputation.up.sql` / `.down.sql`。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 5. 外部依赖与端口
@@ -949,6 +985,8 @@ type DiffCacheCleaner interface {
 - `identity` 提供 AgentVersion 查询（已有 `agent_versions` 表）。
 - `task` 提供 `Execution` 与 `Task` 读取，用于 reputation worker 归因。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 6. 测试策略
@@ -962,6 +1000,8 @@ type DiffCacheCleaner interface {
 | 验收测试 | 端到端审核链路、退回不漂移、跨版本隔离 | 可独立运行 |
 | 前端测试 | Diff 渲染、评论定位、Rubric 计算、声望展示 | Vitest + Playwright |
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 7. 风险与缓解
@@ -974,6 +1014,8 @@ type DiffCacheCleaner interface {
 | Diff 缓存占用大 | 单文件大小阈值 + 摘要 |
 | 严格权限增加查询复杂度 | Repository 查询加 tenant_id + 角色校验，集成测试覆盖 |
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 8. Self-Review
@@ -993,6 +1035,8 @@ type DiffCacheCleaner interface {
 
 3. **类型一致性:** `Review.FinalDecision` / `Decision` 类型在 Task 1、Task 4、Task 6、Task 7 中统一使用；`RubricScore` 在前后端同名同构。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 9. 验证与交付检查清单
@@ -1007,6 +1051,8 @@ type DiffCacheCleaner interface {
 - [x] 设计文档中明确的错误码全部落地：`not_found`、`state_conflict`、`forbidden`、`invalid_argument`、`hard_gates_failed`。
 - [x] 最终 diff 规模以 `base-ref` `9bfdf6900305421ec222063adde41d98960b4943` 为起点统计并归档。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## 10. 备注
@@ -1015,6 +1061,8 @@ type DiffCacheCleaner interface {
 - `git-delivery-and-validation` 模块若尚未合入，Review 服务可先使用端口 stub，但接口契约必须在代码中保留。
 - 声望 Worker 初始为轮询实现，后续可迁移为 outbox 事件驱动而不影响审核事实。
 
+archived-with: 2026-07-05-code-review-and-reputation
+status: final
 ---
 
 ## Execution Handoff
