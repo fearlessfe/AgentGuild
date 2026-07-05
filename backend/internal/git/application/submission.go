@@ -84,6 +84,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 			principal.TenantID,
 			cmd.TaskID,
 			cmd.ExecutionID,
+			cmd.Repo,
 			cmd.Branch,
 			cmd.CommitSHA,
 			cmd.BaseCommitSHA,
@@ -154,6 +155,40 @@ func (s *SubmissionService) GetSubmission(ctx context.Context, principal Princip
 	return result, err
 }
 
+// CheckSubmissionIntegrity verifies the submission commit is still reachable
+// from its branch. If the branch has been force-pushed and the commit is no
+// longer reachable, the submission is marked invalid.
+func (s *SubmissionService) CheckSubmissionIntegrity(ctx context.Context, principal Principal, query CheckSubmissionIntegrity) error {
+	if err := requireCaller(principal); err != nil {
+		return err
+	}
+	if query.SubmissionID == "" {
+		return invalid("submission_id")
+	}
+
+	return s.store.WithTx(ctx, func(tx Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		sub, err := tx.Submissions().GetByID(ctx, principal.TenantID, query.SubmissionID)
+		if err != nil {
+			return err
+		}
+		reachable, err := s.verifier.IsCommitReachable(ctx, sub.Repo, sub.Branch, sub.CommitSHA)
+		if err != nil {
+			return err
+		}
+		if !reachable {
+			if err := sub.MarkInvalid(now); err != nil {
+				return err
+			}
+			return tx.Submissions().Save(ctx, sub)
+		}
+		return nil
+	})
+}
+
 func (s *SubmissionService) requireAgent(principal Principal) error {
 	if principal.TenantID == "" {
 		return domain.ErrForbidden
@@ -175,6 +210,7 @@ func submissionView(sub *gitdomain.Submission, now time.Time) SubmissionView {
 		TenantID:        sub.TenantID,
 		TaskID:          sub.TaskID,
 		ExecutionID:     sub.ExecutionID,
+		Repo:            sub.Repo,
 		Branch:          sub.Branch,
 		CommitSHA:       sub.CommitSHA,
 		BaseCommitSHA:   sub.BaseCommitSHA,

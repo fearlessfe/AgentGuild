@@ -31,10 +31,10 @@ func (r *submissionRepository) Save(ctx context.Context, submission *gitdomain.S
 
 	_, err := r.q.Exec(ctx, `
 		INSERT INTO submissions (
-			id, tenant_id, task_id, execution_id, branch, commit_sha, base_commit_sha,
+			id, tenant_id, task_id, execution_id, repo, branch, commit_sha, base_commit_sha,
 			summary, test_declaration, evidence, diff_fingerprint, status,
 			validation_job_id, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			branch = EXCLUDED.branch,
 			commit_sha = EXCLUDED.commit_sha,
@@ -46,7 +46,7 @@ func (r *submissionRepository) Save(ctx context.Context, submission *gitdomain.S
 			status = EXCLUDED.status,
 			validation_job_id = EXCLUDED.validation_job_id,
 			updated_at = EXCLUDED.updated_at`,
-		submission.ID, submission.TenantID, submission.TaskID, submission.ExecutionID, submission.Branch,
+		submission.ID, submission.TenantID, submission.TaskID, submission.ExecutionID, submission.Repo, submission.Branch,
 		submission.CommitSHA, submission.BaseCommitSHA, submission.Summary, submission.TestDeclaration,
 		evidenceArg, submission.DiffFingerprint, string(submission.Status), submission.ValidationJobID,
 		submission.CreatedAt, submission.UpdatedAt,
@@ -59,7 +59,7 @@ func (r *submissionRepository) Save(ctx context.Context, submission *gitdomain.S
 
 func (r *submissionRepository) GetByID(ctx context.Context, tenantID, id string) (*gitdomain.Submission, error) {
 	submission, err := r.scanRow(r.q.QueryRow(ctx, `
-		SELECT id, tenant_id, task_id, execution_id, branch, commit_sha, base_commit_sha,
+		SELECT id, tenant_id, task_id, execution_id, repo, branch, commit_sha, base_commit_sha,
 		       summary, test_declaration, evidence, diff_fingerprint, status,
 		       validation_job_id, created_at, updated_at
 		FROM submissions
@@ -77,7 +77,7 @@ func (r *submissionRepository) GetByID(ctx context.Context, tenantID, id string)
 
 func (r *submissionRepository) GetByExecutionID(ctx context.Context, tenantID, executionID string) ([]*gitdomain.Submission, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT id, tenant_id, task_id, execution_id, branch, commit_sha, base_commit_sha,
+		SELECT id, tenant_id, task_id, execution_id, repo, branch, commit_sha, base_commit_sha,
 		       summary, test_declaration, evidence, diff_fingerprint, status,
 		       validation_job_id, created_at, updated_at
 		FROM submissions
@@ -114,7 +114,7 @@ func (r *submissionRepository) scanRow(row scanner) (*gitdomain.Submission, erro
 	var evidence *string
 	err := row.Scan(
 		&submission.ID, &submission.TenantID, &submission.TaskID, &submission.ExecutionID,
-		&submission.Branch, &submission.CommitSHA, &submission.BaseCommitSHA,
+		&submission.Repo, &submission.Branch, &submission.CommitSHA, &submission.BaseCommitSHA,
 		&submission.Summary, &submission.TestDeclaration, &evidence,
 		&submission.DiffFingerprint, &status,
 		&submission.ValidationJobID, &submission.CreatedAt, &submission.UpdatedAt,

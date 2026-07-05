@@ -170,6 +170,17 @@ func (v *CommitVerifier) ChangedFiles(ctx context.Context, repo, base, head stri
 	return v.driver.CompareCommits(ctx, repo, base, head)
 }
 
+// IsCommitReachable reports whether commitSHA is still an ancestor of the
+// current branch head. A false result means the branch was force-pushed or the
+// commit was removed.
+func (v *CommitVerifier) IsCommitReachable(ctx context.Context, repo, branch, commitSHA string) (bool, error) {
+	branchHead, err := v.driver.GetCommit(ctx, repo, branch)
+	if err != nil {
+		return false, err
+	}
+	return v.driver.IsAncestor(ctx, repo, commitSHA, branchHead.SHA)
+}
+
 func (v *CommitVerifier) verifyBranch(ctx context.Context, cmd VerifyCommit) error {
 	branchHead, err := v.driver.GetCommit(ctx, cmd.Repo, cmd.Branch)
 	if err != nil {

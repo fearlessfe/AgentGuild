@@ -108,6 +108,19 @@ func TestValidationJobRepositoryClaimNextPendingAfterExpiry(t *testing.T) {
 	require.Equal(t, 2, claimed.Attempt)
 }
 
+func TestValidationJobRepositoryRejectsDuplicateSubmissionJob(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
+	require.NoError(t, err)
+	require.NoError(t, postgres.NewValidationJobRepository(db).Insert(ctx, job))
+
+	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-2" })
+	require.NoError(t, err)
+	err = postgres.NewValidationJobRepository(db).Insert(ctx, job2)
+	require.Error(t, err)
+}
+
 func TestValidationJobRepositoryUpdateStep(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()

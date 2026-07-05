@@ -3,6 +3,7 @@ package validation_test
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -151,6 +152,31 @@ func TestRunnerCapturesElapsedResourceUsage(t *testing.T) {
 	result, err := runner.RunStep(context.Background(), job, gitdomain.ValidationStepBuild)
 	require.NoError(t, err)
 	require.Contains(t, string(result.ResourceUsage), "elapsed_ms")
+}
+
+func TestTempWorkspaceFactoryIsolatesJobs(t *testing.T) {
+	ctx := context.Background()
+	factory := &validation.TempWorkspaceFactory{}
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+
+	job1, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-1" })
+	require.NoError(t, err)
+	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-2" })
+	require.NoError(t, err)
+
+	dir1, cleanup1, err := factory.Prepare(ctx, job1)
+	require.NoError(t, err)
+	defer cleanup1()
+
+	dir2, cleanup2, err := factory.Prepare(ctx, job2)
+	require.NoError(t, err)
+	defer cleanup2()
+
+	require.NotEqual(t, dir1, dir2)
+	_, err = os.Stat(dir1)
+	require.NoError(t, err)
+	_, err = os.Stat(dir2)
+	require.NoError(t, err)
 }
 
 func newJob(now time.Time) *gitdomain.ValidationJob {

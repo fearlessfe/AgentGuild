@@ -147,6 +147,41 @@ func TestGetSubmissionReturnsSubmission(t *testing.T) {
 	require.Equal(t, created.Data.ID, got.Data.ID)
 }
 
+func TestCheckSubmissionIntegrityMarksInvalidOnForcePush(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+	created, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+
+	// Simulate force-push: branch now points to a new head that does not
+	// contain the submission commit.
+	fixture.driver.commits["new-head"] = git.Commit{SHA: "new-head"}
+	fixture.driver.commits["agentguild/exec-1"] = git.Commit{SHA: "new-head"}
+	fixture.driver.ancestors[ancestorKey{base: "head-sha", head: "new-head"}] = false
+
+	require.NoError(t, fixture.svc.CheckSubmissionIntegrity(context.Background(), agentPrincipal(), application.CheckSubmissionIntegrity{SubmissionID: created.Data.ID}))
+
+	got, err := fixture.svc.GetSubmission(context.Background(), agentPrincipal(), application.GetSubmission{SubmissionID: created.Data.ID})
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.SubmissionStatusInvalid, got.Data.Status)
+}
+
+func TestCheckSubmissionIntegrityKeepsValidWhenCommitReachable(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+	created, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+
+	// Branch moved forward but the submission commit is still an ancestor.
+	fixture.driver.commits["new-head"] = git.Commit{SHA: "new-head"}
+	fixture.driver.commits["agentguild/exec-1"] = git.Commit{SHA: "new-head"}
+	fixture.driver.ancestors[ancestorKey{base: "head-sha", head: "new-head"}] = true
+
+	require.NoError(t, fixture.svc.CheckSubmissionIntegrity(context.Background(), agentPrincipal(), application.CheckSubmissionIntegrity{SubmissionID: created.Data.ID}))
+
+	got, err := fixture.svc.GetSubmission(context.Background(), agentPrincipal(), application.GetSubmission{SubmissionID: created.Data.ID})
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.SubmissionStatusPendingVerification, got.Data.Status)
+}
+
 func TestGetSubmissionTenantIsolation(t *testing.T) {
 	fixture := newSubmissionFixture(t)
 	created, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())

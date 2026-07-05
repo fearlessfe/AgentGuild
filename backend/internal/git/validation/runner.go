@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -219,6 +220,20 @@ type StaticWorkspaceFactory struct {
 // Prepare implements WorkspaceFactory.
 func (f *StaticWorkspaceFactory) Prepare(context.Context, *gitdomain.ValidationJob) (string, func(), error) {
 	return f.Dir, nil, nil
+}
+
+// TempWorkspaceFactory creates a fresh temporary directory for each job and
+// returns a cleanup function that removes it. This provides filesystem
+// isolation between concurrent validation runs.
+type TempWorkspaceFactory struct{}
+
+// Prepare implements WorkspaceFactory.
+func (f *TempWorkspaceFactory) Prepare(context.Context, *gitdomain.ValidationJob) (string, func(), error) {
+	dir, err := os.MkdirTemp("", "validation-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create workspace: %w", err)
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // DefaultRegistry returns a starter configuration that maps common make targets

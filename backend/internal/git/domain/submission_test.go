@@ -30,6 +30,7 @@ func TestNewSubmissionRequiresMandatoryFields(t *testing.T) {
 		{"tenant_id", func(a *submissionArgs) { a.tenantID = "" }, "tenant_id"},
 		{"task_id", func(a *submissionArgs) { a.taskID = "" }, "task_id"},
 		{"execution_id", func(a *submissionArgs) { a.executionID = "" }, "execution_id"},
+		{"repo", func(a *submissionArgs) { a.repo = "" }, "repo"},
 		{"branch", func(a *submissionArgs) { a.branch = "" }, "branch"},
 		{"commit_sha", func(a *submissionArgs) { a.commitSHA = "" }, "commit_sha"},
 		{"base_commit_sha", func(a *submissionArgs) { a.baseCommitSHA = "" }, "base_commit_sha"},
@@ -149,6 +150,7 @@ type submissionArgs struct {
 	tenantID      string
 	taskID        string
 	executionID   string
+	repo          string
 	branch        string
 	commitSHA     string
 	baseCommitSHA string
@@ -166,6 +168,7 @@ func defaultArgs() submissionArgs {
 		tenantID:      "tenant-1",
 		taskID:        "task-1",
 		executionID:   "exec-1",
+		repo:          "owner/repo",
 		branch:        "agentguild/exec-1",
 		commitSHA:     "head-abc",
 		baseCommitSHA: "base-abc",
@@ -183,6 +186,7 @@ func buildSubmission(a submissionArgs) (*gitdomain.Submission, error) {
 		a.tenantID,
 		a.taskID,
 		a.executionID,
+		a.repo,
 		a.branch,
 		a.commitSHA,
 		a.baseCommitSHA,

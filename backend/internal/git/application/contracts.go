@@ -150,6 +150,13 @@ type GetSubmission struct {
 	SubmissionID string
 }
 
+// CheckSubmissionIntegrity verifies the submission's commit is still reachable
+// from the expected branch and marks the submission invalid if it was
+// force-pushed away.
+type CheckSubmissionIntegrity struct {
+	SubmissionID string
+}
+
 // StepView is the public shape of a validation step.
 type StepView struct {
 	Step          string     `json:"step"`
@@ -181,6 +188,7 @@ type SubmissionView struct {
 	TenantID        string                    `json:"tenant_id"`
 	TaskID          string                    `json:"task_id"`
 	ExecutionID     string                    `json:"execution_id"`
+	Repo            string                    `json:"repo"`
 	Branch          string                    `json:"branch"`
 	CommitSHA       string                    `json:"commit_sha"`
 	BaseCommitSHA   string                    `json:"base_commit_sha"`

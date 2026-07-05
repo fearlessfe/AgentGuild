@@ -32,6 +32,7 @@ type Submission struct {
 	TenantID        string
 	TaskID          string
 	ExecutionID     string
+	Repo            string
 	Branch          string
 	CommitSHA       string
 	BaseCommitSHA   string
@@ -51,6 +52,7 @@ func NewSubmission(
 	tenantID string,
 	taskID string,
 	executionID string,
+	repo string,
 	branch string,
 	commitSHA string,
 	baseCommitSHA string,
@@ -69,6 +71,9 @@ func NewSubmission(
 	}
 	if executionID == "" {
 		return nil, invalidArgument("execution_id")
+	}
+	if repo == "" {
+		return nil, invalidArgument("repo")
 	}
 	if branch == "" {
 		return nil, invalidArgument("branch")
@@ -99,6 +104,7 @@ func NewSubmission(
 		TenantID:        tenantID,
 		TaskID:          taskID,
 		ExecutionID:     executionID,
+		Repo:            repo,
 		Branch:          branch,
 		CommitSHA:       commitSHA,
 		BaseCommitSHA:   baseCommitSHA,
