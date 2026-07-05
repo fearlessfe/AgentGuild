@@ -10,16 +10,17 @@ const (
 type ExecutionStatus string
 
 const (
-	ExecutionLeased            ExecutionStatus = "leased"
-	ExecutionRunning           ExecutionStatus = "running"
-	ExecutionSubmitted         ExecutionStatus = "submitted"
-	ExecutionValidating        ExecutionStatus = "validating"
-	ExecutionReviewing         ExecutionStatus = "reviewing"
-	ExecutionRevisionRequested ExecutionStatus = "revision_requested"
-	ExecutionAccepted          ExecutionStatus = "accepted"
-	ExecutionRejected          ExecutionStatus = "rejected"
-	ExecutionExpired           ExecutionStatus = "expired"
-	ExecutionCancelled         ExecutionStatus = "cancelled"
+	ExecutionLeased             ExecutionStatus = "leased"
+	ExecutionRunning            ExecutionStatus = "running"
+	ExecutionSubmitted          ExecutionStatus = "submitted"
+	ExecutionValidating         ExecutionStatus = "validating"
+	ExecutionValidationFailed   ExecutionStatus = "validation_failed"
+	ExecutionReviewing          ExecutionStatus = "reviewing"
+	ExecutionRevisionRequested  ExecutionStatus = "revision_requested"
+	ExecutionAccepted           ExecutionStatus = "accepted"
+	ExecutionRejected           ExecutionStatus = "rejected"
+	ExecutionExpired            ExecutionStatus = "expired"
+	ExecutionCancelled          ExecutionStatus = "cancelled"
 )
 
 type Lease struct {
@@ -143,8 +144,20 @@ func (e *Execution) Apply(intent Intent, actor Actor, now time.Time) error {
 	switch intent {
 	case IntentAccept:
 		return e.Accept(actor, now)
+	case IntentReject:
+		return e.Reject(actor, now)
+	case IntentRequestRevision:
+		return e.RequestRevision(actor, now)
 	case IntentCancel:
 		return e.Cancel(actor, now)
+	case IntentSubmit:
+		return e.Submit(actor, now)
+	case IntentStartValidation:
+		return e.StartValidation(actor, now)
+	case IntentFailValidation:
+		return e.FailValidation(actor, now)
+	case IntentMarkReviewing:
+		return e.MarkReviewing(actor, now)
 	default:
 		return ErrStateConflict
 	}
@@ -164,16 +177,83 @@ func (e *Execution) Cancel(actor Actor, _ time.Time) error {
 	return nil
 }
 
-func (e *Execution) Accept(actor Actor, now time.Time) error {
+func (e *Execution) Submit(actor Actor, now time.Time) error {
 	if e.Status != ExecutionRunning {
 		return ErrStateConflict
 	}
-	if actor.Type != ActorReviewer || actor.ID == "" {
+	if actor.ID == "" || (actor.Type != ActorPublisher && actor.Type != ActorAgent && actor.Type != ActorSystem) {
 		return ErrForbidden
 	}
 	if !now.Before(e.Lease.HardExpiry) {
 		return ErrLeaseExpired
 	}
+	e.Status = ExecutionSubmitted
+	e.SubmittedAt = now
+	return nil
+}
+
+func (e *Execution) StartValidation(actor Actor, now time.Time) error {
+	if e.Status != ExecutionSubmitted {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorSystem || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionValidating
+	return nil
+}
+
+func (e *Execution) FailValidation(actor Actor, now time.Time) error {
+	if e.Status != ExecutionValidating {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorSystem || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionValidationFailed
+	return nil
+}
+
+func (e *Execution) MarkReviewing(actor Actor, now time.Time) error {
+	if e.Status != ExecutionValidating {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorSystem || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionReviewing
+	return nil
+}
+
+func (e *Execution) Accept(actor Actor, _ time.Time) error {
+	if e.Status != ExecutionReviewing {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorReviewer || actor.ID == "" {
+		return ErrForbidden
+	}
 	e.Status = ExecutionAccepted
+	return nil
+}
+
+func (e *Execution) Reject(actor Actor, _ time.Time) error {
+	if e.Status != ExecutionReviewing {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorReviewer || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionRejected
+	return nil
+}
+
+func (e *Execution) RequestRevision(actor Actor, _ time.Time) error {
+	if e.Status != ExecutionReviewing {
+		return ErrStateConflict
+	}
+	if actor.Type != ActorReviewer || actor.ID == "" {
+		return ErrForbidden
+	}
+	e.Status = ExecutionRevisionRequested
 	return nil
 }
