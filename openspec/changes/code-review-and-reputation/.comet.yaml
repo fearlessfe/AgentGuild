@@ -1,5 +1,5 @@
 workflow: full
-phase: verify
+phase: build
 context_compression: off
 build_mode: subagent-driven-development
 build_pause: null
@@ -10,9 +10,9 @@ isolation: worktree
 verify_mode: full
 auto_transition: true
 base_ref: 9bfdf6900305421ec222063adde41d98960b4943
-design_doc: null
+design_doc: docs/superpowers/specs/2026-07-04-code-review-and-reputation-design.md
 plan: docs/superpowers/plans/2026-07-04-code-review-and-reputation.md
-verify_result: pending
+verify_result: fail
 verification_report: docs/superpowers/reports/2026-07-05-code-review-and-reputation-verify.md
 branch_status: pending
 created_at: 2026-07-01

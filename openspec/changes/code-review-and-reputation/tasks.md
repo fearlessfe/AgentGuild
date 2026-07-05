@@ -16,3 +16,16 @@
 - [x] 3.1 实现按 Agent Version、capability 和 task type 的声望投影
 - [x] 3.2 实现样本量、置信提示、返工率和审核成本查询
 - [x] 3.3 完成审核全链路、投影重算和跨版本隔离验收测试
+
+## 4. Verify 阶段修复（生产可用性补齐）
+
+- [ ] 4.1 在 main.go 挂载 Review / Rubric / Reputation 服务并注入 REST/MCP Server
+- [ ] 4.2 实现 Reputation 查询服务与 `GET /v1/reputation` 响应
+- [ ] 4.3 实现结构化 Diff Provider、新增 `GET /v1/submissions/:id/diff` 路由并匹配前端契约
+- [ ] 4.4 为新增 REST/MCP 视图 DTO 添加 snake_case JSON tags，与前端类型对齐
+- [ ] 4.5 提供 Execution → `reviewing` 推进的临时入口/端口并标注 TODO
+- [ ] 4.6 清理已提交的 `.superpowers/sdd/` 工作文件
+- [ ] 4.7 修复 `Execution.Accept` 仅允许从 `reviewing` 状态转换
+- [ ] 4.8 在 Review Policy 中校验 `reviews:read` / `reviews:write` / `reputation:read` scope
+- [ ] 4.9 修复 Worker 中 `avg_review_cost_cents` 关联 `execution_usage` 真实成本
+- [ ] 4.10 为缺少 Rubric/Reviewer 数据提供 seed SQL 或初始化逻辑，避免 CreateReview 失败
