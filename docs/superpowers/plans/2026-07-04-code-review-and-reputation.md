@@ -587,7 +587,7 @@ git commit -m "feat(mcp): add review_submit, review_get and reputation_get tools
   - `Projection{TotalReviews, AcceptedCount, RejectedCount, RevisionRequestedCount, PassRate, ReworkRate, AvgReviewCostCents, AvgReviewLatencyMs, SampleSizeHint, AlgorithmVersion}`
   - `Projector.Project(ctx, signals []ReviewSignal) ([]Projection, error)`
 
-- [ ] **Step 1: 写投影测试**
+- [x] **Step 1: 写投影测试**
 
 ```go
 func TestProjectionShowsLowSampleHint(t *testing.T) {
@@ -599,7 +599,7 @@ func TestProjectionShowsLowSampleHint(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 实现算法**
+- [x] **Step 2: 实现算法**
 
 ```go
 func (p *Projection) Apply(s ReviewSignal) {
@@ -620,7 +620,7 @@ func (p *Projection) Apply(s ReviewSignal) {
 }
 ```
 
-- [ ] **Step 3: 运行测试并提交**
+- [x] **Step 3: 运行测试并提交**
 
 ```bash
 go test ./internal/reputation/domain/... -v
