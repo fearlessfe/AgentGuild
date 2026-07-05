@@ -1,2 +1,2 @@
 build_command: "make build"
-verify_command: "make verify"
+verify_command: "scripts/comet-verify.sh"
