@@ -812,6 +812,40 @@ func (c *MCPClient) ReputationGet(agentVersionID, capability, taskType string) m
 	return c.parseReputationResult(rec)
 }
 
+// IssueCredential 通过 MCP 为指定 execution 签发 Git 凭证。
+func (c *MCPClient) IssueCredential(executionID, repo, baseCommit, requestID string) mcpCredentialResult {
+	c.t.Helper()
+	rec := c.callRaw("credential_issue", map[string]any{
+		"request_id":   requestID,
+		"execution_id": executionID,
+		"repo":         repo,
+		"base_commit":  baseCommit,
+	})
+	return c.parseCredentialResult(rec)
+}
+
+// CreateSubmission 通过 MCP 提交代码成果。
+func (c *MCPClient) CreateSubmission(executionID, repo, branch, commitSHA, baseCommitSHA, summary, requestID string) mcpSubmissionResult {
+	c.t.Helper()
+	rec := c.callRaw("submission_create", map[string]any{
+		"request_id":      requestID,
+		"execution_id":    executionID,
+		"repo":            repo,
+		"branch":          branch,
+		"commit_sha":      commitSHA,
+		"base_commit_sha": baseCommitSHA,
+		"summary":         summary,
+	})
+	return c.parseSubmissionResult(rec)
+}
+
+// GetSubmission 通过 MCP 查询 submission。
+func (c *MCPClient) GetSubmission(submissionID string) mcpSubmissionResult {
+	c.t.Helper()
+	rec := c.callRaw("validation_get", map[string]any{"submission_id": submissionID})
+	return c.parseSubmissionResult(rec)
+}
+
 type mcpReviewResult struct {
 	Code   string
 	Review reviewapp.ReviewView
@@ -821,6 +855,19 @@ type mcpReviewResult struct {
 type mcpReputationResult struct {
 	Code       string
 	Projection reputationapp.ProjectionView
+	Meta       application.Meta
+}
+
+type mcpCredentialResult struct {
+	Code       string
+	Credential gitapp.CredentialView
+	Token      string
+	Meta       application.Meta
+}
+
+type mcpSubmissionResult struct {
+	Code       string
+	Submission gitapp.SubmissionView
 	Meta       application.Meta
 }
 
@@ -910,6 +957,86 @@ func (c *MCPClient) parseReputationResult(rec *httptest.ResponseRecorder) mcpRep
 	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
 	c.lastMeta = envelope.Meta
 	return mcpReputationResult{Projection: envelope.Data, Meta: envelope.Meta}
+}
+
+func (c *MCPClient) parseCredentialResult(rec *httptest.ResponseRecorder) mcpCredentialResult {
+	c.t.Helper()
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &rpcResp))
+
+	if rpcResp.Error.Code != 0 {
+		return mcpCredentialResult{Code: "MCP_ERROR"}
+	}
+	if rpcResp.Result.IsError {
+		require.NotEmpty(c.t, rpcResp.Result.Content, "error result has no content")
+		var mcpErr struct {
+			Code string `json:"code"`
+		}
+		require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &mcpErr))
+		return mcpCredentialResult{Code: mcpErr.Code}
+	}
+
+	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
+	var envelope struct {
+		Data gitapp.IssueCredentialResponse `json:"data"`
+		Meta application.Meta             `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
+	c.lastMeta = envelope.Meta
+	return mcpCredentialResult{
+		Credential: envelope.Data.Credential,
+		Token:      envelope.Data.Token,
+		Meta:       envelope.Meta,
+	}
+}
+
+func (c *MCPClient) parseSubmissionResult(rec *httptest.ResponseRecorder) mcpSubmissionResult {
+	c.t.Helper()
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &rpcResp))
+
+	if rpcResp.Error.Code != 0 {
+		return mcpSubmissionResult{Code: "MCP_ERROR"}
+	}
+	if rpcResp.Result.IsError {
+		require.NotEmpty(c.t, rpcResp.Result.Content, "error result has no content")
+		var mcpErr struct {
+			Code string `json:"code"`
+		}
+		require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &mcpErr))
+		return mcpSubmissionResult{Code: mcpErr.Code}
+	}
+
+	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
+	var envelope struct {
+		Data gitapp.SubmissionView `json:"data"`
+		Meta application.Meta      `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
+	c.lastMeta = envelope.Meta
+	return mcpSubmissionResult{Submission: envelope.Data, Meta: envelope.Meta}
 }
 
 func (c *MCPClient) callRaw(tool string, args map[string]any) *httptest.ResponseRecorder {
