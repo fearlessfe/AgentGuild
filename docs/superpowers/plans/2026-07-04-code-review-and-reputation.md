@@ -481,7 +481,7 @@ git commit -m "feat(review): add review application service, policy and allocato
   - `GET /v1/rubrics/active`
   - `GET /v1/reputation?agent_version_id=...&capability=...&task_type=...`
 
-- [ ] **Step 1: 定义 reviewService 接口并注入 Server**
+- [x] **Step 1: 定义 reviewService 接口并注入 Server**
 
 ```go
 type reviewService interface {
@@ -498,7 +498,7 @@ type rubricService interface {
 }
 ```
 
-- [ ] **Step 2: 注册路由**
+- [x] **Step 2: 注册路由**
 
 ```go
 r.With(s.authenticate, s.rateLimit).Get("/reviews/{id}", s.getReview)
@@ -509,7 +509,7 @@ r.With(s.authenticate, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
 r.With(s.authenticate, s.rateLimit).Get("/reputation", s.getReputation)
 ```
 
-- [ ] **Step 3: 写契约测试并提交**
+- [x] **Step 3: 写契约测试并提交**
 
 ```bash
 go test ./internal/transport/rest/... -v
