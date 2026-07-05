@@ -1,16 +1,16 @@
-ALTER TABLE agent_versions
-    ADD COLUMN parent_version_id TEXT,
-    ADD COLUMN status TEXT NOT NULL DEFAULT 'active',
-    ADD COLUMN content_hash TEXT NOT NULL DEFAULT '',
-    ADD COLUMN environment_digest TEXT NOT NULL DEFAULT '',
-    ADD COLUMN prompt_ref TEXT NOT NULL DEFAULT '',
-    ADD COLUMN skill_refs TEXT[] NOT NULL DEFAULT '{}'::text[],
-    ADD COLUMN memory_ref TEXT NOT NULL DEFAULT '',
-    ADD COLUMN tool_refs TEXT[] NOT NULL DEFAULT '{}'::text[],
-    ADD COLUMN created_by TEXT NOT NULL DEFAULT '',
-    ADD COLUMN promoted_at TIMESTAMPTZ,
-    ADD COLUMN retired_at TIMESTAMPTZ,
-    ADD COLUMN rejected_reason TEXT;
+ALTER TABLE IF EXISTS agent_versions
+    ADD COLUMN IF NOT EXISTS parent_version_id TEXT,
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS environment_digest TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS prompt_ref TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS skill_refs TEXT[] NOT NULL DEFAULT '{}'::text[],
+    ADD COLUMN IF NOT EXISTS memory_ref TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS tool_refs TEXT[] NOT NULL DEFAULT '{}'::text[],
+    ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS rejected_reason TEXT;
 
 UPDATE agent_versions
 SET status = 'active',
@@ -18,17 +18,33 @@ SET status = 'active',
     version_number = 1
 WHERE status = 'active' OR status IS NULL;
 
-ALTER TABLE agent_versions
-    ADD CONSTRAINT agent_versions_status_valid CHECK (
-        status IN ('draft', 'evaluating', 'eligible', 'active', 'retired', 'rejected')
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'agent_versions_status_valid'
+    ) THEN
+        ALTER TABLE agent_versions
+            ADD CONSTRAINT agent_versions_status_valid CHECK (
+                status IN ('draft', 'evaluating', 'eligible', 'active', 'retired', 'rejected')
+            );
+    END IF;
+END $$;
 
-ALTER TABLE agent_versions
-    ADD CONSTRAINT agent_versions_parent_fk
-        FOREIGN KEY (tenant_id, parent_version_id)
-        REFERENCES agent_versions (tenant_id, id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'agent_versions_parent_fk'
+    ) THEN
+        ALTER TABLE agent_versions
+            ADD CONSTRAINT agent_versions_parent_fk
+                FOREIGN KEY (tenant_id, parent_version_id)
+                REFERENCES agent_versions (tenant_id, id);
+    END IF;
+END $$;
 
-CREATE TABLE benchmark_sets (
+CREATE TABLE IF NOT EXISTS benchmark_sets (
     id TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     version_number INT NOT NULL CHECK (version_number >= 1),
@@ -41,7 +57,7 @@ CREATE TABLE benchmark_sets (
     UNIQUE (tenant_id, version_number)
 );
 
-CREATE TABLE benchmark_set_tasks (
+CREATE TABLE IF NOT EXISTS benchmark_set_tasks (
     tenant_id TEXT NOT NULL,
     benchmark_set_id TEXT NOT NULL,
     task_ref TEXT NOT NULL,
@@ -51,10 +67,10 @@ CREATE TABLE benchmark_set_tasks (
         FOREIGN KEY (tenant_id, benchmark_set_id) REFERENCES benchmark_sets (tenant_id, id)
 );
 
-CREATE INDEX idx_benchmark_set_tasks_set
+CREATE INDEX IF NOT EXISTS idx_benchmark_set_tasks_set
     ON benchmark_set_tasks (tenant_id, benchmark_set_id);
 
-CREATE TABLE evaluation_runs (
+CREATE TABLE IF NOT EXISTS evaluation_runs (
     id TEXT NOT NULL,
     tenant_id TEXT NOT NULL,
     agent_version_id TEXT NOT NULL,
@@ -76,13 +92,13 @@ CREATE TABLE evaluation_runs (
         FOREIGN KEY (tenant_id, benchmark_set_id) REFERENCES benchmark_sets (tenant_id, id)
 );
 
-CREATE INDEX idx_evaluation_runs_version
+CREATE INDEX IF NOT EXISTS idx_evaluation_runs_version
     ON evaluation_runs (tenant_id, agent_version_id, started_at DESC);
 
-CREATE INDEX idx_evaluation_runs_status
+CREATE INDEX IF NOT EXISTS idx_evaluation_runs_status
     ON evaluation_runs (tenant_id, agent_version_id, status, started_at DESC);
 
-CREATE TABLE evaluation_run_results (
+CREATE TABLE IF NOT EXISTS evaluation_run_results (
     tenant_id TEXT NOT NULL,
     evaluation_run_id TEXT NOT NULL,
     task_ref TEXT NOT NULL,
@@ -94,5 +110,37 @@ CREATE TABLE evaluation_run_results (
         FOREIGN KEY (tenant_id, evaluation_run_id) REFERENCES evaluation_runs (tenant_id, id)
 );
 
-CREATE INDEX idx_evaluation_run_results_run
+CREATE INDEX IF NOT EXISTS idx_evaluation_run_results_run
     ON evaluation_run_results (tenant_id, evaluation_run_id);
+
+CREATE TABLE IF NOT EXISTS experience_candidates (
+    id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    source_task_id TEXT NOT NULL,
+    source_submission_id TEXT NOT NULL,
+    source_review_id TEXT NOT NULL DEFAULT '',
+    evidence_ref TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    applicable_capabilities TEXT[] NOT NULL DEFAULT '{}'::text[],
+    tenant_scope TEXT NOT NULL,
+    sensitivity_class TEXT NOT NULL DEFAULT 'public',
+    status TEXT NOT NULL,
+    policy_reason TEXT,
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (tenant_id, id),
+    CONSTRAINT experience_candidates_status_valid CHECK (
+        status IN ('pending_review', 'approved', 'rejected')
+    ),
+    CONSTRAINT experience_candidates_sensitivity_valid CHECK (
+        sensitivity_class IN ('public', 'internal', 'restricted', 'forbidden')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_experience_candidates_agent_status
+    ON experience_candidates (tenant_id, agent_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_experience_candidates_submission
+    ON experience_candidates (tenant_id, agent_id, source_submission_id);

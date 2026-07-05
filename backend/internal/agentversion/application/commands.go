@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"sort"
 
 	"agentguild.dev/agentguild/backend/internal/agentversion/domain"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -14,6 +16,7 @@ func NewVersionService(
 	store Store,
 	versions VersionRepository,
 	evalProvider EvaluationRunProvider,
+	xpProvider ExperienceCandidateProvider,
 	policy *Policy,
 	options VersionOptions,
 ) (*VersionService, error) {
@@ -36,6 +39,7 @@ func NewVersionService(
 		store:        store,
 		versions:     versions,
 		evalProvider: evalProvider,
+		xpProvider:   xpProvider,
 		policy:       policy,
 		newID:        options.NewID,
 	}, nil
@@ -43,6 +47,8 @@ func NewVersionService(
 
 // CreateDraft creates a new draft version from the latest version for the agent.
 // If the configuration is unchanged, it returns domain.ErrNoChange.
+// Approved experience candidates may be bound to the draft by including their
+// IDs; their evidence references are merged into the new version's memory_ref.
 func (s *VersionService) CreateDraft(
 	ctx context.Context,
 	cmd CreateDraft,
@@ -56,13 +62,29 @@ func (s *VersionService) CreateDraft(
 		return nil, err
 	}
 
+	memoryRef := cmd.MemoryRef
+	if len(cmd.ApprovedExperienceIDs) > 0 {
+		if s.xpProvider == nil {
+			return nil, invalidArgument("approved_experience_ids")
+		}
+		approved, err := s.xpProvider.ListApprovedByAgent(ctx, cmd.TenantID, cmd.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		selected, err := filterApprovedExperiences(cmd.ApprovedExperienceIDs, approved)
+		if err != nil {
+			return nil, err
+		}
+		memoryRef = mergeExperienceRefs(memoryRef, selected)
+	}
+
 	cfg := domain.DraftConfig{
 		Runtime:           cmd.Runtime,
 		Model:             cmd.Model,
 		Capabilities:      cmd.Capabilities,
 		PromptRef:         cmd.PromptRef,
 		SkillRefs:         cmd.SkillRefs,
-		MemoryRef:         cmd.MemoryRef,
+		MemoryRef:         memoryRef,
 		ToolRefs:          cmd.ToolRefs,
 		EnvironmentDigest: cmd.EnvironmentDigest,
 		CreatedBy:         cmd.CreatedBy,
@@ -100,6 +122,46 @@ func (s *VersionService) CreateDraft(
 	}
 
 	return &CreateDraftResponse{Version: version}, nil
+}
+
+// filterApprovedExperiences returns only the approved candidates whose IDs are
+// requested. It returns an error if any requested ID is missing.
+func filterApprovedExperiences(requested []string, approved []ExperienceCandidateRef) ([]ExperienceCandidateRef, error) {
+	approvedByID := make(map[string]ExperienceCandidateRef, len(approved))
+	for _, ref := range approved {
+		approvedByID[ref.ID] = ref
+	}
+	seen := make(map[string]bool)
+	var selected []ExperienceCandidateRef
+	for _, id := range requested {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ref, ok := approvedByID[id]
+		if !ok {
+			return nil, &domain.Error{Code: "invalid_argument", Message: "experience candidate is not approved or does not belong to agent", Field: "approved_experience_ids"}
+		}
+		selected = append(selected, ref)
+	}
+	return selected, nil
+}
+
+// mergeExperienceRefs combines the base memory reference with approved candidate
+// evidence references into a deterministic JSON array used as the new memory_ref.
+func mergeExperienceRefs(baseMemory string, approved []ExperienceCandidateRef) string {
+	refs := make([]string, 0, len(approved)+1)
+	if baseMemory != "" {
+		refs = append(refs, baseMemory)
+	}
+	for _, ref := range approved {
+		if ref.EvidenceRef != "" {
+			refs = append(refs, ref.EvidenceRef)
+		}
+	}
+	sort.Strings(refs)
+	payload, _ := json.Marshal(refs)
+	return string(payload)
 }
 
 // StartEvaluation transitions a draft version to evaluating.

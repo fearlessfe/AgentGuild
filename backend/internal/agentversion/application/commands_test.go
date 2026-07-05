@@ -93,7 +93,7 @@ func newService(t *testing.T, db *pgxpool.Pool) (*application.VersionService, ap
 	repo := avpostgres.NewVersionRepository(db)
 	store := avpostgres.NewStore(db)
 	policy := application.NewPolicy(repo)
-	svc, err := application.NewVersionService(store, repo, fakeEvalProvider{}, policy, application.VersionOptions{})
+	svc, err := application.NewVersionService(store, repo, fakeEvalProvider{}, nil, policy, application.VersionOptions{})
 	require.NoError(t, err)
 	return svc, repo, store
 }

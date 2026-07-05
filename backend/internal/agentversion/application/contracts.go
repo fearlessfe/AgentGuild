@@ -43,6 +43,19 @@ type EvaluationRunProvider interface {
 	GetLatestPassed(context.Context, Tx, string, string) (*EvaluationRunInfo, error)
 }
 
+// ExperienceCandidateProvider abstracts the agentexperience module so a new
+// draft can bind approved experience evidence references.
+type ExperienceCandidateProvider interface {
+	ListApprovedByAgent(ctx context.Context, tenantID, agentID string) ([]ExperienceCandidateRef, error)
+}
+
+// ExperienceCandidateRef contains the minimal information needed to bind an
+// approved experience candidate to a new version.
+type ExperienceCandidateRef struct {
+	ID          string
+	EvidenceRef string
+}
+
 // EvaluationRunInfo contains the minimal information needed by the version
 // lifecycle service.
 type EvaluationRunInfo struct {
@@ -55,6 +68,7 @@ type VersionService struct {
 	store         Store
 	versions      VersionRepository
 	evalProvider  EvaluationRunProvider
+	xpProvider    ExperienceCandidateProvider
 	policy        *Policy
 	newID         func() string
 }
@@ -67,18 +81,19 @@ type VersionOptions struct {
 // Command DTOs
 
 type CreateDraft struct {
-	TenantID          string
-	AgentID           string
-	CreatedBy         string
-	IsAdmin           bool
-	Runtime           string
-	Model             string
-	Capabilities      []string
-	PromptRef         string
-	SkillRefs         []string
-	MemoryRef         string
-	ToolRefs          []string
-	EnvironmentDigest string
+	TenantID              string
+	AgentID               string
+	CreatedBy             string
+	IsAdmin               bool
+	Runtime               string
+	Model                 string
+	Capabilities          []string
+	PromptRef             string
+	SkillRefs             []string
+	MemoryRef             string
+	ToolRefs              []string
+	EnvironmentDigest     string
+	ApprovedExperienceIDs []string
 }
 
 type CreateDraftResponse struct {

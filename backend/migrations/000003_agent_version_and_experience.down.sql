@@ -2,14 +2,15 @@ DROP TABLE IF EXISTS evaluation_run_results;
 DROP TABLE IF EXISTS evaluation_runs;
 DROP TABLE IF EXISTS benchmark_set_tasks;
 DROP TABLE IF EXISTS benchmark_sets;
+DROP TABLE IF EXISTS experience_candidates;
 
-ALTER TABLE agent_versions
+ALTER TABLE IF EXISTS agent_versions
     DROP CONSTRAINT IF EXISTS agent_versions_parent_fk;
 
-ALTER TABLE agent_versions
+ALTER TABLE IF EXISTS agent_versions
     DROP CONSTRAINT IF EXISTS agent_versions_status_valid;
 
-ALTER TABLE agent_versions
+ALTER TABLE IF EXISTS agent_versions
     DROP COLUMN IF EXISTS parent_version_id,
     DROP COLUMN IF EXISTS status,
     DROP COLUMN IF EXISTS content_hash,
