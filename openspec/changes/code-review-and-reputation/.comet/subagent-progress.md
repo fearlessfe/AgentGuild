@@ -4,11 +4,12 @@
 
 - Plan task: Task 8: 声望持久化与 Worker
 - OpenSpec task: 3.1 / 3.2
-- Stage: quality-review
+- Stage: final-fix
 - Review mode: thorough
 - Implementer: agent-24 (DONE, commit 5ada486)
-- Reviewer: agent-26 (task_id: agent-ot807wop, running; agent-25 failed on quota)
-- Base commit: 38b4878
+- Reviewer: agent-26 (FAIL: 2 CRITICAL, 2 IMPORTANT)
+- Fixer: agent-27 (task_id: agent-jjw3lsw5, running)
+- Base commit: 7915bd8
 
 ## Previous Task
 
@@ -16,6 +17,5 @@
 
 ## Next
 
-- Wait for agent-26 review result.
-- If PASS: check off Task 8 and OpenSpec tasks, then proceed to Task 9.
-- If FAIL with CRITICAL/IMPORTANT findings: dispatch fix subagent.
+- Wait for agent-27 fix result.
+- After fix, regenerate review package and re-dispatch reviewer (final review round 1).
