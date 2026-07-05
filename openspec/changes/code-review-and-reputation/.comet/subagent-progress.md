@@ -3,10 +3,11 @@
 ## Current Task
 
 - Plan task: Task 10: React 行级评论、Rubric 评分与决策提交
-- Stage: quality-review
+- Stage: final-fix
 - Review mode: thorough
 - Implementer: agent-35 (DONE, commit 3fc40a5)
-- Reviewer: agent-36 (task_id: agent-xpm2fmkc, running)
+- Reviewer: agent-36 (PASS with 1 IMPORTANT deviation)
+- Fixer: agent-37 (task_id: agent-qdb0g8c4, running)
 - Base commit: 219cd3e
 
 ## Previous Tasks
@@ -17,6 +18,5 @@
 
 ## Next
 
-- Wait for agent-36 review result.
-- If PASS: check off Task 10, then proceed to Task 11.
-- If FAIL with CRITICAL/IMPORTANT findings: dispatch fix subagent.
+- Wait for agent-37 fix result.
+- After fix, regenerate review package and re-dispatch final reviewer.
