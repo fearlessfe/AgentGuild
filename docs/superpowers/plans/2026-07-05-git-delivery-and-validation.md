@@ -2,6 +2,7 @@
 change: git-delivery-and-validation
 design-doc: docs/superpowers/specs/2026-07-04-git-delivery-and-validation-design.md
 base-ref: 8550b609a784adfbb336055ca7a407a33ee6a4d5
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 # Git Delivery and Validation 运行时接入实施计划
@@ -29,6 +30,7 @@ base-ref: 8550b609a784adfbb336055ca7a407a33ee6a4d5
 - 硬门槛失败时 Submission MUST NOT 进入 ReadyForReview（本 change 内体现为 Execution 不进入 `reviewing`）。
 - 验证结果 MUST 绑定 commit SHA、diff 指纹、验证配置版本和尝试号。
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## File Structure
@@ -51,6 +53,7 @@ base-ref: 8550b609a784adfbb336055ca7a407a33ee6a4d5
 - `backend/internal/transport/mcp/server.go` — 增加 `WithCredentialService` Option 与凭证工具注册
 - `openspec/changes/git-delivery-and-validation/tasks.md` — 补充运行时接入任务
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 1: 补齐 Execution 状态机迁移
@@ -212,6 +215,7 @@ git add backend/internal/domain/execution.go backend/internal/domain/execution_t
 git commit -m "feat(domain): add execution submitted/validating/validation_failed/reviewing transitions"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 2: 定义 Execution 状态迁移端口
@@ -284,6 +288,7 @@ git add backend/internal/git/application/execution_notifier.go backend/internal/
 git commit -m "feat(git): add ExecutionNotifier port for cross-module state transitions"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 3: SubmissionService 推进 Execution 到 submitted
@@ -438,6 +443,7 @@ git add backend/internal/domain/task.go backend/internal/domain/execution.go bac
 git commit -m "feat(git): SubmissionService notifies execution submitted after create"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 4: ValidationWorker 推进 Execution 状态
@@ -600,6 +606,7 @@ git add backend/internal/git/domain/validation_job.go backend/internal/git/appli
 git commit -m "feat(git): ValidationWorker advances Execution through validating/reviewing/failed"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 5: 核心应用服务实现 ExecutionNotifier
@@ -666,6 +673,7 @@ git add backend/internal/application/service.go
 git commit -m "feat(application): implement CoreExecutionNotifier for git module"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 6: REST 凭证路由
@@ -862,6 +870,7 @@ git add backend/internal/transport/rest/router.go backend/internal/transport/res
 git commit -m "feat(rest): add credential issue/get/revoke routes"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 7: MCP 凭证工具
@@ -998,6 +1007,7 @@ git add backend/internal/transport/mcp/server.go backend/internal/transport/mcp/
 git commit -m "feat(mcp): add credential issue/get/revoke tools"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 8: main.go 挂载 Git 模块运行时
@@ -1149,6 +1159,7 @@ git add backend/cmd/agentguild-api/main.go backend/internal/config/config.go
 git commit -m "feat(main): wire Git driver, credential/submission services and validation worker"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 9: 更新 tasks.md 并添加验证
@@ -1224,6 +1235,7 @@ git add backend/internal/postgres/task_repository.go
 git commit -m "fix(postgres): persist submitted_at in UpdateExecution"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Task 9: 更新 tasks.md 并添加验证
@@ -1268,6 +1280,7 @@ git add openspec/changes/git-delivery-and-validation/tasks.md
 git commit -m "chore(git): mark runtime integration tasks complete"
 ```
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Spec Coverage Check
@@ -1281,6 +1294,7 @@ git commit -m "chore(git): mark runtime integration tasks complete"
 | 硬门槛不可绕过 | Task 4（ValidationWorker 根据 ValidationJob 状态推进） |
 | 验证结果绑定不可变提交 | Task 3, 4（Submission 冻结 commit SHA 与 diff fingerprint） |
 
+archived-with: 2026-07-05-git-delivery-and-validation
 ---
 
 ## Placeholder Scan

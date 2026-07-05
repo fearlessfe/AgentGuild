@@ -2,6 +2,8 @@
 comet_change: git-delivery-and-validation
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-05-git-delivery-and-validation
+status: final
 ---
 
 # Git Delivery and Validation Technical Design
