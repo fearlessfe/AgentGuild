@@ -100,6 +100,23 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if err := tx.Submissions().Save(ctx, sub); err != nil {
 			return err
 		}
+
+		configVersion := cmd.ConfigVersion
+		if configVersion == "" {
+			configVersion = "default"
+		}
+		job, err := gitdomain.NewValidationJob(principal.TenantID, sub.ID, configVersion, now, s.newID)
+		if err != nil {
+			return err
+		}
+		if err := tx.ValidationJobs().Insert(ctx, job); err != nil {
+			return err
+		}
+		sub.SetValidationJobID(job.ID, now)
+		if err := tx.Submissions().Save(ctx, sub); err != nil {
+			return err
+		}
+
 		result = Envelope[SubmissionView]{
 			Data: submissionView(sub, now),
 			Meta: Meta{ServerTime: now},

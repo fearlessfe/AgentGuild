@@ -142,11 +142,37 @@ type CreateSubmission struct {
 	Evidence       []byte
 	AllowedPaths   []string
 	ForbiddenPaths []string
+	ConfigVersion  string
 }
 
 // GetSubmission retrieves a submission by ID.
 type GetSubmission struct {
 	SubmissionID string
+}
+
+// StepView is the public shape of a validation step.
+type StepView struct {
+	Step          string     `json:"step"`
+	Status        string     `json:"status"`
+	LogSummary    string     `json:"log_summary,omitempty"`
+	ResourceUsage []byte     `json:"resource_usage,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+}
+
+// ValidationJobView is the public shape of a validation job.
+type ValidationJobView struct {
+	ID            string     `json:"id"`
+	TenantID      string     `json:"tenant_id"`
+	SubmissionID  string     `json:"submission_id"`
+	Status        string     `json:"status"`
+	Attempt       int        `json:"attempt"`
+	ClaimedUntil  *time.Time `json:"claimed_until,omitempty"`
+	ClaimedBy     *string    `json:"claimed_by,omitempty"`
+	ConfigVersion string     `json:"config_version"`
+	Steps         []StepView `json:"steps"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // SubmissionView is the public shape of a submission.

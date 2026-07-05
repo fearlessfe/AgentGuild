@@ -16,7 +16,18 @@ type Store interface {
 type Tx interface {
 	Credentials() CredentialRepository
 	Submissions() SubmissionRepository
+	ValidationJobs() ValidationJobRepository
 	Now(context.Context) (time.Time, error)
+}
+
+// ValidationJobRepository persists validation jobs and their steps.
+type ValidationJobRepository interface {
+	Insert(context.Context, *gitdomain.ValidationJob) error
+	GetByID(context.Context, string, string) (*gitdomain.ValidationJob, error)
+	GetBySubmissionID(context.Context, string, string) (*gitdomain.ValidationJob, error)
+	ClaimNextPending(context.Context, string, string, time.Time, time.Time) (*gitdomain.ValidationJob, error)
+	Update(context.Context, *gitdomain.ValidationJob) error
+	UpdateStep(context.Context, string, string, gitdomain.Step) error
 }
 
 // CredentialRepository persists credential metadata without the token

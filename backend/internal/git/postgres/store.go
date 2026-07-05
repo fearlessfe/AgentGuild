@@ -69,5 +69,10 @@ func (tx *Tx) Submissions() application.SubmissionRepository {
 	return &submissionRepository{q: tx.tx}
 }
 
+// ValidationJobs returns the validation job repository for this transaction.
+func (tx *Tx) ValidationJobs() application.ValidationJobRepository {
+	return &validationJobRepository{q: tx.tx, now: tx.Now}
+}
+
 var _ application.Store = (*Store)(nil)
 var _ application.Tx = (*Tx)(nil)

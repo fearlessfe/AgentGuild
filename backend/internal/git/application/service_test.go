@@ -294,13 +294,19 @@ func (f *fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branc
 }
 
 type memoryStore struct {
-	now         time.Time
-	credentials map[string]*application.CredentialRecord
-	submissions map[string]*gitdomain.Submission
+	now           time.Time
+	credentials   map[string]*application.CredentialRecord
+	submissions   map[string]*gitdomain.Submission
+	validationJobs map[string]*gitdomain.ValidationJob
 }
 
 func newMemoryStore(now time.Time) *memoryStore {
-	return &memoryStore{now: now, credentials: map[string]*application.CredentialRecord{}, submissions: map[string]*gitdomain.Submission{}}
+	return &memoryStore{
+		now:            now,
+		credentials:    map[string]*application.CredentialRecord{},
+		submissions:    map[string]*gitdomain.Submission{},
+		validationJobs: map[string]*gitdomain.ValidationJob{},
+	}
 }
 
 func (s *memoryStore) WithTx(ctx context.Context, fn func(application.Tx) error) error {
@@ -336,6 +342,10 @@ func (tx *memoryTx) Credentials() application.CredentialRepository {
 
 func (tx *memoryTx) Submissions() application.SubmissionRepository {
 	return &memorySubmissionRepository{store: tx.store}
+}
+
+func (tx *memoryTx) ValidationJobs() application.ValidationJobRepository {
+	return &memoryValidationJobRepository{store: tx.store}
 }
 
 func (tx *memoryTx) Now(context.Context) (time.Time, error) { return tx.now, nil }
@@ -446,6 +456,70 @@ func (r *memorySubmissionRepository) GetByExecutionID(_ context.Context, tenantI
 		}
 	}
 	return out, nil
+}
+
+type memoryValidationJobRepository struct {
+	store *memoryStore
+}
+
+func (r *memoryValidationJobRepository) Insert(_ context.Context, job *gitdomain.ValidationJob) error {
+	r.store.validationJobs[job.ID] = job
+	return nil
+}
+
+func (r *memoryValidationJobRepository) GetByID(_ context.Context, tenantID, id string) (*gitdomain.ValidationJob, error) {
+	job := r.store.validationJobs[id]
+	if job == nil || job.TenantID != tenantID {
+		return nil, git.ErrValidationJobNotFound
+	}
+	return job, nil
+}
+
+func (r *memoryValidationJobRepository) GetBySubmissionID(_ context.Context, tenantID, submissionID string) (*gitdomain.ValidationJob, error) {
+	for _, job := range r.store.validationJobs {
+		if job.TenantID == tenantID && job.SubmissionID == submissionID {
+			return job, nil
+		}
+	}
+	return nil, git.ErrValidationJobNotFound
+}
+
+func (r *memoryValidationJobRepository) ClaimNextPending(_ context.Context, tenantID, workerID string, now, until time.Time) (*gitdomain.ValidationJob, error) {
+	for _, job := range r.store.validationJobs {
+		if job.TenantID != tenantID {
+			continue
+		}
+		if job.Status != gitdomain.ValidationStatusPending && job.Status != gitdomain.ValidationStatusRunning {
+			continue
+		}
+		if job.ClaimedUntil != nil && job.ClaimedUntil.After(now) {
+			continue
+		}
+		if err := job.Claim(workerID, until, now); err != nil {
+			continue
+		}
+		return job, nil
+	}
+	return nil, nil
+}
+
+func (r *memoryValidationJobRepository) Update(_ context.Context, job *gitdomain.ValidationJob) error {
+	r.store.validationJobs[job.ID] = job
+	return nil
+}
+
+func (r *memoryValidationJobRepository) UpdateStep(_ context.Context, tenantID, jobID string, step gitdomain.Step) error {
+	job := r.store.validationJobs[jobID]
+	if job == nil || job.TenantID != tenantID {
+		return git.ErrValidationJobNotFound
+	}
+	for i, s := range job.Steps {
+		if s.Step == step.Step {
+			job.Steps[i] = step
+			return nil
+		}
+	}
+	return git.ErrValidationJobNotFound
 }
 
 func sequenceIDs(values ...string) func() string {

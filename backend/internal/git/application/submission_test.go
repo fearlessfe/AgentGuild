@@ -113,6 +113,14 @@ func TestCreateSubmissionComputesDiffFingerprint(t *testing.T) {
 	require.Equal(t, "tenant-1", got.Data.TenantID)
 	require.Equal(t, "task-1", got.Data.TaskID)
 	require.Equal(t, "exec-1", got.Data.ExecutionID)
+	require.NotNil(t, got.Data.ValidationJobID)
+
+	job := fixture.store.validationJobs[*got.Data.ValidationJobID]
+	require.NotNil(t, job)
+	require.Equal(t, got.Data.ID, job.SubmissionID)
+	require.Equal(t, gitdomain.ValidationStatusPending, job.Status)
+	require.Equal(t, "default", job.ConfigVersion)
+	require.Len(t, job.Steps, len(gitdomain.DefaultValidationSteps))
 
 	record := fixture.store.submissions[got.Data.ID]
 	require.NotNil(t, record)
