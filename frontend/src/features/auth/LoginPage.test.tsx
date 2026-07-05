@@ -5,16 +5,19 @@ import { LoginPage } from "./LoginPage";
 
 describe("LoginPage", () => {
   const originalLocation = window.location;
-  const originalEnv = import.meta.env;
 
   beforeEach(() => {
-    delete (window as Window & { location?: Location }).location;
-    window.location = { ...originalLocation, href: "" } as Location;
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...originalLocation, href: "" },
+    });
   });
 
   afterEach(() => {
-    window.location = originalLocation;
-    import.meta.env = originalEnv;
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: originalLocation,
+    });
     vi.restoreAllMocks();
   });
 
