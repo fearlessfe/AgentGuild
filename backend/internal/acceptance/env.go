@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,10 +18,18 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	"agentguild.dev/agentguild/backend/internal/domain"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
+	reputationdomain "agentguild.dev/agentguild/backend/internal/reputation/domain"
+	reputationpostgres "agentguild.dev/agentguild/backend/internal/reputation/postgres"
+	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
+	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
+	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
+	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
 	transportmcp "agentguild.dev/agentguild/backend/internal/transport/mcp"
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
@@ -33,6 +43,9 @@ type Env struct {
 	T          *testing.T
 	DB         *pgxpool.Pool
 	Service    *application.Service
+	ReviewSvc  *reviewapp.Service
+	Validation *acceptanceValidationProvider
+	Worker     *reputationworker.Worker
 	MCP        *MCPClient
 	REST       *RESTClient
 	Identity   *IdentityClient
@@ -51,6 +64,12 @@ func Start(t *testing.T) *Env {
 		CursorTTL:    15 * time.Minute,
 	})
 	require.NoError(t, err)
+
+	validation := &acceptanceValidationProvider{pass: true}
+	reviewSvc, err := reviewapp.NewService(store, acceptanceDiffProvider{}, validation, reviewapp.Options{})
+	require.NoError(t, err)
+	worker := reputationworker.NewWorker(store, time.Hour, 100, slog.Default())
+
 	verifier, tokenIssuer := newAcceptanceIdentityRuntime(t)
 	identitySvc, err := identityapp.NewIdentityService(identityStore, identityapp.IdentityOptions{
 		NewID:       acceptanceSequenceIDs("agent-1", "version-1", "agent-2", "version-2", "agent-3", "version-3"),
@@ -58,19 +77,32 @@ func Start(t *testing.T) *Env {
 	})
 	require.NoError(t, err)
 	seedFakeLifecycleAgents(t, db)
+	seedAcceptanceRubric(t, db)
+	seedAcceptanceReviewer(t, db)
 
-	mcpHandler := transportmcp.NewServer(svc, verifier).Handler()
+	reputationSvc := application.NewReputationQueryService(store)
+
+	mcpHandler := transportmcp.NewServer(svc, verifier,
+		transportmcp.WithReviewService(reviewSvc),
+		transportmcp.WithReputationService(reputationSvc),
+	).Handler()
 	restHandler := rest.NewServer(svc, verifier,
 		rest.WithIdentityService(identitySvc),
+		rest.WithReviewService(reviewSvc),
+		rest.WithRubricService(reviewSvc),
+		rest.WithReputationService(reputationSvc),
 		rest.WithSession("acceptance-session-secret-0123456789abcdef", false),
 	).Router()
 
 	return &Env{
-		T:       t,
-		DB:      db,
-		Service: svc,
-		MCP:     &MCPClient{t: t, handler: mcpHandler, db: db, token: "token-agent"},
-		REST:    &RESTClient{t: t, handler: restHandler, db: db, token: "token-agent"},
+		T:          t,
+		DB:         db,
+		Service:    svc,
+		ReviewSvc:  reviewSvc,
+		Validation: validation,
+		Worker:     worker,
+		MCP:        &MCPClient{t: t, handler: mcpHandler, db: db, token: "token-agent"},
+		REST:       &RESTClient{t: t, handler: restHandler, db: db, token: "token-agent"},
 		Identity: &IdentityClient{
 			t:             t,
 			handler:       restHandler,
@@ -126,6 +158,146 @@ func (env *Env) RunReaper() int {
 	return n
 }
 
+// SubmitForReview 将运行中的执行推进到 reviewing 状态。
+// 当前为临时入口，待 git-delivery-and-validation 模块合入后替换。
+func (env *Env) SubmitForReview(executionID string) {
+	env.T.Helper()
+	ctx := context.Background()
+	var agentVersionID string
+	err := env.DB.QueryRow(ctx, `SELECT agent_version_id FROM executions WHERE tenant_id=$1 AND id=$2`, "tenant-1", executionID).Scan(&agentVersionID)
+	require.NoError(env.T, err)
+	token := "token-agent"
+	var i int
+	if _, err := fmt.Sscanf(agentVersionID, "acceptance-agent-%d", &i); err == nil && i > 1 {
+		token = fmt.Sprintf("token-agent-%d", i)
+	}
+	res := env.REST.As(token).SubmitForReview(executionID, executionID+"-submit-for-review")
+	require.Empty(env.T, res.Code, "submit for review failed: %s", res.Code)
+}
+
+// CreateResubmissionExecution 模拟 revision requested 后 agent 重新提交产生的新 execution。
+// 当前 git-delivery-and-validation 模块尚未实现，因此直接操作数据库生成新 execution。
+func (env *Env) CreateResubmissionExecution(taskID, oldExecutionID, newExecutionID, agentVersionID string) string {
+	env.T.Helper()
+	ctx := context.Background()
+
+	_, err := env.DB.Exec(ctx, `
+		UPDATE executions
+		SET status = 'expired', expired_at = clock_timestamp(), updated_at = clock_timestamp()
+		WHERE tenant_id = $1 AND id = $2`, "tenant-1", oldExecutionID)
+	require.NoError(env.T, err)
+
+	_, err = env.DB.Exec(ctx, `
+		UPDATE tasks
+		SET active_execution_id = NULL, updated_at = clock_timestamp()
+		WHERE tenant_id = $1 AND id = $2`, "tenant-1", taskID)
+	require.NoError(env.T, err)
+
+	secret := make([]byte, 32)
+	_, err = rand.Read(secret)
+	require.NoError(env.T, err)
+	hash := sha256.Sum256(secret)
+	_, err = env.DB.Exec(ctx, `
+		INSERT INTO executions (
+			tenant_id, id, task_id, agent_version_id, status, state_version,
+			lease_secret_hash, lease_generation, claimed_at, started_at, submitted_at,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, 'reviewing', 0, $5, 1,
+			clock_timestamp(), clock_timestamp(), clock_timestamp(),
+			clock_timestamp(), clock_timestamp())`,
+		"tenant-1", newExecutionID, taskID, agentVersionID, hash[:])
+	require.NoError(env.T, err)
+
+	_, err = env.DB.Exec(ctx, `
+		UPDATE tasks
+		SET active_execution_id = $1, updated_at = clock_timestamp()
+		WHERE tenant_id = $2 AND id = $3`, newExecutionID, "tenant-1", taskID)
+	require.NoError(env.T, err)
+	return newExecutionID
+}
+
+// GetExecutionStatus 直接读取 execution 状态。
+func (env *Env) GetExecutionStatus(tenantID, executionID string) domain.ExecutionStatus {
+	env.T.Helper()
+	var status string
+	err := env.DB.QueryRow(context.Background(), `
+		SELECT status FROM executions WHERE tenant_id=$1 AND id=$2`, tenantID, executionID).Scan(&status)
+	require.NoError(env.T, err)
+	return domain.ExecutionStatus(status)
+}
+
+// CreateReviewViaREST 以发布者身份为指定 submission 创建 review。
+func (env *Env) CreateReviewViaREST(executionID string, capabilities []string, requestID string) reviewapp.ReviewView {
+	env.T.Helper()
+	res := env.REST.As("token-publisher").CreateReview(executionID, capabilities, requestID)
+	require.Empty(env.T, res.Code, "create review failed: %s", res.Code)
+	return res.Review
+}
+
+// SubmitDecisionViaREST 以指定 reviewer token 提交 review 决策。
+func (env *Env) SubmitDecisionViaREST(reviewID, decision string, scores []reviewdomain.RubricScore, summary, token, requestID string) reviewapp.ReviewView {
+	env.T.Helper()
+	res := env.REST.As(token).SubmitDecision(reviewID, decision, scores, summary, requestID)
+	require.Empty(env.T, res.Code, "submit decision failed: %s", res.Code)
+	return res.Review
+}
+
+// SubmitDecisionViaMCP 以指定 reviewer token 通过 MCP 提交 review 决策。
+func (env *Env) SubmitDecisionViaMCP(reviewID, decision string, scores []reviewdomain.RubricScore, summary, token, requestID string) reviewapp.ReviewView {
+	env.T.Helper()
+	res := env.MCP.As(token).ReviewSubmit(reviewID, decision, scores, summary, requestID)
+	require.Empty(env.T, res.Code, "submit decision via MCP failed: %s", res.Code)
+	return res.Review
+}
+
+// SubmitDecisionCodeViaMCP 返回 MCP 提交决策的错误码，空字符串表示成功。
+func (env *Env) SubmitDecisionCodeViaMCP(reviewID, decision string, scores []reviewdomain.RubricScore, summary, token, requestID string) string {
+	env.T.Helper()
+	return env.MCP.As(token).ReviewSubmit(reviewID, decision, scores, summary, requestID).Code
+}
+
+// AddCommentViaREST 为 review 添加行级注释。
+func (env *Env) AddCommentViaREST(reviewID, submissionID, text, token, requestID string) reviewapp.CommentView {
+	env.T.Helper()
+	res := env.REST.As(token).AddComment(reviewID, submissionID, text, requestID)
+	require.Empty(env.T, res.Code, "add comment failed: %s", res.Code)
+	return res.Comment
+}
+
+// ListComments 返回指定 review 下的所有行级注释。
+func (env *Env) ListComments(tenantID, reviewID string) []reviewdomain.LineComment {
+	env.T.Helper()
+	repo := reviewpostgres.NewLineCommentRepository(env.DB)
+	comments, err := repo.ListByReview(context.Background(), tenantID, reviewID)
+	require.NoError(env.T, err)
+	return comments
+}
+
+// WorkerTick 运行一次声望投影 worker。
+func (env *Env) WorkerTick() {
+	env.T.Helper()
+	require.NoError(env.T, env.Worker.RunOnce(context.Background()))
+}
+
+// GetProjection 读取指定 key 的声望投影。
+func (env *Env) GetProjection(tenantID, agentVersionID, capability, taskType string) *reputationdomain.Projection {
+	env.T.Helper()
+	repo := reputationpostgres.NewProjectionRepository(env.DB)
+	proj, err := repo.GetByKey(context.Background(), tenantID, reputationdomain.ProjectionKey{
+		AgentVersionID: agentVersionID,
+		Capability:     capability,
+		TaskType:       taskType,
+	})
+	require.NoError(env.T, err)
+	return proj
+}
+
+// SetHardGatesPass 切换验收测试中的硬门禁验证结果。
+func (env *Env) SetHardGatesPass(pass bool) {
+	env.T.Helper()
+	env.Validation.pass = pass
+}
+
 // AsAgent 返回使用指定 agent token 的 MCP 客户端。
 func (env *Env) AsAgent(token string) *MCPClient {
 	return env.MCP.As(token)
@@ -163,10 +335,17 @@ func (v fakeVerifier) Verify(ctx context.Context, rawToken string) (auth.Princip
 		return agentPrincipal(1), nil
 	case rawToken == "token-admin":
 		return adminPrincipal(), nil
+	case rawToken == "token-reviewer":
+		return reviewerPrincipal(1), nil
 	case strings.HasPrefix(rawToken, "token-agent-"):
 		var i int
 		if _, err := fmt.Sscanf(rawToken, "token-agent-%d", &i); err == nil {
 			return agentPrincipal(i), nil
+		}
+	case strings.HasPrefix(rawToken, "token-reviewer-"):
+		var i int
+		if _, err := fmt.Sscanf(rawToken, "token-reviewer-%d", &i); err == nil {
+			return reviewerPrincipal(i), nil
 		}
 	}
 	if v.fallback != nil {
@@ -181,7 +360,16 @@ func publisherPrincipal() auth.Principal {
 		Type:           auth.PrincipalTypeAgent,
 		AgentID:        "publisher",
 		AgentVersionID: "publisher-v1",
-		Scopes:         []string{"tasks:publish", "tasks:read", "tasks:cancel"},
+		Scopes:         []string{"tasks:publish", "tasks:read", "tasks:cancel", "reviews:read", "reviews:write", "tasks:execute"},
+	}
+}
+
+func reviewerPrincipal(i int) auth.Principal {
+	return auth.Principal{
+		TenantID: "tenant-1",
+		Type:     auth.PrincipalTypeHuman,
+		OwnerID:  fmt.Sprintf("reviewer-user-%d", i),
+		Scopes:   []string{"reviews:read", "reviews:write", "reputation:read"},
 	}
 }
 
@@ -360,6 +548,53 @@ func (c *MCPClient) TaskClaimCode(taskID, requestID string) string {
 	return c.call("task_claim", map[string]any{"request_id": requestID, "task_id": taskID}).Code
 }
 
+// ReviewSubmit 通过 MCP 提交 review 决策。
+func (c *MCPClient) ReviewSubmit(reviewID, decision string, scores []reviewdomain.RubricScore, summary, requestID string) mcpReviewResult {
+	c.t.Helper()
+	inputs := make([]map[string]any, len(scores))
+	for i, s := range scores {
+		inputs[i] = map[string]any{"dimension": s.Dimension, "score": s.Score}
+	}
+	rec := c.callRaw("review_submit", map[string]any{
+		"request_id": requestID,
+		"review_id":  reviewID,
+		"decision":   decision,
+		"scores":     inputs,
+		"summary":    summary,
+	})
+	return c.parseReviewResult(rec)
+}
+
+// ReviewGet 通过 MCP 查询 review。
+func (c *MCPClient) ReviewGet(reviewID string) mcpReviewResult {
+	c.t.Helper()
+	rec := c.callRaw("review_get", map[string]any{"review_id": reviewID})
+	return c.parseReviewResult(rec)
+}
+
+// ReputationGet 通过 MCP 查询声望投影。
+func (c *MCPClient) ReputationGet(agentVersionID, capability, taskType string) mcpReputationResult {
+	c.t.Helper()
+	rec := c.callRaw("reputation_get", map[string]any{
+		"agent_version_id": agentVersionID,
+		"capability":       capability,
+		"task_type":        taskType,
+	})
+	return c.parseReputationResult(rec)
+}
+
+type mcpReviewResult struct {
+	Code   string
+	Review reviewapp.ReviewView
+	Meta   application.Meta
+}
+
+type mcpReputationResult struct {
+	Code       string
+	Projection reputationapp.ProjectionView
+	Meta       application.Meta
+}
+
 type mcpResult struct {
 	Code      string
 	Execution application.ExecutionView
@@ -370,6 +605,82 @@ func (c *MCPClient) call(tool string, args map[string]any) mcpResult {
 	c.t.Helper()
 	rec := c.callRaw(tool, args)
 	return c.parseResult(rec)
+}
+
+func (c *MCPClient) parseReviewResult(rec *httptest.ResponseRecorder) mcpReviewResult {
+	c.t.Helper()
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &rpcResp))
+
+	if rpcResp.Error.Code != 0 {
+		return mcpReviewResult{Code: "MCP_ERROR"}
+	}
+	if rpcResp.Result.IsError {
+		require.NotEmpty(c.t, rpcResp.Result.Content, "error result has no content")
+		var mcpErr struct {
+			Code string `json:"code"`
+		}
+		require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &mcpErr))
+		return mcpReviewResult{Code: mcpErr.Code}
+	}
+
+	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
+	var envelope struct {
+		Data reviewapp.ReviewView `json:"data"`
+		Meta application.Meta     `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
+	c.lastMeta = envelope.Meta
+	return mcpReviewResult{Review: envelope.Data, Meta: envelope.Meta}
+}
+
+func (c *MCPClient) parseReputationResult(rec *httptest.ResponseRecorder) mcpReputationResult {
+	c.t.Helper()
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &rpcResp))
+
+	if rpcResp.Error.Code != 0 {
+		return mcpReputationResult{Code: "MCP_ERROR"}
+	}
+	if rpcResp.Result.IsError {
+		require.NotEmpty(c.t, rpcResp.Result.Content, "error result has no content")
+		var mcpErr struct {
+			Code string `json:"code"`
+		}
+		require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &mcpErr))
+		return mcpReputationResult{Code: mcpErr.Code}
+	}
+
+	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
+	var envelope struct {
+		Data reputationapp.ProjectionView `json:"data"`
+		Meta application.Meta             `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
+	c.lastMeta = envelope.Meta
+	return mcpReputationResult{Projection: envelope.Data, Meta: envelope.Meta}
 }
 
 func (c *MCPClient) callRaw(tool string, args map[string]any) *httptest.ResponseRecorder {
@@ -477,6 +788,154 @@ func (c *RESTClient) HeartbeatCode(executionID string, generation int64, request
 		"request_id":       requestID,
 		"lease_generation": generation,
 	}).Code
+}
+
+// CreateReview 为指定 submission 创建 review。
+func (c *RESTClient) CreateReview(submissionID string, capabilities []string, requestID string) restReviewResult {
+	c.t.Helper()
+	return c.postReview("/v1/submissions/"+submissionID+"/reviews", requestID, map[string]any{
+		"request_id":   requestID,
+		"capabilities": capabilities,
+	})
+}
+
+// SubmitDecision 提交 review 决策。
+func (c *RESTClient) SubmitDecision(reviewID, decision string, scores []reviewdomain.RubricScore, summary, requestID string) restReviewResult {
+	c.t.Helper()
+	return c.postReview("/v1/reviews/"+reviewID+"/decision", requestID, map[string]any{
+		"request_id": requestID,
+		"decision":   decision,
+		"scores":     scores,
+		"summary":    summary,
+	})
+}
+
+// AddComment 为 review 添加行级注释。
+func (c *RESTClient) AddComment(reviewID, submissionID, text, requestID string) restCommentResult {
+	c.t.Helper()
+	return c.postComment("/v1/reviews/"+reviewID+"/comments", requestID, map[string]any{
+		"request_id":       requestID,
+		"submission_id":    submissionID,
+		"file_path":        "main.go",
+		"side":             "right",
+		"line_number":      42,
+		"hunk_hash":        "h1",
+		"diff_fingerprint": "d1",
+		"text":             text,
+	})
+}
+
+// SubmitForReview 将运行中的 execution 推进到 reviewing。
+func (c *RESTClient) SubmitForReview(executionID, requestID string) restResult {
+	c.t.Helper()
+	return c.post("/v1/executions/"+executionID+":submit_for_review", requestID, map[string]any{
+		"request_id": requestID,
+	})
+}
+
+// GetReputation 查询指定 key 的声望投影。
+func (c *RESTClient) GetReputation(agentVersionID, capability, taskType string) restReputationResult {
+	c.t.Helper()
+	path := fmt.Sprintf("/v1/reputation?agent_version_id=%s&capability=%s&task_type=%s", agentVersionID, capability, taskType)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restReputationResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data reputationapp.ProjectionView `json:"data"`
+		Meta application.Meta             `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restReputationResult{Projection: envelope.Data, Meta: envelope.Meta}
+}
+
+type restReputationResult struct {
+	Code       string
+	Projection reputationapp.ProjectionView
+	Meta       application.Meta
+}
+
+type restReviewResult struct {
+	Code   string
+	Review reviewapp.ReviewView
+	Meta   application.Meta
+}
+
+type restCommentResult struct {
+	Code    string
+	Comment reviewapp.CommentView
+	Meta    application.Meta
+}
+
+func (c *RESTClient) postReview(path, requestID string, body map[string]any) restReviewResult {
+	c.t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(c.t, err)
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Idempotency-Key", requestID)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restReviewResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data reviewapp.ReviewView `json:"data"`
+		Meta application.Meta     `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restReviewResult{Review: envelope.Data, Meta: envelope.Meta}
+}
+
+func (c *RESTClient) postComment(path, requestID string, body map[string]any) restCommentResult {
+	c.t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(c.t, err)
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Idempotency-Key", requestID)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restCommentResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data reviewapp.CommentView `json:"data"`
+		Meta application.Meta      `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restCommentResult{Comment: envelope.Data, Meta: envelope.Meta}
 }
 
 type restResult struct {
@@ -908,3 +1367,64 @@ func acceptanceSequenceIDs(values ...string) func() string {
 		return value
 	}
 }
+
+// --- review & reputation helpers ---
+
+func seedAcceptanceRubric(t *testing.T, db *pgxpool.Pool) {
+	t.Helper()
+	repo := reviewpostgres.NewRubricRepository(db)
+	version, err := reviewdomain.NewRubricVersion(
+		"rubric-acceptance", "tenant-1", "Acceptance Rubric", 1,
+		[]reviewdomain.RubricDimension{{ID: "quality", Name: "Quality"}},
+		map[string]float64{"quality": 1.0},
+		"2026-07-04-v1", time.Now(),
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateVersion(context.Background(), version))
+}
+
+func seedAcceptanceReviewer(t *testing.T, db *pgxpool.Pool) {
+	t.Helper()
+	repo := reviewpostgres.NewReviewerRepository(db)
+	profile, err := reviewdomain.NewReviewerProfile(
+		"reviewer-1", "tenant-1", "reviewer-user-1", []string{"go"}, time.Now(),
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.Insert(context.Background(), profile))
+}
+
+// acceptanceDiffProvider 是 diff provider 的内存桩，返回固定结构化 diff 内容。
+// TODO: replace with git-delivery-and-validation implementation
+type acceptanceDiffProvider struct{}
+
+func (acceptanceDiffProvider) GetDiff(context.Context, string) ([]reviewapp.FileDiff, error) {
+	return []reviewapp.FileDiff{{
+		Path: "main.go",
+		Hunks: []reviewapp.Hunk{{
+			OldStart: 1,
+			OldLines: 0,
+			NewStart: 1,
+			NewLines: 1,
+			HunkHash: "h1",
+			Lines: []reviewapp.DiffLine{
+				{Type: "add", Text: "+func Run() {}", NewLine: 1},
+			},
+		}},
+	}}, nil
+}
+
+// acceptanceValidationProvider 是 validation provider 的内存桩，可控制硬 gate 结果。
+// TODO: replace with git-delivery-and-validation implementation
+type acceptanceValidationProvider struct {
+	pass bool
+}
+
+func (a *acceptanceValidationProvider) GetValidationStatus(context.Context, string) (reviewapp.ValidationStatus, error) {
+	return acceptanceValidationStatus{pass: a.pass}, nil
+}
+
+type acceptanceValidationStatus struct {
+	pass bool
+}
+
+func (v acceptanceValidationStatus) AllHardGatesPassed() bool { return v.pass }

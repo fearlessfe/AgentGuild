@@ -28,6 +28,7 @@ func (e Error) Is(target error) bool {
 }
 
 var (
+	ErrNotFound      = &Error{Code: "not_found", Message: "resource not found"}
 	ErrStateConflict = &Error{Code: "state_conflict", Message: "state transition is not allowed"}
 	ErrLeaseExpired  = &Error{Code: "lease_expired", Message: "lease is expired or stale"}
 	ErrForbidden     = &Error{Code: "forbidden", Message: "actor is not allowed to perform this transition"}

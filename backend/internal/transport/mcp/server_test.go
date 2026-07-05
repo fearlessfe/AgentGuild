@@ -16,6 +16,9 @@ import (
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
+	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
+	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -87,6 +90,44 @@ func (f *fakeApplication) HeartbeatExecution(ctx context.Context, p auth.Princip
 func (f *fakeApplication) GetExecution(ctx context.Context, p auth.Principal, q application.GetExecution) (application.Envelope[application.ExecutionView], error) {
 	f.calls = append(f.calls, call{method: "GetExecution", principal: p, payload: q})
 	return f.getExecution, f.getExecutionErr
+}
+
+// fakeReviewService 记录代码评审应用服务调用并按预置值返回。
+type fakeReviewService struct {
+	calls                 []call
+	submitResult          application.Envelope[reviewapp.ReviewView]
+	submitErr             error
+	getResult             application.Envelope[reviewapp.ReviewView]
+	getErr                error
+	submitForReviewResult application.Envelope[application.ExecutionView]
+	submitForReviewErr    error
+}
+
+func (f *fakeReviewService) SubmitDecision(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitDecision) (application.Envelope[reviewapp.ReviewView], error) {
+	f.calls = append(f.calls, call{method: "SubmitDecision", principal: p, payload: cmd})
+	return f.submitResult, f.submitErr
+}
+
+func (f *fakeReviewService) GetReview(ctx context.Context, p auth.Principal, query reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error) {
+	f.calls = append(f.calls, call{method: "GetReview", principal: p, payload: query})
+	return f.getResult, f.getErr
+}
+
+func (f *fakeReviewService) SubmitForReview(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error) {
+	f.calls = append(f.calls, call{method: "SubmitForReview", principal: p, payload: cmd})
+	return f.submitForReviewResult, f.submitForReviewErr
+}
+
+// fakeReputationService 是声望投影服务的占位实现。
+type fakeReputationService struct {
+	calls         []call
+	projection    application.Envelope[reputationapp.ProjectionView]
+	projectionErr error
+}
+
+func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, query reputationapp.GetProjection) (application.Envelope[reputationapp.ProjectionView], error) {
+	f.calls = append(f.calls, call{method: "GetProjection", principal: p, payload: query})
+	return f.projection, f.projectionErr
 }
 
 type fakeVerifier struct {
@@ -315,6 +356,23 @@ func newMCPServerWithAppAndPrincipal(t *testing.T, app *fakeApplication, princip
 	return s.mcpServer(req)
 }
 
+func newMCPServerWithReview(t *testing.T, reviewSvc reviewService, reputationSvc ReputationService) *mcp.Server {
+	t.Helper()
+	app := &fakeApplication{}
+	verifier := &fakeVerifier{principal: testPrincipal("tasks:read", "tasks:publish", "tasks:claim", "tasks:execute")}
+	opts := []Option{}
+	if reviewSvc != nil {
+		opts = append(opts, WithReviewService(reviewSvc))
+	}
+	if reputationSvc != nil {
+		opts = append(opts, WithReputationService(reputationSvc))
+	}
+	s := NewServer(app, verifier, opts...)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), verifier.principal))
+	return s.mcpServer(req)
+}
+
 func TestOversizedRequestBodyIsRejected(t *testing.T) {
 	app := &fakeApplication{}
 	verifier := &fakeVerifier{principal: testPrincipal("tasks:claim")}
@@ -460,6 +518,141 @@ func (f *fakeRateLimiter) Allow(ctx context.Context, key string) (bool, int) {
 	return f.allowed, f.retryAfter
 }
 
+func TestReviewSubmitMapsToApplicationService(t *testing.T) {
+	now := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	reviewSvc := &fakeReviewService{
+		submitResult: application.Envelope[reviewapp.ReviewView]{
+			Data: reviewapp.ReviewView{
+				ID:            "review-1",
+				SubmissionID:  "sub-1",
+				ReviewerID:    "reviewer-1",
+				Status:        string(reviewdomain.ReviewSubmitted),
+				FinalDecision: string(reviewdomain.DecisionAccepted),
+			},
+			Meta: application.Meta{ServerTime: now, ResourceVersion: 1},
+		},
+	}
+	server := newMCPServerWithReview(t, reviewSvc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "review_submit",
+		Arguments: map[string]any{
+			"request_id": "req-1",
+			"review_id":  "review-1",
+			"decision":   "accepted",
+			"scores": []map[string]any{
+				{"dimension": "correctness", "score": 5},
+			},
+			"summary": "looks good",
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, reviewSvc.calls, 1)
+	require.Equal(t, "SubmitDecision", reviewSvc.calls[0].method)
+	payload := reviewSvc.calls[0].payload.(reviewapp.SubmitDecision)
+	require.Equal(t, "req-1", payload.RequestID)
+	require.Equal(t, "review-1", payload.ReviewID)
+	require.Equal(t, reviewdomain.DecisionAccepted, payload.Decision)
+	require.Len(t, payload.Scores, 1)
+	require.Equal(t, "correctness", payload.Scores[0].Dimension)
+	require.Equal(t, 5, payload.Scores[0].Score)
+	require.Equal(t, "looks good", payload.Summary)
+}
+
+func TestReviewGetMapsToApplicationService(t *testing.T) {
+	now := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	reviewSvc := &fakeReviewService{
+		getResult: application.Envelope[reviewapp.ReviewView]{
+			Data: reviewapp.ReviewView{
+				ID:            "review-1",
+				SubmissionID:  "sub-1",
+				ReviewerID:    "reviewer-1",
+				Status:        string(reviewdomain.ReviewPending),
+				FinalDecision: "",
+			},
+			Meta: application.Meta{ServerTime: now, ResourceVersion: 1},
+		},
+	}
+	server := newMCPServerWithReview(t, reviewSvc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "review_get",
+		Arguments: map[string]any{"review_id": "review-1"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, reviewSvc.calls, 1)
+	require.Equal(t, "GetReview", reviewSvc.calls[0].method)
+	require.Equal(t, "review-1", reviewSvc.calls[0].payload.(reviewapp.GetReview).ReviewID)
+}
+
+func TestReputationGetReturnsNotImplemented(t *testing.T) {
+	server := newMCPServerWithReview(t, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	go func() { _, _ = server.Connect(ctx, serverTransport, nil) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer session.Close()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "reputation_get",
+		Arguments: map[string]any{
+			"agent_version_id": "agent-1-v1",
+			"capability":       "code-review",
+			"task_type":        "refactor",
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+	require.Len(t, res.Content, 1)
+	text, ok := res.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	var mcpErr MCPError
+	require.NoError(t, json.Unmarshal([]byte(text.Text), &mcpErr))
+	require.Equal(t, "NOT_IMPLEMENTED", mcpErr.Code)
+}
+
+func TestReviewToolsRequireRequestID(t *testing.T) {
+	server := newMCPServerWithReview(t, &fakeReviewService{}, nil)
+	for _, name := range []string{"review_submit"} {
+		t.Run(name, func(t *testing.T) {
+			schema := toolSchema(t, server, name)
+			required, ok := schema["required"].([]any)
+			require.True(t, ok, "schema required should be an array")
+			var found bool
+			for _, r := range required {
+				if r == "request_id" {
+					found = true
+					break
+				}
+			}
+			require.True(t, found, "%s schema should require request_id", name)
+		})
+	}
+}
 type fakeSubmissionService struct {
 	calls []submissionCall
 

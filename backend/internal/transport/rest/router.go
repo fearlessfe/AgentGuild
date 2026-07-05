@@ -62,6 +62,9 @@ type Server struct {
 	svc           applicationService
 	submissions   submissionService
 	identity      identityService
+	reviewSvc     ReviewService
+	rubricSvc     RubricService
+	reputationSvc ReputationService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
 	sessionSecret string
@@ -158,6 +161,16 @@ func (s *Server) Router() http.Handler {
 			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/submissions", s.createSubmission)
 			r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}", s.getSubmission)
 		}
+
+		r.With(s.authenticate, s.rateLimit).Post("/submissions/{id}/reviews", s.createReview)
+		r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}/diff", s.getSubmissionDiff)
+		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/decision", s.submitDecision)
+		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/comments", s.addComment)
+		r.With(s.authenticate, s.rateLimit).Get("/reviews/{id}", s.getReview)
+		r.With(s.authenticate, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
+		r.With(s.authenticate, s.rateLimit).Get("/reputation", s.getReputation)
+
+		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:submit_for_review", s.submitForReview)
 	})
 	return r
 }

@@ -13,6 +13,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 )
 
 var fixtureNow = time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
@@ -732,4 +733,17 @@ func (tx *fakeTx) GetLatestExecutionEvent(_ context.Context, _, executionID stri
 		}
 	}
 	return application.TaskEventSummary{}, nil
+}
+
+func (tx *fakeTx) Reviews() application.ReviewRepository      { return nil }
+func (tx *fakeTx) LineComments() application.LineCommentRepository { return nil }
+func (tx *fakeTx) Rubrics() application.RubricRepository      { return nil }
+func (tx *fakeTx) Reviewers() application.ReviewerRepository  { return nil }
+
+func (tx *fakeTx) UpsertReputationProjection(context.Context, reputationapp.ProjectionRecord) error {
+	return nil
+}
+
+func (tx *fakeTx) ListReputationProjectionsByAgentVersion(context.Context, string, string) ([]reputationapp.ProjectionRecord, error) {
+	return nil, nil
 }

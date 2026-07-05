@@ -25,6 +25,9 @@ const (
 	IntentHeartbeat
 	IntentExpire
 	IntentAccept
+	IntentReject
+	IntentRequestRevision
+	IntentSubmitForReview
 )
 
 type ActorType string

@@ -93,9 +93,9 @@ type GetSubmissionInput struct {
 	SubmissionID string `json:"submission_id" jsonschema:"submission identifier"`
 }
 
-// registerTools 注册任务生命周期与 Submission 工具。
+// registerTools 注册任务生命周期、Submission 与代码评审 MCP 工具。
 // Principal 已按请求注入，每个 handler 只调用共享 applicationService。
-func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, principal auth.Principal) {
+func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, reviewSvc reviewService, reputationSvc ReputationService, principal auth.Principal) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_publish",
 		Description: "发布新任务",
@@ -222,7 +222,6 @@ func registerTools(server *mcp.Server, svc applicationService, submissions submi
 		}
 		return successResult(result), nil, nil
 	})
-
 	if submissions != nil {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "submission_create",
@@ -268,6 +267,8 @@ func registerTools(server *mcp.Server, svc applicationService, submissions submi
 			return successResult(result), nil, nil
 		})
 	}
+
+	registerReviewTools(server, reviewSvc, reputationSvc, principal)
 	wrapSchemaValidationErrors(server)
 }
 

@@ -138,7 +138,16 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
 
   const response = await fetch(base + path, { ...init, headers, body });
   if (!response.ok) {
-    throw new Error(`API request failed (${response.status})`);
+    let message = `API request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "message" in body.error && typeof body.error.message === "string") {
+        message = body.error.message;
+      }
+    } catch {
+      // ignore parse errors and fall back to status message
+    }
+    throw new Error(message);
   }
   return response.json() as Promise<Envelope<T>>;
 }
@@ -334,6 +343,115 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({ data: demoTasks.find((task) => task.id === id) ?? demoTasks[0], meta: demoMeta });
   }
 
+  if (url.pathname.startsWith("/v1/reviews/") && method === "GET") {
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "rev-1");
+    return clone({
+      data: {
+        id,
+        submission_id: "sub-1",
+        reviewer_id: "reviewer-1",
+        status: "pending",
+        final_decision: undefined,
+        rubric_scores: [
+          { dimension: "correctness", score: 85 },
+          { dimension: "readability", score: 70 },
+        ],
+        summary: "整体实现正确，但缺少边界测试。",
+        line_comments: [],
+      },
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname.startsWith("/v1/submissions/") && url.pathname.endsWith("/diff") && method === "GET") {
+    return clone({
+      data: [
+        {
+          path: "src/payment.go",
+          old_path: "src/payment.go",
+          hunks: [
+            {
+              old_start: 10,
+              old_lines: 3,
+              new_start: 10,
+              new_lines: 5,
+              hunk_hash: "h1",
+              lines: [
+                { type: "context", text: "func Charge(amount int) error {", old_line: 10, new_line: 10 },
+                { type: "remove", text: "    return db.Exec(amount)", old_line: 11 },
+                { type: "add", text: "    if amount <= 0 {", new_line: 11 },
+                { type: "add", text: "        return fmt.Errorf(\"invalid amount\")", new_line: 12 },
+                { type: "context", text: "    }", old_line: 12, new_line: 13 },
+              ],
+            },
+          ],
+        },
+      ],
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname === "/v1/rubrics/active" && method === "GET") {
+    return clone({
+      data: {
+        id: "rubric-1",
+        tenant_id: "tenant-1",
+        version_number: 1,
+        name: "默认代码审核评分表",
+        dimensions: [
+          { id: "correctness", name: "正确性" },
+          { id: "readability", name: "可读性" },
+          { id: "testing", name: "测试覆盖" },
+        ],
+        weights: { correctness: 0.5, readability: 0.3, testing: 0.2 },
+        algorithm_version: "v1",
+        is_active: true,
+        created_at: "2026-07-01T00:00:00Z",
+      },
+      meta: demoMeta,
+    });
+  }
+
+  const reviewCommentMatch = url.pathname.match(/^\/v1\/reviews\/([^/:]+)\/comments$/);
+  if (reviewCommentMatch && method === "POST") {
+    const body = parseDemoBody(init.body);
+    return clone({
+      data: {
+        id: `comment-${Date.now()}`,
+        tenant_id: "tenant-1",
+        review_id: decodeURIComponent(reviewCommentMatch[1]),
+        submission_id: body.submission_id ?? "sub-1",
+        file_path: body.file_path ?? "src/payment.go",
+        side: body.side ?? "right",
+        line_number: typeof body.line_number === "number" ? body.line_number : 1,
+        hunk_hash: body.hunk_hash ?? "",
+        diff_fingerprint: body.diff_fingerprint ?? "",
+        text: body.text ?? "",
+        created_at: "2026-07-02T14:00:00Z",
+      },
+      meta: demoMeta,
+    });
+  }
+
+  const reviewDecisionMatch = url.pathname.match(/^\/v1\/reviews\/([^/:]+)\/decision$/);
+  if (reviewDecisionMatch && method === "POST") {
+    const body = parseDemoBody(init.body);
+    return clone({
+      data: {
+        id: decodeURIComponent(reviewDecisionMatch[1]),
+        submission_id: "sub-1",
+        reviewer_id: "reviewer-1",
+        rubric_version_id: "rubric-1",
+        status: "submitted",
+        final_decision: body.decision ?? "accepted",
+        rubric_scores: Array.isArray(body.scores) ? body.scores : [],
+        summary: typeof body.summary === "string" ? body.summary : "",
+        line_comments: [],
+      },
+      meta: demoMeta,
+    });
+  }
+
   if (url.pathname === "/v1/agents" && method === "GET") {
     return clone({ data: { items: demoAgents }, meta: demoMeta });
   }
@@ -395,6 +513,26 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
       throw new Error(`Demo agent not found: ${id}`);
     }
     return clone({ data: updatedAgent, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/reputation" && method === "GET") {
+    const agentVersionId = url.searchParams.get("agent_version_id") ?? "agent-v12";
+    const capability = url.searchParams.get("capability") ?? "code-review";
+    const taskType = url.searchParams.get("task_type") ?? "typescript";
+    return clone({
+      data: {
+        agent_version_id: agentVersionId,
+        capability,
+        task_type: taskType,
+        total_reviews: 12,
+        pass_rate: 0.75,
+        rework_rate: 0.17,
+        avg_review_cost_cents: 120,
+        avg_review_latency_ms: 3450,
+        sample_size_hint: "medium",
+      },
+      meta: demoMeta,
+    });
   }
 
   throw new Error(`Unsupported demo route: ${method} ${url.pathname}`);
