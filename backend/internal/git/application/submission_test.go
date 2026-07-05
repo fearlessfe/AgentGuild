@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -254,6 +255,21 @@ func TestCreateSubmissionNotifiesExecutionSubmitted(t *testing.T) {
 	require.Equal(t, "tenant-1", recorder.calls[0].TenantID)
 	require.Equal(t, domain.ActorAgent, recorder.calls[0].Actor.Type)
 	require.Equal(t, "agent-1", recorder.calls[0].Actor.ID)
+}
+
+func TestCreateSubmissionSucceedsWhenNotificationFails(t *testing.T) {
+	fixture := newSubmissionFixtureWithNotifier(t, &failingNotifier{})
+
+	got, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Data.ID)
+	require.NotNil(t, got.Data.ValidationJobID)
+}
+
+type failingNotifier struct{}
+
+func (f *failingNotifier) Notify(context.Context, application.ExecutionStateCommand, time.Time) error {
+	return errors.New("notification failed")
 }
 
 type recordingNotifier struct {

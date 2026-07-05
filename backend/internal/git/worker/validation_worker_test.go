@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"agentguild.dev/agentguild/backend/internal/git/worker"
@@ -99,13 +100,17 @@ func TestValidationWorkerRecordFailureAfterMaxAttempts(t *testing.T) {
 		return tx.ValidationJobs().Update(ctx, job)
 	}))
 
-	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, nil, nil)
+	recorder := &recordingNotifier{}
+	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, nil, recorder)
 	_, err = w.RunOnce(ctx, "tenant-1")
 	require.NoError(t, err)
 
 	got, err := store.getJob("job-1")
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
+	require.Len(t, recorder.calls, 1)
+	require.Equal(t, domain.IntentFailValidation, recorder.calls[0].Intent)
+	require.Equal(t, "exec-1", recorder.calls[0].ExecutionID)
 }
 
 func TestValidationWorkerRecordsFailureWhenRunnerFails(t *testing.T) {
@@ -119,7 +124,8 @@ func TestValidationWorkerRecordsFailureWhenRunnerFails(t *testing.T) {
 	}))
 
 	runner := &fakeRunner{failStep: gitdomain.ValidationStepBuild}
-	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, runner, nil)
+	recorder := &recordingNotifier{}
+	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, runner, recorder)
 	_, err = w.RunOnce(ctx, "tenant-1")
 	require.NoError(t, err)
 
@@ -127,6 +133,9 @@ func TestValidationWorkerRecordsFailureWhenRunnerFails(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
 	require.Equal(t, gitdomain.ValidationStepStatusFailed, got.Steps[0].Status)
+	require.Len(t, recorder.calls, 2)
+	require.Equal(t, domain.IntentStartValidation, recorder.calls[0].Intent)
+	require.Equal(t, domain.IntentFailValidation, recorder.calls[1].Intent)
 }
 
 func TestValidationWorkerSucceedsWhenRunnerPassesAllSteps(t *testing.T) {
@@ -269,5 +278,15 @@ func (r *memoryValidationJobRepository) UpdateStep(_ context.Context, tenantID, 
 			return nil
 		}
 	}
+	return nil
+}
+
+
+type recordingNotifier struct {
+	calls []application.ExecutionStateCommand
+}
+
+func (r *recordingNotifier) Notify(_ context.Context, cmd application.ExecutionStateCommand, _ time.Time) error {
+	r.calls = append(r.calls, cmd)
 	return nil
 }

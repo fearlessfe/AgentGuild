@@ -202,12 +202,19 @@ func (w *ValidationWorker) runStep(ctx context.Context, job *gitdomain.Validatio
 		if err := tx.ValidationJobs().UpdateStep(ctx, fresh.TenantID, fresh.ID, result); err != nil {
 			return err
 		}
-		return tx.ValidationJobs().Update(ctx, fresh)
+		if err := tx.ValidationJobs().Update(ctx, fresh); err != nil {
+			return err
+		}
+		// Keep the in-memory job pointer in sync with the persisted state so
+		// callers can inspect the updated status after the step finishes.
+		*job = *fresh
+		return nil
 	})
 }
 
 func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.ValidationJob, cause error) error {
-	return w.store.WithTx(ctx, func(tx gitapp.Tx) error {
+	failed := false
+	err := w.store.WithTx(ctx, func(tx gitapp.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -221,6 +228,7 @@ func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.Val
 		}
 		if fresh.Attempt >= w.maxAttempts {
 			fresh.Status = gitdomain.ValidationStatusFailed
+			failed = true
 		} else {
 			fresh.Status = gitdomain.ValidationStatusPending
 		}
@@ -229,6 +237,18 @@ func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.Val
 		fresh.UpdatedAt = now
 		return tx.ValidationJobs().Update(ctx, fresh)
 	})
+	if err != nil {
+		return err
+	}
+	if failed {
+		_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+			TenantID:    job.TenantID,
+			ExecutionID: job.ExecutionID,
+			Intent:      domain.IntentFailValidation,
+			Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+		}, time.Now())
+	}
+	return nil
 }
 
 // ValidationJobError is a simple error type for worker configuration issues.

@@ -118,25 +118,28 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 			return err
 		}
 
-		// Transition the execution to submitted so the task lifecycle reflects the
-		// delivery event. The transition is best-effort: if it fails, the submission
-		// is still recorded and the worker can later reconcile the state.
-		if err := s.notifier.Notify(ctx, ExecutionStateCommand{
-			TenantID:    principal.TenantID,
-			ExecutionID: cmd.ExecutionID,
-			Intent:      domain.IntentSubmit,
-			Actor:       domain.Actor{Type: domain.ActorAgent, ID: principal.AgentID},
-		}, now); err != nil {
-			return err
-		}
-
 		result = Envelope[SubmissionView]{
 			Data: submissionView(sub, now),
 			Meta: Meta{ServerTime: now},
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return result, err
+	}
+
+	// Transition the execution to submitted so the task lifecycle reflects the
+	// delivery event. The transition is best-effort: it happens after the
+	// transaction commits so that a notification failure does not roll back the
+	// submission or validation job.
+	_ = s.notifier.Notify(ctx, ExecutionStateCommand{
+		TenantID:    principal.TenantID,
+		ExecutionID: cmd.ExecutionID,
+		Intent:      domain.IntentSubmit,
+		Actor:       domain.Actor{Type: domain.ActorAgent, ID: principal.AgentID},
+	}, time.Now())
+
+	return result, nil
 }
 
 // GetSubmission returns a submission by ID for an authorized caller.
