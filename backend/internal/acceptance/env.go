@@ -1121,6 +1121,19 @@ func (c *RESTClient) As(token string) *RESTClient {
 // LastMeta 返回最近一次成功调用的 envelope meta。
 func (c *RESTClient) LastMeta() application.Meta { return c.lastMeta }
 
+type restCredentialResult struct {
+	Code       string
+	Credential gitapp.CredentialView
+	Token      string
+	Meta       application.Meta
+}
+
+type restSubmissionResult struct {
+	Code       string
+	Submission gitapp.SubmissionView
+	Meta       application.Meta
+}
+
 func (c *RESTClient) ClaimTask(taskID, requestID string) application.ExecutionView {
 	c.t.Helper()
 	res := c.post("/v1/tasks/"+taskID+":claim", requestID, map[string]any{"request_id": requestID})
@@ -1187,6 +1200,55 @@ func (c *RESTClient) SubmitForReview(executionID, requestID string) restResult {
 	return c.post("/v1/executions/"+executionID+":submit_for_review", requestID, map[string]any{
 		"request_id": requestID,
 	})
+}
+
+// IssueCredential 通过 REST 为指定 execution 签发 Git 凭证。
+func (c *RESTClient) IssueCredential(executionID, repo, baseCommit, requestID string) restCredentialResult {
+	c.t.Helper()
+	res := c.postCredential("/v1/executions/"+executionID+"/credentials", requestID, map[string]any{
+		"repo":        repo,
+		"base_commit": baseCommit,
+	})
+	require.Empty(c.t, res.Code, "REST issue credential failed: %s", res.Code)
+	return res
+}
+
+// CreateSubmission 通过 REST 提交代码成果。
+func (c *RESTClient) CreateSubmission(executionID, repo, branch, commitSHA, baseCommitSHA, summary, requestID string) restSubmissionResult {
+	c.t.Helper()
+	return c.postSubmission("/v1/executions/"+executionID+"/submissions", requestID, map[string]any{
+		"repo":            repo,
+		"branch":          branch,
+		"commit_sha":      commitSHA,
+		"base_commit_sha": baseCommitSHA,
+		"summary":         summary,
+	})
+}
+
+// GetSubmission 通过 REST 查询 submission。
+func (c *RESTClient) GetSubmission(submissionID string) restSubmissionResult {
+	c.t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/submissions/"+submissionID, nil)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restSubmissionResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data gitapp.SubmissionView `json:"data"`
+		Meta application.Meta      `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restSubmissionResult{Submission: envelope.Data, Meta: envelope.Meta}
 }
 
 // GetReputation 查询指定 key 的声望投影。
@@ -1292,6 +1354,70 @@ func (c *RESTClient) postComment(path, requestID string, body map[string]any) re
 	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
 	c.lastMeta = envelope.Meta
 	return restCommentResult{Comment: envelope.Data, Meta: envelope.Meta}
+}
+
+func (c *RESTClient) postCredential(path, requestID string, body map[string]any) restCredentialResult {
+	c.t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(c.t, err)
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Idempotency-Key", requestID)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restCredentialResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data gitapp.IssueCredentialResponse `json:"data"`
+		Meta application.Meta             `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restCredentialResult{
+		Credential: envelope.Data.Credential,
+		Token:      envelope.Data.Token,
+		Meta:       envelope.Meta,
+	}
+}
+
+func (c *RESTClient) postSubmission(path, requestID string, body map[string]any) restSubmissionResult {
+	c.t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(c.t, err)
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Idempotency-Key", requestID)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restSubmissionResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data gitapp.SubmissionView `json:"data"`
+		Meta application.Meta      `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restSubmissionResult{Submission: envelope.Data, Meta: envelope.Meta}
 }
 
 type restResult struct {
