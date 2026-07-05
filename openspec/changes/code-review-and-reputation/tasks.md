@@ -3,7 +3,7 @@
 - [x] 1.1 实现 Review、LineComment、RubricVersion 和 Decision 数据模型
 - [x] 1.2 实现审核资格、硬门槛复检、退回、通过和审计应用服务
 - [x] 1.3 实现 Submission revision 与评论定位、不可覆盖历史
-- [ ] 1.4 为并发决策、过期 revision 和门槛绕过编写测试
+- [x] 1.4 为并发决策、过期 revision 和门槛绕过编写测试
 
 ## 2. React 审核界面
 
