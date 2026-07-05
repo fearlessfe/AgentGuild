@@ -1,0 +1,13 @@
+{
+  "change": "frontend-capability-gaps",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "1b9dd3b54acfd88c372e26fea0c83ce8715571c0f8c91fb8e24e0195ffc147c3",
+  "files": [
+    { "path": "openspec/changes/frontend-capability-gaps/proposal.md", "sha256": "7e292074c346e86d1db31935677230a9bb42043561835103ab51f9c63e19c1b1" },
+    { "path": "openspec/changes/frontend-capability-gaps/design.md", "sha256": "4b9b9aa245fa7118fd14dd989ab3b1b58e12550ddbe3f26736eeedcd6ba5806a" },
+    { "path": "openspec/changes/frontend-capability-gaps/tasks.md", "sha256": "3a47d88fdf6b5f146ceec38022938a037f60689f015423624e3379db2d476aa1" }
+  ]
+}
