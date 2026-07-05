@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
+	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
+	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
+	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -19,7 +22,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// applicationService 是 REST 层消费的应用服务边界；*application.Service 天然满足此接口。
+// applicationService 是 REST 层消费的任务应用服务边界；*application.Service 天然满足此接口。
 type applicationService interface {
 	PublishTask(ctx context.Context, principal auth.Principal, command application.PublishTask) (application.Envelope[application.TaskView], error)
 	ListTasks(ctx context.Context, principal auth.Principal, query application.ListTasks) (application.Envelope[application.TaskPage], error)
@@ -44,6 +47,32 @@ type identityService interface {
 	AgentHeartbeat(context.Context, identityapp.Principal, identityapp.AgentHeartbeat) (identityapp.Envelope[identityapp.AgentView], error)
 }
 
+type versionService interface {
+	ListVersions(ctx context.Context, tenantID, agentID string) ([]agentversionapp.VersionSummary, error)
+	GetVersion(ctx context.Context, tenantID, agentID, versionID string) (*agentversionapp.VersionDetail, error)
+	GetVersionDiff(ctx context.Context, tenantID, agentID, versionID, baseVersionID string) (*agentversionapp.VersionDiff, error)
+	CreateDraft(ctx context.Context, cmd agentversionapp.CreateDraft) (*agentversionapp.CreateDraftResponse, error)
+	StartEvaluation(ctx context.Context, principal identityapp.Principal, cmd agentversionapp.StartEvaluation) error
+	Promote(ctx context.Context, cmd agentversionapp.Promote) error
+	Rollback(ctx context.Context, cmd agentversionapp.Rollback) error
+}
+
+type evaluationService interface {
+	ListBenchmarkSetSummaries(ctx context.Context, principal identityapp.Principal, tenantID string) ([]evaluationapp.BenchmarkSetSummary, error)
+	GetBenchmarkSetSummary(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*evaluationapp.BenchmarkSetSummary, error)
+	CreateBenchmarkSet(ctx context.Context, cmd evaluationapp.CreateBenchmarkSet) (*evaluationapp.CreateBenchmarkSetResponse, error)
+	ListEvaluationRunSummaries(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]evaluationapp.EvaluationRunSummary, error)
+	GetEvaluationRunSummary(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*evaluationapp.EvaluationRunSummary, error)
+	StartEvaluationRun(ctx context.Context, cmd evaluationapp.StartEvaluationRun) (*evaluationapp.StartEvaluationRunResponse, error)
+}
+
+type experienceService interface {
+	ListCandidates(ctx context.Context, tenantID, agentID, status string) ([]agentexperienceapp.CandidateSummary, error)
+	GetCandidate(ctx context.Context, tenantID, agentID, candidateID string) (*agentexperienceapp.CandidateSummary, error)
+	ExtractCandidate(ctx context.Context, cmd agentexperienceapp.ExtractCandidate) (*agentexperienceapp.ExtractCandidateResponse, error)
+	ReviewCandidate(ctx context.Context, cmd agentexperienceapp.ReviewCandidate) error
+}
+
 type oidcProvider interface {
 	BeginAuthURL(state string) string
 	Exchange(context.Context, string) (*auth.Session, error)
@@ -55,6 +84,9 @@ type socketRemoteAddrContextKey struct{}
 type Server struct {
 	svc           applicationService
 	identity      identityService
+	versions      versionService
+	evaluations   evaluationService
+	experiences   experienceService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
 	sessionSecret string
@@ -88,6 +120,21 @@ func WithOIDCProvider(provider oidcProvider) Option {
 	return func(s *Server) { s.oidc = provider }
 }
 
+// WithVersionService 挂载 Agent 版本管理 REST API。
+func WithVersionService(svc versionService) Option {
+	return func(s *Server) { s.versions = svc }
+}
+
+// WithEvaluationService 挂载评测基准集与运行 REST API。
+func WithEvaluationService(svc evaluationService) Option {
+	return func(s *Server) { s.evaluations = svc }
+}
+
+// WithExperienceService 挂载经验候选治理 REST API。
+func WithExperienceService(svc experienceService) Option {
+	return func(s *Server) { s.experiences = svc }
+}
+
 // NewServer 创建 REST server；svc 通常是 *application.Service。
 func NewServer(svc applicationService, verifier auth.TokenVerifier, opts ...Option) *Server {
 	s := &Server{
@@ -118,7 +165,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/v1", func(r chi.Router) {
 		if s.identity != nil {
-			r.Post("/agents/me:activate", s.rateLimitHandler(http.HandlerFunc(s.activateAgent)).ServeHTTP)
+			r.Post("/agents/me:activate", s.rateLimit(http.HandlerFunc(s.activateAgent)).ServeHTTP)
 			r.With(s.authenticate, s.rateLimit).Post("/agents/me:refresh", s.refreshAgentToken)
 			r.With(s.authenticate, s.rateLimit).Post("/agents/me:heartbeat", s.agentHeartbeat)
 			r.With(s.authenticate, s.rateLimit).Get("/agents/me", s.getSelfAgent)
@@ -141,12 +188,33 @@ func (s *Server) Router() http.Handler {
 		r.With(s.authenticate, s.rateLimit).Get("/executions/{id}", s.getExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:start", s.startExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:heartbeat", s.heartbeatExecution)
+
+		if s.versions != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}/versions", s.listAgentVersions)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions", s.createAgentVersion)
+			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}/versions/{version_id}", s.getAgentVersion)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/diff", s.diffAgentVersion)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/evaluations", s.startAgentVersionEvaluation)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/promote", s.promoteAgentVersion)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/rollback", s.rollbackAgentVersion)
+		}
+
+		if s.experiences != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}/experiences", s.listAgentExperiences)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/experiences", s.createAgentExperience)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/experiences/{experience_id}/approve", s.approveAgentExperience)
+			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/experiences/{experience_id}/reject", s.rejectAgentExperience)
+		}
+
+		if s.evaluations != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/benchmarks", s.listBenchmarks)
+			r.With(s.requireSession, s.rateLimit).Post("/benchmarks", s.createBenchmark)
+			r.With(s.requireSession, s.rateLimit).Get("/benchmarks/{id}", s.getBenchmark)
+			r.With(s.requireSession, s.rateLimit).Get("/evaluations", s.listEvaluations)
+			r.With(s.requireSession, s.rateLimit).Get("/evaluations/{id}", s.getEvaluation)
+		}
 	})
 	return r
-}
-
-func (s *Server) rateLimitHandler(next http.Handler) http.Handler {
-	return s.rateLimit(next)
 }
 
 func captureSocketRemoteAddr(next http.Handler) http.Handler {

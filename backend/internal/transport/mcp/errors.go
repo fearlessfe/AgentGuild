@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"time"
 
+	agentversiondomain "agentguild.dev/agentguild/backend/internal/agentversion/domain"
+	agentexperiencedomain "agentguild.dev/agentguild/backend/internal/agentexperience/domain"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	evaluationdomain "agentguild.dev/agentguild/backend/internal/evaluation/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -34,10 +37,7 @@ func isAdministrator(p auth.Principal) bool {
 // mapDomainError 把领域错误映射为 MCP tool error content。
 // 对非管理员，forbidden 与 not_found 返回一致的安全响应，避免资源探测。
 func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
-	code := domain.CodeOf(err)
-	if code == "" {
-		code = identitydomain.CodeOf(err)
-	}
+	code := errorCodeOf(err)
 	errContent := MCPError{Code: "INTERNAL_ERROR", Message: "internal server error"}
 	switch code {
 	case "invalid_argument":
@@ -65,13 +65,53 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 	case "token_revoked":
 		errContent = MCPError{Code: "TOKEN_REVOKED", Message: err.Error()}
 	case "rate_limited":
-		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error(), RetryAfterSeconds: retryAfterSeconds(domain.RetryAfterOf(err))}
+		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error(), RetryAfterSeconds: retryAfterSeconds(errorRetryAfterOf(err))}
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			errContent = MCPError{Code: "TEMPORARILY_UNAVAILABLE", Message: "request timed out"}
 		}
 	}
 	return errorResult(errContent)
+}
+
+// errorCodeOf 尝试从所有领域包中提取稳定错误码。
+func errorCodeOf(err error) string {
+	if code := domain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := identitydomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := agentversiondomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := evaluationdomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := agentexperiencedomain.CodeOf(err); code != "" {
+		return code
+	}
+	return ""
+}
+
+// errorRetryAfterOf 尝试从所有领域包中提取重试等待时间。
+func errorRetryAfterOf(err error) time.Duration {
+	if d := domain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := identitydomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := agentversiondomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := evaluationdomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := agentexperiencedomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	return 0
 }
 
 func retryAfterSeconds(duration time.Duration) int {

@@ -57,6 +57,13 @@ func FieldOf(err error) string {
 	return ""
 }
 
+func RetryAfterOf(err error) time.Duration {
+	if domainErr := errorOf(err); domainErr != nil {
+		return domainErr.RetryAfter
+	}
+	return 0
+}
+
 func errorOf(err error) *Error {
 	var pointer *Error
 	if errors.As(err, &pointer) {

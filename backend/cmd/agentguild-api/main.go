@@ -15,9 +15,16 @@ import (
 	"syscall"
 	"time"
 
+	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
+	agentversionpostgres "agentguild.dev/agentguild/backend/internal/agentversion/postgres"
+	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
+	agentexperiencedomain "agentguild.dev/agentguild/backend/internal/agentexperience/domain"
+	agentexperiencepostgres "agentguild.dev/agentguild/backend/internal/agentexperience/postgres"
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/config"
+	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
+	evaluationpostgres "agentguild.dev/agentguild/backend/internal/evaluation/postgres"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
@@ -61,15 +68,40 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	restOptions := make([]resttransport.Option, 0, 3)
+
+	versionService, evaluationService, experienceService, err := buildVersionExperienceRuntime(pool)
+	if err != nil {
+		return err
+	}
+
+	restOptions := make([]resttransport.Option, 0, 6)
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
 	}
 	if oidcProvider != nil {
 		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
 	}
+	if versionService != nil {
+		restOptions = append(restOptions, resttransport.WithVersionService(versionService))
+	}
+	if evaluationService != nil {
+		restOptions = append(restOptions, resttransport.WithEvaluationService(evaluationService))
+	}
+	if experienceService != nil {
+		restOptions = append(restOptions, resttransport.WithExperienceService(experienceService))
+	}
 	restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
-	mcpHandler := mcptransport.NewServer(service, verifier).Handler()
+	mcpOptions := make([]mcptransport.Option, 0, 3)
+	if versionService != nil {
+		mcpOptions = append(mcpOptions, mcptransport.WithVersionService(versionService))
+	}
+	if evaluationService != nil {
+		mcpOptions = append(mcpOptions, mcptransport.WithEvaluationService(evaluationService))
+	}
+	if experienceService != nil {
+		mcpOptions = append(mcpOptions, mcptransport.WithExperienceService(experienceService))
+	}
+	mcpHandler := mcptransport.NewServer(service, verifier, mcpOptions...).Handler()
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: adapterHandler(cfg.WebEnabled, cfg.MCPEnabled, restHandler, mcpHandler), ReadHeaderTimeout: 5 * time.Second}
 
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
@@ -102,6 +134,42 @@ func run() error {
 		}
 		return err
 	}
+}
+
+func buildVersionExperienceRuntime(pool *pgxpool.Pool) (*agentversionapp.VersionService, *evaluationapp.EvaluationService, *agentexperienceapp.CandidateService, error) {
+	avStore := agentversionpostgres.NewStore(pool)
+	versionRepo := agentversionpostgres.NewVersionRepository(pool)
+	evalProvider := agentversionpostgres.NewEvaluationRunProvider(pool)
+	xpProvider := agentversionpostgres.NewExperienceCandidateProvider(pool)
+	avPolicy := agentversionapp.NewPolicy(versionRepo)
+	versionService, err := agentversionapp.NewVersionService(avStore, versionRepo, evalProvider, xpProvider, avPolicy, agentversionapp.VersionOptions{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	evStore := evaluationpostgres.NewStore(pool)
+	bsRepo := evaluationpostgres.NewBenchmarkSetRepository(pool)
+	runRepo := evaluationpostgres.NewEvaluationRunRepository(pool)
+	versionLifecycle := agentversionpostgres.NewVersionLifecycleAdapter(pool)
+	executor := evaluationapp.NewFixedBenchmarkExecutor()
+	evPolicy := evaluationapp.NewPolicy(versionRepo)
+	evaluationService, err := evaluationapp.NewEvaluationService(evStore, bsRepo, runRepo, versionLifecycle, executor, evPolicy, evaluationapp.EvaluationOptions{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	axStore := agentexperiencepostgres.NewStore(pool)
+	candidateRepo := agentexperiencepostgres.NewExperienceCandidateRepository(pool)
+	submissionStore := agentexperienceapp.NewFixedSubmissionStore(nil)
+	executionStore := agentexperienceapp.NewFixedExecutionStore(nil)
+	classifier := agentexperiencedomain.NewRuleBasedSensitivityPolicy()
+	axPolicy := agentexperienceapp.NewPolicy(versionRepo)
+	experienceService, err := agentexperienceapp.NewCandidateService(axStore, candidateRepo, submissionStore, executionStore, axPolicy, classifier, agentexperienceapp.CandidateOptions{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return versionService, evaluationService, experienceService, nil
 }
 
 func costProvider(enabled bool, cfg config.Config) telemetry.TraceCostProvider {
