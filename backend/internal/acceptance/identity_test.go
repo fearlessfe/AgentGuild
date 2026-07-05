@@ -126,9 +126,9 @@ func TestCredentialHashNotLeakedAndUnauthorizedRequestsAreRejected(t *testing.T)
 	require.Equal(t, identitydomain.ActivationCredentialPending, status.ActivationStatus)
 	var decoded struct {
 		Data struct {
-			AgentID          string
-			Status           string
-			ActivationStatus string
+			AgentID          string `json:"agent_id"`
+			Status           string `json:"status"`
+			ActivationStatus string `json:"activation_status"`
 		} `json:"data"`
 	}
 	env.Identity.DecodeLastBody(&decoded)
