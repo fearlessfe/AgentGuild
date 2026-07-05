@@ -12,6 +12,8 @@ type Store interface {
 	WithTx(context.Context, func(Tx) error) error
 }
 
+var _ ExecutionNotifier = (*NopExecutionNotifier)(nil)
+
 // Tx is the set of operations available inside one credential transaction.
 type Tx interface {
 	Credentials() CredentialRepository
