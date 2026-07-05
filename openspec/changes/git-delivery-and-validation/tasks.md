@@ -8,7 +8,7 @@
 ## 2. 成果接口
 
 - [x] 2.1 实现 REST Submission 创建、查询和幂等处理
-- [ ] 2.2 实现 MCP `submission_create` 与验证状态查询工具
+- [x] 2.2 实现 MCP `submission_create` 与验证状态查询工具
 - [ ] 2.3 建立 REST/MCP 成果契约、Lease 和越权测试
 
 ## 3. 自动验证

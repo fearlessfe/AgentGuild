@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -73,9 +75,27 @@ type GetExecutionInput struct {
 	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
 }
 
-// registerTools 注册全部 8 个任务生命周期工具。
+// CreateSubmissionInput 是 submission_create 工具的输入。
+type CreateSubmissionInput struct {
+	RequestID     string          `json:"request_id" jsonschema:"unique mutation request id"`
+	ExecutionID   string          `json:"execution_id" jsonschema:"execution identifier"`
+	Repo          string          `json:"repo" jsonschema:"repository in owner/name format"`
+	Branch        string          `json:"branch" jsonschema:"branch containing the commit"`
+	CommitSHA     string          `json:"commit_sha" jsonschema:"commit sha to submit"`
+	BaseCommitSHA string          `json:"base_commit_sha" jsonschema:"base commit sha"`
+	Summary       string          `json:"summary" jsonschema:"human-readable summary of changes"`
+	Tests         *string         `json:"tests,omitempty" jsonschema:"test declaration or command"`
+	Evidence      json.RawMessage `json:"evidence,omitempty" jsonschema:"supporting evidence JSON"`
+}
+
+// GetSubmissionInput 是 validation_get 工具的输入。
+type GetSubmissionInput struct {
+	SubmissionID string `json:"submission_id" jsonschema:"submission identifier"`
+}
+
+// registerTools 注册任务生命周期与 Submission 工具。
 // Principal 已按请求注入，每个 handler 只调用共享 applicationService。
-func registerTools(server *mcp.Server, svc applicationService, principal auth.Principal) {
+func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, principal auth.Principal) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_publish",
 		Description: "发布新任务",
@@ -202,7 +222,79 @@ func registerTools(server *mcp.Server, svc applicationService, principal auth.Pr
 		}
 		return successResult(result), nil, nil
 	})
+
+	if submissions != nil {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "submission_create",
+			Description: "提交代码成果以触发自动验证",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateSubmissionInput) (*mcp.CallToolResult, any, error) {
+			execResult, err := svc.GetExecution(ctx, principal, application.GetExecution{ExecutionID: input.ExecutionID})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			allowed, forbidden := parsePathConstraints(execResult.Data.TaskConstraints)
+			result, err := submissions.CreateSubmission(ctx, gitPrincipal(principal), gitapp.CreateSubmission{
+				RequestID:      input.RequestID,
+				ExecutionID:    input.ExecutionID,
+				TaskID:         execResult.Data.TaskID,
+				Repo:           input.Repo,
+				Branch:         input.Branch,
+				CommitSHA:      input.CommitSHA,
+				BaseCommitSHA:  input.BaseCommitSHA,
+				Summary:        input.Summary,
+				Tests:          input.Tests,
+				Evidence:       []byte(input.Evidence),
+				AllowedPaths:   allowed,
+				ForbiddenPaths: forbidden,
+			})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			return successResult(result), nil, nil
+		})
+
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "validation_get",
+			Description: "查询 Submission 与验证状态",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input GetSubmissionInput) (*mcp.CallToolResult, any, error) {
+			result, err := submissions.GetSubmission(ctx, gitPrincipal(principal), gitapp.GetSubmission{SubmissionID: input.SubmissionID})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			_, err = svc.GetExecution(ctx, principal, application.GetExecution{ExecutionID: result.Data.ExecutionID})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			return successResult(result), nil, nil
+		})
+	}
 	wrapSchemaValidationErrors(server)
+}
+
+func gitPrincipal(p auth.Principal) gitapp.Principal {
+	return gitapp.Principal{
+		TenantID:       p.TenantID,
+		OwnerID:        p.OwnerID,
+		OwnerEmail:     p.OwnerEmail,
+		IsAdmin:        p.IsAdmin,
+		AgentID:        p.AgentID,
+		AgentVersionID: p.AgentVersionID,
+		Scopes:         p.Scopes,
+		RepoScope:      p.RepoScope,
+	}
+}
+
+func parsePathConstraints(constraints []string) (allowed, forbidden []string) {
+	for _, c := range constraints {
+		if strings.HasPrefix(c, "path:allowed:") {
+			allowed = append(allowed, strings.TrimPrefix(c, "path:allowed:"))
+			continue
+		}
+		if strings.HasPrefix(c, "path:forbidden:") {
+			forbidden = append(forbidden, strings.TrimPrefix(c, "path:forbidden:"))
+		}
+	}
+	return
 }
 
 // wrapSchemaValidationErrors 为 mcp.Server 增加接收中间件，把 SDK 在参数 schema 校验阶段
