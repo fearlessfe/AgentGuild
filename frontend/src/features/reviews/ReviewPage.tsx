@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getReview, getSubmissionDiff } from "./reviews.api";
+import { addComment, getActiveRubric, getReview, getSubmissionDiff, submitDecision } from "./reviews.api";
 import { DiffViewer } from "./DiffViewer";
 import { FileTree } from "./FileTree";
-import type { Decision, FileDiff, LineComment, ReviewStatus } from "./reviews.types";
+import { RevisionSelector } from "./RevisionSelector";
+import { RubricForm } from "./RubricForm";
+import type { Decision, FileDiff, LineComment, ReviewStatus, RubricScore } from "./reviews.types";
 
 function formatStatus(status: ReviewStatus) {
   switch (status) {
@@ -32,8 +34,11 @@ function formatDecision(decision?: Decision) {
 
 export function ReviewPage() {
   const { reviewId } = useParams<{ reviewId: string }>();
+  const queryClient = useQueryClient();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [comments, setComments] = useState<LineComment[]>([]);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [summary, setSummary] = useState("");
 
   const reviewQuery = useQuery({
     queryKey: ["review", reviewId],
@@ -48,6 +53,13 @@ export function ReviewPage() {
     queryKey: ["submission-diff", submissionId],
     queryFn: () => getSubmissionDiff(submissionId ?? ""),
     enabled: !!submissionId,
+  });
+
+  const rubricQuery = useQuery({
+    queryKey: ["active-rubric"],
+    queryFn: () => getActiveRubric(),
+    enabled: !!reviewId,
+    refetchOnWindowFocus: false,
   });
 
   const files = useMemo<FileDiff[]>(() => diffQuery.data?.data ?? [], [diffQuery.data]);
@@ -70,6 +82,57 @@ export function ReviewPage() {
     }
   }, [reviewQuery.data]);
 
+  // Seed local scores and summary from the review response once on first load.
+  const hasSeededScores = useRef(false);
+  useEffect(() => {
+    if (reviewQuery.data && !hasSeededScores.current) {
+      hasSeededScores.current = true;
+      const next: Record<string, number> = {};
+      for (const score of reviewQuery.data.data.rubric_scores) {
+        next[score.dimension] = score.score;
+      }
+      setScores(next);
+      setSummary(reviewQuery.data.data.summary ?? "");
+    }
+  }, [reviewQuery.data]);
+
+  const commentMutation = useMutation({
+    mutationFn: async (input: {
+      lineNumber: number;
+      side: "left" | "right";
+      hunkHash: string;
+      text: string;
+    }) => {
+      const result = await addComment(reviewId ?? "", {
+        submission_id: reviewQuery.data?.data.submission_id ?? "",
+        file_path: selectedFile?.path ?? "",
+        side: input.side,
+        line_number: input.lineNumber,
+        hunk_hash: input.hunkHash,
+        diff_fingerprint: `${selectedFile?.path ?? ""}:${input.side}:${input.lineNumber}:${input.hunkHash}`,
+        text: input.text,
+      });
+      return result.data;
+    },
+    onSuccess: (comment) => {
+      setComments((prev) => [...prev, comment]);
+    },
+  });
+
+  const decisionMutation = useMutation({
+    mutationFn: async (decision: Decision) => {
+      const dimensions = rubricQuery.data?.data.dimensions ?? [];
+      const scoresArray: RubricScore[] = dimensions.map((dimension) => ({
+        dimension: dimension.id,
+        score: scores[dimension.id] ?? 0,
+      }));
+      return submitDecision(reviewId ?? "", { decision, scores: scoresArray, summary });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["review", reviewId] });
+    },
+  });
+
   if (!reviewId) {
     return <div className="review-page empty">请选择一次审核</div>;
   }
@@ -90,21 +153,16 @@ export function ReviewPage() {
 
   const review = reviewQuery.data.data;
   const decisionLabel = formatDecision(review.final_decision);
+  const isSubmitted = review.status === "submitted";
+  const mutationError = commentMutation.error ?? decisionMutation.error;
 
-  function handleAddComment(line: number, side: "left" | "right", text: string) {
-    const next: LineComment = {
-      id: `local-${Date.now()}`,
-      review_id: review.id,
-      submission_id: review.submission_id,
-      file_path: selectedFile?.path ?? "",
-      side,
-      line_number: line,
-      hunk_hash: "",
-      diff_fingerprint: "",
-      text,
-      created_at: new Date().toISOString(),
-    };
-    setComments((prev) => [...prev, next]);
+  function handleAddComment(input: {
+    lineNumber: number;
+    side: "left" | "right";
+    hunkHash: string;
+    text: string;
+  }) {
+    commentMutation.mutate(input);
   }
 
   return (
@@ -116,21 +174,93 @@ export function ReviewPage() {
           {decisionLabel ? <span>结论：<strong>{decisionLabel}</strong></span> : null}
           <span>Reviewer：{review.reviewer_id}</span>
           <span>Submission：{review.submission_id}</span>
+          <RevisionSelector
+            revisions={[{ id: review.submission_id, label: review.submission_id }]}
+            selected={review.submission_id}
+            onSelect={() => {
+              // Revision 切换需要后端提供 revisions 列表；当前仅展示当前 Submission。
+            }}
+            label="Revision"
+          />
         </div>
-        {review.summary ? <p className="review-summary">{review.summary}</p> : null}
-        {review.rubric_scores.length > 0 ? (
-          <div className="review-rubric">
-            <h3>评分</h3>
-            <ul>
-              {review.rubric_scores.map((score) => (
-                <li key={score.dimension}>
-                  {score.dimension}：<strong>{score.score}</strong>
-                </li>
-              ))}
-            </ul>
+      </header>
+
+      {mutationError ? (
+        <div className="review-error" role="alert">
+          {mutationError.message}
+        </div>
+      ) : null}
+
+      <div className="review-decision-panel">
+        {rubricQuery.data ? (
+          <RubricForm
+            dimensions={rubricQuery.data.data.dimensions}
+            weights={rubricQuery.data.data.weights}
+            scores={scores}
+            onChange={setScores}
+            readOnly={isSubmitted}
+          />
+        ) : rubricQuery.isPending ? (
+          <div className="rubric-loading">正在加载评分表…</div>
+        ) : rubricQuery.isError ? (
+          <div className="rubric-error">无法加载评分表：{rubricQuery.error.message}</div>
+        ) : null}
+
+        <div className="review-summary-field">
+          <label htmlFor="review-summary">审核总结</label>
+          <textarea
+            id="review-summary"
+            rows={3}
+            value={summary}
+            disabled={isSubmitted}
+            onChange={(e) => setSummary(e.target.value)}
+            placeholder="输入审核总结…"
+          />
+        </div>
+
+        {!isSubmitted ? (
+          <div className="review-actions">
+            <button
+              type="button"
+              className="accept"
+              disabled={decisionMutation.isPending}
+              onClick={() => decisionMutation.mutate("accepted")}
+            >
+              通过
+            </button>
+            <button
+              type="button"
+              className="revision"
+              disabled={decisionMutation.isPending}
+              onClick={() => decisionMutation.mutate("revision_requested")}
+            >
+              退回修改
+            </button>
+            <button
+              type="button"
+              className="reject"
+              disabled={decisionMutation.isPending}
+              onClick={() => decisionMutation.mutate("rejected")}
+            >
+              拒绝
+            </button>
           </div>
         ) : null}
-      </header>
+      </div>
+
+      {isSubmitted && review.summary ? <p className="review-summary">{review.summary}</p> : null}
+      {isSubmitted && review.rubric_scores.length > 0 ? (
+        <div className="review-rubric">
+          <h3>评分</h3>
+          <ul>
+            {review.rubric_scores.map((score) => (
+              <li key={score.dimension}>
+                {score.dimension}：<strong>{score.score}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="review-body">
         <aside className="review-file-tree">

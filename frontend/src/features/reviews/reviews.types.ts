@@ -7,6 +7,29 @@ export type RubricScore = {
   score: number;
 };
 
+export type RubricDimension = {
+  id: string;
+  name: string;
+};
+
+export type RubricView = {
+  id: string;
+  tenant_id: string;
+  version_number: number;
+  name: string;
+  dimensions: RubricDimension[];
+  weights: Record<string, number>;
+  algorithm_version: string;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type Revision = {
+  id: string;
+  label: string;
+  created_at?: string;
+};
+
 export type DiffLineType = "context" | "add" | "remove";
 
 export type DiffLine = {
@@ -48,6 +71,7 @@ export type ReviewView = {
   id: string;
   submission_id: string;
   reviewer_id: string;
+  rubric_version_id: string;
   status: ReviewStatus;
   final_decision?: Decision;
   rubric_scores: RubricScore[];

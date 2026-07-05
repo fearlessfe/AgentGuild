@@ -138,7 +138,16 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
 
   const response = await fetch(base + path, { ...init, headers, body });
   if (!response.ok) {
-    throw new Error(`API request failed (${response.status})`);
+    let message = `API request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "message" in body.error && typeof body.error.message === "string") {
+        message = body.error.message;
+      }
+    } catch {
+      // ignore parse errors and fall back to status message
+    }
+    throw new Error(message);
   }
   return response.json() as Promise<Envelope<T>>;
 }
@@ -378,6 +387,67 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
           ],
         },
       ],
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname === "/v1/rubrics/active" && method === "GET") {
+    return clone({
+      data: {
+        id: "rubric-1",
+        tenant_id: "tenant-1",
+        version_number: 1,
+        name: "默认代码审核评分表",
+        dimensions: [
+          { id: "correctness", name: "正确性" },
+          { id: "readability", name: "可读性" },
+          { id: "testing", name: "测试覆盖" },
+        ],
+        weights: { correctness: 0.5, readability: 0.3, testing: 0.2 },
+        algorithm_version: "v1",
+        is_active: true,
+        created_at: "2026-07-01T00:00:00Z",
+      },
+      meta: demoMeta,
+    });
+  }
+
+  const reviewCommentMatch = url.pathname.match(/^\/v1\/reviews\/([^/:]+)\/comments$/);
+  if (reviewCommentMatch && method === "POST") {
+    const body = parseDemoBody(init.body);
+    return clone({
+      data: {
+        id: `comment-${Date.now()}`,
+        tenant_id: "tenant-1",
+        review_id: decodeURIComponent(reviewCommentMatch[1]),
+        submission_id: body.submission_id ?? "sub-1",
+        file_path: body.file_path ?? "src/payment.go",
+        side: body.side ?? "right",
+        line_number: typeof body.line_number === "number" ? body.line_number : 1,
+        hunk_hash: body.hunk_hash ?? "",
+        diff_fingerprint: body.diff_fingerprint ?? "",
+        text: body.text ?? "",
+        created_at: "2026-07-02T14:00:00Z",
+      },
+      meta: demoMeta,
+    });
+  }
+
+  const reviewDecisionMatch = url.pathname.match(/^\/v1\/reviews\/([^/:]+)\/decision$/);
+  if (reviewDecisionMatch && method === "POST") {
+    const body = parseDemoBody(init.body);
+    return clone({
+      data: {
+        id: decodeURIComponent(reviewDecisionMatch[1]),
+        submission_id: "sub-1",
+        reviewer_id: "reviewer-1",
+        rubric_version_id: "rubric-1",
+        status: "submitted",
+        final_decision: body.decision ?? "accepted",
+        rubric_scores: Array.isArray(body.scores) ? body.scores : [],
+        summary: typeof body.summary === "string" ? body.summary : "",
+        line_comments: [],
+      },
       meta: demoMeta,
     });
   }

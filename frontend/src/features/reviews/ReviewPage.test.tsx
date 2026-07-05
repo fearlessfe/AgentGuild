@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { envelope } from "../../api/fixtures";
 import { ReviewWorkspace } from "../../app/AppShell";
 import { ReviewPage } from "./ReviewPage";
-import type { FileDiff, ReviewView } from "./reviews.types";
+import type { FileDiff, ReviewView, RubricView } from "./reviews.types";
 
 function renderWithProviders(
   ui: ReactNode,
@@ -34,6 +34,7 @@ const reviewFixture: ReviewView = {
   id: "rev-1",
   submission_id: "sub-1",
   reviewer_id: "reviewer-1",
+  rubric_version_id: "rubric-1",
   status: "pending",
   final_decision: undefined,
   rubric_scores: [
@@ -42,6 +43,22 @@ const reviewFixture: ReviewView = {
   ],
   summary: "整体实现正确，但缺少边界测试。",
   line_comments: [],
+};
+
+const rubricFixture: RubricView = {
+  id: "rubric-1",
+  tenant_id: "tenant-1",
+  version_number: 1,
+  name: "默认代码审核评分表",
+  dimensions: [
+    { id: "correctness", name: "正确性" },
+    { id: "readability", name: "可读性" },
+    { id: "testing", name: "测试覆盖" },
+  ],
+  weights: { correctness: 0.5, readability: 0.3, testing: 0.2 },
+  algorithm_version: "v1",
+  is_active: true,
+  created_at: "2026-07-01T00:00:00Z",
 };
 
 const diffFixture: FileDiff[] = [
@@ -67,35 +84,108 @@ const diffFixture: FileDiff[] = [
   },
 ];
 
+type FetchState = {
+  review: ReviewView;
+  diff: FileDiff[];
+  rubric: RubricView;
+};
+
+function mockFetch({ review = reviewFixture, diff = diffFixture, rubric = rubricFixture }: Partial<FetchState> = {}) {
+  const state: FetchState = { review, diff, rubric };
+  const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
+    const method = (init as RequestInit | undefined)?.method ?? "GET";
+
+    if (url.pathname.startsWith("/api/v1/reviews/") && !url.pathname.includes("/comments") && !url.pathname.endsWith("/decision")) {
+      return Promise.resolve(new Response(JSON.stringify(envelope(state.review)), { status: 200 }));
+    }
+
+    if (url.pathname === "/api/v1/rubrics/active") {
+      return Promise.resolve(new Response(JSON.stringify(envelope(state.rubric)), { status: 200 }));
+    }
+
+    if (url.pathname.startsWith("/api/v1/submissions/") && url.pathname.endsWith("/diff")) {
+      return Promise.resolve(new Response(JSON.stringify(envelope(state.diff)), { status: 200 }));
+    }
+
+    const commentMatch = url.pathname.match(/^\/api\/v1\/reviews\/([^/]+)\/comments$/);
+    if (commentMatch && method === "POST") {
+      const body = JSON.parse((init as RequestInit).body as string);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            envelope({
+              id: `comment-${Date.now()}`,
+              tenant_id: "tenant-1",
+              review_id: decodeURIComponent(commentMatch[1]),
+              ...body,
+              created_at: "2026-07-02T14:00:00Z",
+            })
+          ),
+          { status: 201 },
+        )
+      );
+    }
+
+    const decisionMatch = url.pathname.match(/^\/api\/v1\/reviews\/([^/]+)\/decision$/);
+    if (decisionMatch && method === "POST") {
+      const body = JSON.parse((init as RequestInit).body as string);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(
+            envelope({
+              ...state.review,
+              status: "submitted",
+              final_decision: body.decision,
+              rubric_scores: body.scores,
+              summary: body.summary,
+            })
+          ),
+          { status: 200 },
+        )
+      );
+    }
+
+    return Promise.reject(new Error(`Unexpected fetch: ${url.pathname}`));
+  });
+  return { spy, state };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("ReviewPage", () => {
   it("renders review status, summary, rubric scores and diff", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(reviewFixture)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }));
-
+    mockFetch();
     renderWithProviders(<ReviewPage />);
 
     expect(await screen.findByText("审核 rev-1")).toBeVisible();
     expect(screen.getByText("状态：")).toBeVisible();
     expect(screen.getByText("待审核")).toBeVisible();
     expect(screen.getByText("整体实现正确，但缺少边界测试。")).toBeVisible();
-    expect(screen.getByText(/correctness/)).toBeVisible();
-    expect(screen.getByText("85")).toBeVisible();
+    expect(await screen.findByTestId("rubric-form")).toBeVisible();
+    expect(screen.getByLabelText("正确性 分数")).toHaveValue(85);
 
     expect(await screen.findByLabelText("文件树")).toBeVisible();
     expect(screen.getByLabelText("查看 src/payment.go")).toBeVisible();
     expect((await screen.findAllByText("func Charge(amount int) error {")).length).toBeGreaterThan(0);
   });
 
-  it("switches between split and unified diff modes", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(reviewFixture)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }));
+  it("loads and renders the active rubric form", async () => {
+    mockFetch();
+    renderWithProviders(<ReviewPage />);
 
+    await screen.findByText("审核 rev-1");
+    expect(await screen.findByTestId("rubric-form")).toBeVisible();
+    expect(screen.getByLabelText("正确性 分数")).toBeVisible();
+    expect(screen.getByLabelText("可读性 分数")).toBeVisible();
+    expect(screen.getByLabelText("测试覆盖 分数")).toBeVisible();
+    expect(screen.getByTestId("rubric-total")).toHaveTextContent("总分：");
+  });
+
+  it("switches between split and unified diff modes", async () => {
+    mockFetch();
     renderWithProviders(<ReviewPage />);
 
     await screen.findAllByText("func Charge(amount int) error {");
@@ -121,9 +211,7 @@ describe("ReviewPage", () => {
 
   it("does not get stuck loading when the review has no submission_id", async () => {
     const reviewWithoutSubmission = { ...reviewFixture, submission_id: "" };
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify(envelope(reviewWithoutSubmission)), { status: 200 }),
-    );
+    mockFetch({ review: reviewWithoutSubmission });
 
     renderWithProviders(<ReviewPage />);
 
@@ -150,11 +238,7 @@ describe("ReviewPage", () => {
       ],
     };
 
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(reviewWithServerComment)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }));
-
+    const { state } = mockFetch({ review: reviewWithServerComment });
     const { client } = renderWithProviders(<ReviewPage />);
 
     await screen.findAllByText("func Charge(amount int) error {");
@@ -168,10 +252,7 @@ describe("ReviewPage", () => {
 
     // Simulate a background refetch returning empty comments. Before the fix,
     // this would have overwritten local comments and removed them.
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify(envelope({ ...reviewFixture, line_comments: [] })), { status: 200 }),
-    );
-
+    state.review = { ...reviewFixture, line_comments: [] };
     await client.refetchQueries({ queryKey: ["review", "rev-1"] });
 
     expect(screen.getByText("缺少 nil 检查")).toBeVisible();
@@ -253,11 +334,7 @@ describe("ReviewPage", () => {
       },
     ];
 
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(rev1Review)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(rev2Review)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(rev2Diff)), { status: 200 }));
+    const { state } = mockFetch({ review: rev1Review, diff: diffFixture });
 
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -286,6 +363,8 @@ describe("ReviewPage", () => {
       expect(screen.getByLabelText("查看 src/payment.go")).toHaveAttribute("aria-pressed", "true");
 
       // Navigate to rev-2 within the same route.
+      state.review = rev2Review;
+      state.diff = rev2Diff;
       await router.navigate("/reviews/rev-2");
 
       // Wait for rev-2 to load and assert new server comments / selected path.
@@ -296,5 +375,82 @@ describe("ReviewPage", () => {
     } finally {
       globalThis.Request = OriginalRequest;
     }
+  });
+
+  it("submits a decision with scores and summary", async () => {
+    const { spy } = mockFetch();
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findByText("审核 rev-1");
+    await screen.findByTestId("rubric-form");
+
+    await userEvent.type(screen.getByPlaceholderText("输入审核总结…"), " 符合要求");
+
+    await userEvent.click(screen.getByRole("button", { name: "通过" }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/reviews/rev-1/decision"),
+      expect.objectContaining({ method: "POST" }),
+    ));
+
+    const [, init] = spy.mock.calls.find(
+      ([url]) => typeof url === "string" && url.includes("/v1/reviews/rev-1/decision")
+    )!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.decision).toBe("accepted");
+    expect(body.summary).toContain("符合要求");
+    expect(body.scores).toEqual(expect.arrayContaining([
+      { dimension: "correctness", score: expect.any(Number) },
+    ]));
+  });
+
+  it("persists a line comment via POST /v1/reviews/:id/comments", async () => {
+    const { spy } = mockFetch();
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findAllByText("func Charge(amount int) error {");
+
+    await userEvent.click(screen.getByLabelText("在右侧第 12 行添加评论"));
+    await userEvent.type(screen.getByPlaceholderText("输入评论…"), "边界情况未处理");
+    await userEvent.click(screen.getByRole("button", { name: "添加评论" }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/reviews/rev-1/comments"),
+      expect.objectContaining({ method: "POST" }),
+    ));
+
+    const [, init] = spy.mock.calls.find(
+      ([url]) => typeof url === "string" && url.includes("/v1/reviews/rev-1/comments")
+    )!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.file_path).toBe("src/payment.go");
+    expect(body.line_number).toBe(12);
+    expect(body.text).toBe("边界情况未处理");
+    expect(body.request_id).toBeTruthy();
+  });
+
+  it("displays hard-gate error when accepting a submission with failed hard gates", async () => {
+    const { spy } = mockFetch();
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findByText("审核 rev-1");
+    await screen.findByTestId("rubric-form");
+
+    spy.mockImplementation((input) => {
+      const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
+      if (url.pathname.endsWith("/decision")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ error: { code: "hard_gates_failed", message: "硬门槛未通过：测试覆盖率不足" } }),
+            { status: 400 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify(envelope(reviewFixture)), { status: 200 }));
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "通过" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("硬门槛未通过：测试覆盖率不足");
   });
 });

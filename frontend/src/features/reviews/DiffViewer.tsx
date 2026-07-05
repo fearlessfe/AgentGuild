@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
-import type { DiffLine, FileDiff, LineComment } from "./reviews.types";
+import type { DiffLine, FileDiff, Hunk, LineComment } from "./reviews.types";
+import { LineComment as LineCommentComponent } from "./LineComment";
 
 type DiffMode = "split" | "unified";
 
@@ -7,6 +8,14 @@ type SelectedLine = {
   key: string;
   lineNumber: number;
   side: "left" | "right";
+  hunkHash: string;
+};
+
+type AddCommentInput = {
+  lineNumber: number;
+  side: "left" | "right";
+  hunkHash: string;
+  text: string;
 };
 
 function lineMarker(type: DiffLine["type"]): string {
@@ -31,29 +40,34 @@ export function DiffViewer({
 }: {
   diff: FileDiff;
   comments: LineComment[];
-  onAddComment: (line: number, side: "left" | "right", text: string) => void;
+  onAddComment: (input: AddCommentInput) => void;
 }) {
   const [mode, setMode] = useState<DiffMode>("split");
   const [selected, setSelected] = useState<SelectedLine | null>(null);
   const [draft, setDraft] = useState("");
 
-  function selectLine(key: string, lineNumber: number | undefined, side: "left" | "right") {
+  function selectLine(key: string, lineNumber: number | undefined, side: "left" | "right", hunkHash: string) {
     if (lineNumber === undefined) return;
-    setSelected({ key, lineNumber, side });
+    setSelected({ key, lineNumber, side, hunkHash });
     setDraft("");
   }
 
   function submitComment() {
     if (!selected || draft.trim() === "") return;
-    onAddComment(selected.lineNumber, selected.side, draft.trim());
+    onAddComment({
+      lineNumber: selected.lineNumber,
+      side: selected.side,
+      hunkHash: selected.hunkHash,
+      text: draft.trim(),
+    });
     setSelected(null);
     setDraft("");
   }
 
-  const allLines: { hunkIndex: number; lineIndex: number; line: DiffLine }[] = [];
+  const allLines: { hunkIndex: number; lineIndex: number; line: DiffLine; hunk: Hunk }[] = [];
   diff.hunks.forEach((hunk, hunkIndex) => {
     hunk.lines.forEach((line, lineIndex) => {
-      allLines.push({ hunkIndex, lineIndex, line });
+      allLines.push({ hunkIndex, lineIndex, line, hunk });
     });
   });
 
@@ -84,7 +98,7 @@ export function DiffViewer({
       {mode === "unified" ? (
         <table className="diff-table unified">
           <tbody>
-            {allLines.map(({ hunkIndex, lineIndex, line }) => {
+            {allLines.map(({ hunkIndex, lineIndex, line, hunk }) => {
               const keyBase = `${hunkIndex}-${lineIndex}`;
               const leftKey = `${keyBase}-left`;
               const rightKey = `${keyBase}-right`;
@@ -99,7 +113,7 @@ export function DiffViewer({
                           type="button"
                           className={selected?.key === leftKey ? "selected" : undefined}
                           aria-label={`在左侧第 ${line.old_line} 行添加评论`}
-                          onClick={() => selectLine(leftKey, line.old_line, "left")}
+                          onClick={() => selectLine(leftKey, line.old_line, "left", hunk.hunk_hash)}
                         >
                           {line.old_line}
                         </button>
@@ -111,7 +125,7 @@ export function DiffViewer({
                           type="button"
                           className={selected?.key === rightKey ? "selected" : undefined}
                           aria-label={`在右侧第 ${line.new_line} 行添加评论`}
-                          onClick={() => selectLine(rightKey, line.new_line, "right")}
+                          onClick={() => selectLine(rightKey, line.new_line, "right", hunk.hunk_hash)}
                         >
                           {line.new_line}
                         </button>
@@ -165,7 +179,7 @@ export function DiffViewer({
             </tr>
           </thead>
           <tbody>
-            {allLines.map(({ hunkIndex, lineIndex, line }) => {
+            {allLines.map(({ hunkIndex, lineIndex, line, hunk }) => {
               const keyBase = `${hunkIndex}-${lineIndex}`;
               const leftKey = `${keyBase}-left`;
               const rightKey = `${keyBase}-right`;
@@ -180,7 +194,7 @@ export function DiffViewer({
                           type="button"
                           className={selected?.key === leftKey ? "selected" : undefined}
                           aria-label={`在左侧第 ${line.old_line} 行添加评论`}
-                          onClick={() => selectLine(leftKey, line.old_line, "left")}
+                          onClick={() => selectLine(leftKey, line.old_line, "left", hunk.hunk_hash)}
                         >
                           {line.old_line}
                         </button>
@@ -195,7 +209,7 @@ export function DiffViewer({
                           type="button"
                           className={selected?.key === rightKey ? "selected" : undefined}
                           aria-label={`在右侧第 ${line.new_line} 行添加评论`}
-                          onClick={() => selectLine(rightKey, line.new_line, "right")}
+                          onClick={() => selectLine(rightKey, line.new_line, "right", hunk.hunk_hash)}
                         >
                           {line.new_line}
                         </button>
@@ -247,7 +261,7 @@ function CommentList({ items, sideLabel }: { items: LineComment[]; sideLabel: st
       {items.map((comment) => (
         <li key={comment.id} className="comment-item">
           <span className="comment-meta">{sideLabel} · 第 {comment.line_number} 行</span>
-          <p>{comment.text}</p>
+          <LineCommentComponent comment={comment} />
         </li>
       ))}
     </ul>
