@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/application"
 	appdomain "agentguild.dev/agentguild/backend/internal/domain"
-	"agentguild.dev/agentguild/backend/internal/review/application"
+	reviewapplication "agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"agentguild.dev/agentguild/backend/internal/review/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
@@ -23,7 +24,7 @@ func TestInsertReviewIsTenantScoped(t *testing.T) {
 	review := newReview("review-1", "tenant-1", "submission-1", reviewerID, rubricID)
 
 	store := postgres.NewStore(db)
-	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
 		return tx.Reviews().Insert(ctx, review)
 	}))
 
@@ -213,7 +214,7 @@ func TestReviewerInsertUsesTransactionTime(t *testing.T) {
 
 	var txNow time.Time
 	store := postgres.NewStore(db)
-	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
 		var err error
 		txNow, err = tx.Now(ctx)
 		if err != nil {
@@ -314,7 +315,7 @@ func TestReviewInsertUsesTransactionTime(t *testing.T) {
 
 	var txNow time.Time
 	store := postgres.NewStore(db)
-	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
 		txNow, err = tx.Now(ctx)
 		if err != nil {
 			return err
@@ -343,7 +344,7 @@ func TestReviewUpdateUsesTransactionTime(t *testing.T) {
 	var txNow time.Time
 	store := postgres.NewStore(db)
 	var err error
-	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
 		txNow, err = tx.Now(ctx)
 		if err != nil {
 			return err
@@ -356,6 +357,117 @@ func TestReviewUpdateUsesTransactionTime(t *testing.T) {
 	err = db.QueryRow(ctx, "SELECT updated_at FROM reviews WHERE tenant_id=$1 AND id=$2", review.TenantID, review.ID).Scan(&updatedAt)
 	require.NoError(t, err)
 	require.WithinDuration(t, txNow, updatedAt, 0)
+}
+
+func TestListUnprojectedReturnsSubmittedReviewsWithExecutionMetadata(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	insertExecutionAndTask(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
+	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	review := submitReviewWithRubric(t, db, "tenant-1", "review-1", "exe-1", reviewerID, rubricID, domain.DecisionAccepted)
+
+	store := postgres.NewStore(db)
+	var records []application.ReviewSignalRecord
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
+		var err error
+		records, err = tx.Reviews().ListUnprojected(ctx, 10)
+		return err
+	}))
+
+	require.Len(t, records, 1)
+	require.Equal(t, "tenant-1", records[0].TenantID)
+	require.Equal(t, review.ID, records[0].ReviewID)
+	require.Equal(t, "agent-v1", records[0].AgentVersionID)
+	require.Equal(t, "code", records[0].TaskType)
+	require.Equal(t, domain.DecisionAccepted, records[0].Decision)
+}
+
+func TestListUnprojectedSkipsPendingAndAlreadyProjected(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	insertExecutionAndTask(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
+	insertExecutionAndTask(t, db, "tenant-1", "task-2", "exe-2", "agent-v1", "code")
+	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	pending := newReview("review-pending", "tenant-1", "exe-1", reviewerID, rubricID)
+	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, pending))
+	submitted := submitReviewWithRubric(t, db, "tenant-1", "review-submitted", "exe-2", reviewerID, rubricID, domain.DecisionAccepted)
+
+	_, err := db.Exec(ctx, "UPDATE reviews SET projected_at=clock_timestamp() WHERE tenant_id='tenant-1' AND id=$1", submitted.ID)
+	require.NoError(t, err)
+
+	store := postgres.NewStore(db)
+	var records []application.ReviewSignalRecord
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
+		records, err = tx.Reviews().ListUnprojected(ctx, 10)
+		return err
+	}))
+	require.Empty(t, records)
+}
+
+func TestMarkProjectedSetsTimestamp(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	insertExecutionAndTask(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
+	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	review := submitReviewWithRubric(t, db, "tenant-1", "review-1", "exe-1", reviewerID, rubricID, domain.DecisionAccepted)
+
+	store := postgres.NewStore(db)
+	var txNow time.Time
+	require.NoError(t, store.WithTx(ctx, func(tx reviewapplication.Tx) error {
+		var err error
+		txNow, err = tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		return tx.Reviews().MarkProjected(ctx, "tenant-1", review.ID)
+	}))
+
+	var projectedAt time.Time
+	require.NoError(t, db.QueryRow(ctx, "SELECT projected_at FROM reviews WHERE tenant_id=$1 AND id=$2", review.TenantID, review.ID).Scan(&projectedAt))
+	require.WithinDuration(t, txNow, projectedAt, 0)
+}
+
+func TestMarkProjectedNotFoundReturnsDomainError(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	store := postgres.NewStore(db)
+	err := store.WithTx(ctx, func(tx reviewapplication.Tx) error {
+		return tx.Reviews().MarkProjected(ctx, "tenant-1", "missing")
+	})
+	require.ErrorIs(t, err, appdomain.ErrNotFound)
+	require.Equal(t, "not_found", appdomain.CodeOf(err))
+}
+
+func insertExecutionAndTask(t *testing.T, db *pgxpool.Pool, tenantID, taskID, executionID, agentVersionID, taskType string) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := db.Exec(ctx, `
+		INSERT INTO tasks (tenant_id, id, publisher_agent_version_id, type, title, problem, constraints, requirements, deadline, status)
+		VALUES ($1, $2, 'publisher-1', $3, 'title', 'problem', '[]'::jsonb, '[]'::jsonb, $4, 'open')`,
+		tenantID, taskID, taskType, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, `
+		INSERT INTO executions (tenant_id, id, task_id, agent_version_id, status, lease_generation, started_at)
+		VALUES ($1, $2, $3, $4, 'reviewing', 1, clock_timestamp())`,
+		tenantID, executionID, taskID, agentVersionID)
+	require.NoError(t, err)
+}
+
+func submitReviewWithRubric(t *testing.T, db *pgxpool.Pool, tenantID, reviewID, submissionID, reviewerID, rubricVersionID string, decision domain.Decision) *domain.Review {
+	t.Helper()
+	ctx := context.Background()
+	rubric := newRubricVersion(rubricVersionID, tenantID, 1)
+	review := newReview(reviewID, tenantID, submissionID, reviewerID, rubricVersionID)
+	require.NoError(t, review.Submit(decision, []domain.RubricScore{{Dimension: "quality", Score: 80}}, rubric, time.Now()))
+	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, review))
+	return review
 }
 
 func newReview(id, tenantID, submissionID, reviewerID, rubricVersionID string) *domain.Review {
@@ -384,7 +496,7 @@ func insertReviewer(t *testing.T, db *pgxpool.Pool, tenantID, reviewerID string)
 	ctx := context.Background()
 	profile, err := domain.NewReviewerProfile(reviewerID, tenantID, "user-"+reviewerID, []string{"go"}, time.Now())
 	require.NoError(t, err)
-	require.NoError(t, postgres.NewStore(db).WithTx(ctx, func(tx application.Tx) error {
+	require.NoError(t, postgres.NewStore(db).WithTx(ctx, func(tx reviewapplication.Tx) error {
 		return tx.Reviewers().Insert(ctx, profile)
 	}))
 	return reviewerID
@@ -413,7 +525,7 @@ func insertRubricVersion(t *testing.T, db *pgxpool.Pool, tenantID string, versio
 		time.Now(),
 	)
 	require.NoError(t, err)
-	require.NoError(t, postgres.NewStore(db).WithTx(ctx, func(tx application.Tx) error {
+	require.NoError(t, postgres.NewStore(db).WithTx(ctx, func(tx reviewapplication.Tx) error {
 		return tx.Rubrics().CreateVersion(ctx, version)
 	}))
 	return version.ID

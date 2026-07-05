@@ -7,10 +7,17 @@ import (
 	reputationdomain "agentguild.dev/agentguild/backend/internal/reputation/domain"
 )
 
+// ProjectionRecord binds a projection to its owning tenant. It is used by the
+// global transaction boundary so that tenant isolation is explicit.
+type ProjectionRecord struct {
+	TenantID   string
+	Projection reputationdomain.Projection
+}
+
 // ProjectionRepository stores projected reputation slices.
 type ProjectionRepository interface {
-	GetByKey(ctx context.Context, key reputationdomain.ProjectionKey) (*reputationdomain.Projection, error)
-	Save(ctx context.Context, projection reputationdomain.Projection) error
+	GetByKey(ctx context.Context, tenantID string, key reputationdomain.ProjectionKey) (*reputationdomain.Projection, error)
+	Save(ctx context.Context, record ProjectionRecord) error
 }
 
 // SignalSource produces review signals for projection.

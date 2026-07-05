@@ -21,6 +21,7 @@ type Config struct {
 	MCPEnabled, WebEnabled, LangfuseEnabled                bool
 	SessionCookieSecure                                    bool
 	ReaperInterval, OutboxInterval, ShutdownTimeout        time.Duration
+	ReputationWorkerInterval                               time.Duration
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
@@ -63,7 +64,7 @@ func Load(get LookupEnv) (Config, error) {
 	if cfg.OutboxInterval, err = duration(get, "OUTBOX_INTERVAL", 3*time.Second); err != nil {
 		return Config{}, err
 	}
-	if cfg.ShutdownTimeout, err = duration(get, "SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
+	if cfg.ReputationWorkerInterval, err = duration(get, "REPUTATION_WORKER_INTERVAL", 30*time.Second); err != nil {
 		return Config{}, err
 	}
 	for _, required := range [][2]string{{"DATABASE_URL", cfg.DatabaseURL}, {"CURSOR_SECRET", cfg.CursorSecret}} {

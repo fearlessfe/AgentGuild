@@ -38,6 +38,7 @@ CREATE TABLE reviews (
     status text NOT NULL,
     final_decision text,
     submitted_at timestamptz,
+    projected_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (tenant_id, id),
@@ -49,6 +50,7 @@ CREATE TABLE reviews (
     CONSTRAINT fk_reviews_rubric_version FOREIGN KEY (tenant_id, rubric_version_id) REFERENCES rubric_versions(tenant_id, id)
 );
 CREATE UNIQUE INDEX reviews_one_per_submission ON reviews (tenant_id, submission_id);
+CREATE INDEX reviews_unprojected ON reviews (tenant_id, status, projected_at) WHERE status='submitted' AND projected_at IS NULL;
 
 CREATE TABLE line_comments (
     tenant_id text NOT NULL,

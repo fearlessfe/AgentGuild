@@ -6,9 +6,24 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/shopspring/decimal"
 )
+
+// ReviewSignalRecord is an unprojected review joined with its execution/task
+// metadata. It carries everything needed to build a reputation signal plus the
+// tenant/review identity required to mark the review projected.
+type ReviewSignalRecord struct {
+	TenantID       string
+	ReviewID       string
+	AgentVersionID string
+	Capability     string
+	TaskType       string
+	Decision       reviewdomain.Decision
+	CostCents      int64
+	LatencyMs      int64
+}
 
 type Store interface {
 	WithTx(context.Context, func(Tx) error) error
@@ -23,6 +38,8 @@ type Tx interface {
 	LineComments() LineCommentRepository
 	Rubrics() RubricRepository
 	Reviewers() ReviewerRepository
+	UpsertReputationProjection(context.Context, reputationapp.ProjectionRecord) error
+	ListReputationProjectionsByAgentVersion(context.Context, string, string) ([]reputationapp.ProjectionRecord, error)
 	Now(context.Context) (time.Time, error)
 	RequireLiveAgent(context.Context, auth.Principal) error
 }
@@ -145,6 +162,8 @@ type ReviewRepository interface {
 	Update(context.Context, *reviewdomain.Review) error
 	GetByID(context.Context, string, string) (*reviewdomain.Review, error)
 	ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error)
+	ListUnprojected(context.Context, int) ([]ReviewSignalRecord, error)
+	MarkProjected(context.Context, string, string) error
 }
 
 type LineCommentRepository interface {

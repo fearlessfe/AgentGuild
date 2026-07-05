@@ -7,8 +7,8 @@ import (
 	"errors"
 	"time"
 
-	appdomain "agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/application"
+	appdomain "agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,6 +126,69 @@ func (r *reviewRepository) ListBySubmission(ctx context.Context, tenantID, submi
 		reviews = append(reviews, *review)
 	}
 	return reviews, rows.Err()
+}
+
+func (r *reviewRepository) ListUnprojected(ctx context.Context, batchSize int) ([]application.ReviewSignalRecord, error) {
+	if batchSize <= 0 {
+		return nil, &appdomain.Error{Code: "invalid_argument", Message: "batch_size is invalid", Field: "batch_size"}
+	}
+	rows, err := r.q.Query(ctx, `
+		SELECT
+			r.tenant_id,
+			r.id,
+			e.agent_version_id,
+			COALESCE(rp.capabilities[1], t.type) AS capability,
+			t.type AS task_type,
+			r.final_decision,
+			0 AS cost_cents,
+			COALESCE(EXTRACT(EPOCH FROM (r.submitted_at - e.started_at)) * 1000, 0)::bigint AS latency_ms
+		FROM reviews r
+		JOIN executions e ON e.tenant_id = r.tenant_id AND e.id = r.submission_id
+		JOIN tasks t ON t.tenant_id = e.tenant_id AND t.id = e.task_id
+		JOIN reviewer_profiles rp ON rp.tenant_id = r.tenant_id AND rp.id = r.reviewer_id
+		WHERE r.status = 'submitted' AND r.projected_at IS NULL
+		ORDER BY r.tenant_id, r.id
+		LIMIT $1
+		FOR UPDATE OF r SKIP LOCKED`, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []application.ReviewSignalRecord
+	for rows.Next() {
+		var rec application.ReviewSignalRecord
+		var decision string
+		if err := rows.Scan(
+			&rec.TenantID, &rec.ReviewID, &rec.AgentVersionID, &rec.Capability, &rec.TaskType,
+			&decision, &rec.CostCents, &rec.LatencyMs,
+		); err != nil {
+			return nil, err
+		}
+		rec.Decision = domain.Decision(decision)
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+func (r *reviewRepository) MarkProjected(ctx context.Context, tenantID, reviewID string) error {
+	now, err := r.now(ctx)
+	if err != nil {
+		return err
+	}
+	tag, err := r.q.Exec(ctx, `
+		UPDATE reviews
+		SET projected_at=$3, updated_at=$3
+		WHERE tenant_id=$1 AND id=$2 AND projected_at IS NULL`,
+		tenantID, reviewID, now,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return appdomain.ErrNotFound
+	}
+	return nil
 }
 
 var _ application.ReviewRepository = (*reviewRepository)(nil)

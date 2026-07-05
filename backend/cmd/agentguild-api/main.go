@@ -22,6 +22,7 @@ import (
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
+	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
 	mcptransport "agentguild.dev/agentguild/backend/internal/transport/mcp"
 	resttransport "agentguild.dev/agentguild/backend/internal/transport/rest"
@@ -79,6 +80,8 @@ func run() error {
 	provider := costProvider(cfg.LangfuseEnabled, cfg)
 	outbox := worker.NewOutbox(pool, provider)
 	runWorker(workerCtx, &wg, cfg.OutboxInterval, "outbox", outbox.RunOnce)
+	reputation := reputationworker.NewWorker(postgres.NewStore(pool), cfg.ReputationWorkerInterval, 100, slog.Default())
+	runWorker(workerCtx, &wg, cfg.ReputationWorkerInterval, "reputation", reputation.RunOnce)
 
 	errCh := make(chan error, 1)
 	go func() {

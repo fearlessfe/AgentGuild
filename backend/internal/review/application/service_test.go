@@ -9,6 +9,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/stretchr/testify/require"
@@ -659,6 +660,14 @@ func (tx *reviewMemoryTx) Reviewers() application.ReviewerRepository {
 	return reviewMemoryReviewerRepository{store: tx.store}
 }
 
+func (tx *reviewMemoryTx) UpsertReputationProjection(context.Context, reputationapp.ProjectionRecord) error {
+	return nil
+}
+
+func (tx *reviewMemoryTx) ListReputationProjectionsByAgentVersion(context.Context, string, string) ([]reputationapp.ProjectionRecord, error) {
+	return nil, nil
+}
+
 func (tx *reviewMemoryTx) RequireLiveAgent(context.Context, auth.Principal) error { return nil }
 
 // --- memory repositories ---
@@ -690,6 +699,14 @@ func (r reviewMemoryReviewRepository) GetByID(_ context.Context, tenantID, id st
 }
 
 func (r reviewMemoryReviewRepository) ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error) {
+	panic("not implemented")
+}
+
+func (r reviewMemoryReviewRepository) ListUnprojected(context.Context, int) ([]application.ReviewSignalRecord, error) {
+	panic("not implemented")
+}
+
+func (r reviewMemoryReviewRepository) MarkProjected(context.Context, string, string) error {
 	panic("not implemented")
 }
 
