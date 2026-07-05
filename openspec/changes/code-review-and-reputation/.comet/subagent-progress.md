@@ -3,11 +3,12 @@
 ## Current Task
 
 - Plan task: Task 12: 集成测试与验收测试
-- Stage: final-fix
+- Stage: final-review
 - Review mode: thorough
 - Implementer: agent-43 (DONE, commit ba3b5b6)
 - Reviewer: agent-44 (PASS with 2 IMPORTANT gaps)
-- Fixer: agent-45 (task_id: agent-wpr5j7gs, running)
+- Fixer: agent-45 (DONE, changes committed as b0dad3f)
+- Final Reviewer: agent-46 (task_id: agent-43yw3230, running)
 - Base commit: 516dc1c
 
 ## Previous Tasks
@@ -20,5 +21,6 @@
 
 ## Next
 
-- Wait for agent-45 fix result.
-- After fix, regenerate review package and re-dispatch final reviewer.
+- Wait for agent-46 final review result.
+- If PASS: check off Task 12 and OpenSpec task 3.3, then run final build guard and transition to verify.
+- If FAIL with CRITICAL/IMPORTANT findings: this is final review round 1; one more fix round allowed per thorough mode.
