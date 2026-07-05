@@ -816,7 +816,7 @@ git commit -m "feat(frontend): line comments, rubric scoring and decision submis
 - Consumes: `GET /v1/reputation?agent_version_id=...&capability=...&task_type=...`
 - Produces: `ReputationPage` 展示 pass_rate、rework_rate、avg cost、latency、sample_size_hint
 
-- [ ] **Step 1: 定义类型与 API**
+- [x] **Step 1: 定义类型与 API**
 
 ```ts
 export type ProjectionView = {
@@ -830,7 +830,7 @@ export type ProjectionView = {
 };
 ```
 
-- [ ] **Step 2: 实现页面并测试 Task 11**
+- [x] **Step 2: 实现页面并测试 Task 11**
 
 ```bash
 npm test -- --run
