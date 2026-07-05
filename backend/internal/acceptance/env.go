@@ -390,7 +390,6 @@ func (env *Env) GetSubmission(tenantID, submissionID string) *SubmissionRecord {
 type ValidationJobRecord struct {
 	ID            string
 	SubmissionID  string
-	ExecutionID   string
 	Repo          string
 	Branch        string
 	CommitSHA     string
@@ -404,10 +403,10 @@ func (env *Env) GetValidationJob(tenantID, jobID string) *ValidationJobRecord {
 	env.T.Helper()
 	var r ValidationJobRecord
 	err := env.DB.QueryRow(context.Background(), `
-		SELECT id, submission_id, execution_id, repo, branch, commit_sha, status, attempt, config_version
+		SELECT id, submission_id, repo, branch, commit_sha, status, attempt, config_version
 		FROM validation_jobs
 		WHERE tenant_id=$1 AND id=$2`, tenantID, jobID).Scan(
-		&r.ID, &r.SubmissionID, &r.ExecutionID, &r.Repo, &r.Branch, &r.CommitSHA,
+		&r.ID, &r.SubmissionID, &r.Repo, &r.Branch, &r.CommitSHA,
 		&r.Status, &r.Attempt, &r.ConfigVersion)
 	require.NoError(env.T, err)
 	return &r
@@ -422,23 +421,24 @@ type CredentialRecord struct {
 	Branch         string
 	BaseCommit     string
 	Status         string
-	TokenPlaintext *string
+	HasTokenColumn bool
 }
 
-// GetCredential 直接读取 credential 元数据，并验证 token 未以明文存储。
+// GetCredential 直接读取 credential 元数据，并验证 git_credentials 表不存在明文 token 列。
 func (env *Env) GetCredential(tenantID, executionID string) *CredentialRecord {
 	env.T.Helper()
 	var r CredentialRecord
-	var tokenPlaintext *string
 	err := env.DB.QueryRow(context.Background(), `
 		SELECT id, execution_id, provider, repo_url, branch, base_commit_sha, status,
-		       (SELECT column_name FROM information_schema.columns
-		        WHERE table_name='git_credentials' AND column_name='token') AS token_col
+		       EXISTS (
+				   SELECT 1 FROM information_schema.columns
+				   WHERE table_name='git_credentials' AND column_name='token'
+		       ) AS has_token_column
 		FROM git_credentials
 		WHERE tenant_id=$1 AND execution_id=$2`, tenantID, executionID).Scan(
-		&r.ID, &r.ExecutionID, &r.Provider, &r.RepoURL, &r.Branch, &r.BaseCommit, &r.Status, &tokenPlaintext)
+		&r.ID, &r.ExecutionID, &r.Provider, &r.RepoURL, &r.Branch, &r.BaseCommit, &r.Status, &r.HasTokenColumn)
 	require.NoError(env.T, err)
-	r.TokenPlaintext = tokenPlaintext
+	require.False(env.T, r.HasTokenColumn, "git_credentials 不应包含明文 token 列")
 	return &r
 }
 
