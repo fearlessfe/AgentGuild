@@ -17,39 +17,45 @@ func NewPolicy(ownerProvider AgentOwnerProvider) *Policy {
 	return &Policy{ownerProvider: ownerProvider}
 }
 
-// RequireTenantAdmin verifies that principal belongs to the tenant and is an
-// admin. Used for tenant-scoped resources such as BenchmarkSets.
-func (p *Policy) RequireTenantAdmin(ctx context.Context, principal identityapp.Principal, tenantID string) error {
+// RequireTenantOwnerOrAdmin verifies that principal belongs to the tenant and
+// is either an admin or a tenant owner. Used for tenant-scoped resources such
+// as BenchmarkSets.
+func (p *Policy) RequireTenantOwnerOrAdmin(principal identityapp.Principal, tenantID string) error {
 	if principal.TenantID == "" {
-		return domain.ErrForbidden
+		return domain.ErrNotFound
 	}
 	if principal.TenantID != tenantID {
-		return domain.ErrForbidden
+		return domain.ErrNotFound
 	}
 	if principal.IsAdmin {
 		return nil
 	}
-	return domain.ErrForbidden
+	if principal.OwnerID != "" {
+		return nil
+	}
+	return domain.ErrNotFound
 }
 
 // RequireOwnerOrAdmin verifies that principal is either an admin or the owner
-// of the agent identified by tenantID and agentID.
+// of the agent identified by tenantID and agentID. For non-admin callers,
+// missing or unauthorized agents always return not_found to avoid resource
+// probing.
 func (p *Policy) RequireOwnerOrAdmin(ctx context.Context, principal identityapp.Principal, tenantID, agentID string) error {
 	if principal.TenantID == "" {
-		return domain.ErrForbidden
+		return domain.ErrNotFound
 	}
 	if principal.TenantID != tenantID {
-		return domain.ErrForbidden
+		return domain.ErrNotFound
 	}
 	if principal.IsAdmin {
 		return nil
 	}
 	ownerID, err := p.ownerProvider.GetAgentOwner(ctx, tenantID, agentID)
 	if err != nil {
-		return domain.ErrForbidden
+		return domain.ErrNotFound
 	}
 	if principal.OwnerID != "" && principal.OwnerID == ownerID {
 		return nil
 	}
-	return domain.ErrForbidden
+	return domain.ErrNotFound
 }

@@ -88,6 +88,50 @@ func (r *versionRepository) UpdateStatus(ctx context.Context, tx application.Tx,
 	return nil
 }
 
+func (r *versionRepository) UpdateContent(ctx context.Context, tx application.Tx, version *domain.AgentVersion) error {
+	var running int
+	err := tx.QueryRow(ctx, `
+		SELECT 1
+		FROM evaluation_runs
+		WHERE tenant_id=$1 AND agent_version_id=$2 AND status='running'
+		LIMIT 1`,
+		version.TenantID, version.ID,
+	).Scan(&running)
+	if err == nil {
+		return domain.ErrStateConflict
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE agent_versions
+		SET runtime=$4,
+		    model=$5,
+		    capabilities=$6,
+		    config_fingerprint=$7,
+		    content_hash=$8,
+		    environment_digest=$9,
+		    prompt_ref=$10,
+		    skill_refs=$11,
+		    memory_ref=$12,
+		    tool_refs=$13
+		WHERE tenant_id=$1 AND agent_id=$2 AND id=$3`,
+		version.TenantID, version.AgentID, version.ID,
+		version.Runtime, version.Model, stringSlice(version.Capabilities),
+		version.ConfigFingerprint, version.ContentHash,
+		nullString(version.EnvironmentDigest), nullString(version.PromptRef),
+		stringSlice(version.SkillRefs), nullString(version.MemoryRef), stringSlice(version.ToolRefs),
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (r *versionRepository) GetByID(ctx context.Context, tenantID, agentID, versionID string) (*domain.AgentVersion, error) {
 	var version domain.AgentVersion
 	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason sql.NullString

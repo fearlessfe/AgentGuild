@@ -56,4 +56,10 @@ func TestNewEvaluationRunValidatesInputs(t *testing.T) {
 
 	_, err = domain.NewEvaluationRun("er-1", "tenant-1", "av-1", "", "env", domain.ScoringRuleVersionV1, now)
 	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+
+	_, err = domain.NewEvaluationRun("er-1", "tenant-1", "av-1", "bs-1", "", domain.ScoringRuleVersionV1, now)
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+
+	_, err = domain.NewEvaluationRun("er-1", "tenant-1", "av-1", "bs-1", "env", "", now)
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
 }

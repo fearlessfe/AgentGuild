@@ -26,12 +26,12 @@ type BenchmarkTask struct {
 
 // NewBenchmarkSet creates a minimal BenchmarkSet. Version numbers are normally
 // assigned by the repository.
-func NewBenchmarkSet(tenantID, id, createdBy string, versionNumber int) (*BenchmarkSet, error) {
-	if tenantID == "" {
-		return nil, invalidArgument("tenant_id")
-	}
+func NewBenchmarkSet(id, tenantID, createdBy string, versionNumber int) (*BenchmarkSet, error) {
 	if id == "" {
 		return nil, invalidArgument("id")
+	}
+	if tenantID == "" {
+		return nil, invalidArgument("tenant_id")
 	}
 	if createdBy == "" {
 		return nil, invalidArgument("created_by")
@@ -59,7 +59,7 @@ func NewBenchmarkSetWithTasks(
 	if now.IsZero() {
 		return nil, invalidArgument("created_at")
 	}
-	bs, err := NewBenchmarkSet(tenantID, id, createdBy, versionNumber)
+	bs, err := NewBenchmarkSet(id, tenantID, createdBy, versionNumber)
 	if err != nil {
 		return nil, err
 	}

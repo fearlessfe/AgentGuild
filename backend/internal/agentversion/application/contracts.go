@@ -27,6 +27,7 @@ type Tx interface {
 type VersionRepository interface {
 	Create(context.Context, Tx, *domain.AgentVersion) error
 	UpdateStatus(context.Context, Tx, *domain.AgentVersion) error
+	UpdateContent(context.Context, Tx, *domain.AgentVersion) error
 	GetByID(context.Context, string, string, string) (*domain.AgentVersion, error)
 	ListByAgent(context.Context, string, string) ([]domain.AgentVersion, error)
 	GetLatestByAgent(context.Context, string, string) (*domain.AgentVersion, error)

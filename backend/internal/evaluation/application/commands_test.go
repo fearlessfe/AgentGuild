@@ -7,9 +7,13 @@ import (
 	"testing"
 	"time"
 
+	avapplication "agentguild.dev/agentguild/backend/internal/agentversion/application"
+	avdomain "agentguild.dev/agentguild/backend/internal/agentversion/domain"
+	avpostgres "agentguild.dev/agentguild/backend/internal/agentversion/postgres"
 	"agentguild.dev/agentguild/backend/internal/evaluation/application"
 	"agentguild.dev/agentguild/backend/internal/evaluation/domain"
 	evpostgres "agentguild.dev/agentguild/backend/internal/evaluation/postgres"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	"agentguild.dev/agentguild/backend/internal/testdb"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -151,7 +155,7 @@ func TestCreateBenchmarkSetAndActivate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, resp2.BenchmarkSet.VersionNumber())
 
-	active, err := svc.GetActiveBenchmarkSet(context.Background(), tenantID)
+	active, err := svc.GetActiveBenchmarkSet(context.Background(), identityapp.Principal{TenantID: tenantID, OwnerID: "owner", IsAdmin: false}, tenantID)
 	require.NoError(t, err)
 	require.Equal(t, resp.BenchmarkSet.ID(), active.ID())
 }
@@ -202,7 +206,7 @@ func TestStartEvaluationRunPassedMarksEligible(t *testing.T) {
 	require.True(t, runResp.EvaluationRun.IsPassed())
 	require.Equal(t, "eligible", versions.versions[versionID].Status)
 
-	runs, err := svc.ListEvaluationRuns(context.Background(), tenantID, versionID)
+	runs, err := svc.ListEvaluationRuns(context.Background(), identityapp.Principal{TenantID: tenantID, OwnerID: ownerID, IsAdmin: false}, tenantID, versionID)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	require.Equal(t, domain.StatusPassed, runs[0].Status())
@@ -304,49 +308,74 @@ func TestRunningEvaluationRunBlocksVersionContentMutation(t *testing.T) {
 	ownerID := "owner"
 	versionID := randomID()
 	insertAgent(t, db, tenantID, agentID, ownerID)
-	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
 
-	versions := newFakeVersionLifecycle()
-	versions.AddVersion(&application.VersionInfo{ID: versionID, TenantID: tenantID, AgentID: agentID, Status: "draft"})
+	avStore := avpostgres.NewStore(db)
+	avRepo := avpostgres.NewVersionRepository(db)
 
-	// Start a run but never complete it in this test.
-	executor := &fakeExecutor{results: []domain.TaskResult{
-		{TaskRef: "task-1", Passed: true, LatencyMs: 100},
-	}}
-	svc := newService(t, db, executor, versions)
-
-	bsResp, err := svc.CreateBenchmarkSet(context.Background(), application.CreateBenchmarkSet{
-		TenantID:  tenantID,
-		Name:      "Set",
-		Tasks:     []domain.BenchmarkTask{{TaskRef: "task-1"}},
-		CreatedBy: ownerID,
-		IsAdmin:   true,
-	})
+	version, err := avdomain.NewAgentVersion(
+		versionID, tenantID, agentID, 1, "",
+		"python", "gpt-4", []string{"code"},
+		"sha256:prompt", []string{"sha256:skill"},
+		"sha256:memory", []string{"sha256:tool"},
+		"env-digest", ownerID, time.Now(),
+	)
 	require.NoError(t, err)
+	require.NoError(t, avStore.WithTx(context.Background(), func(tx avapplication.Tx) error {
+		return avRepo.Create(context.Background(), tx, version)
+	}))
 
-	_, err = svc.StartEvaluationRun(context.Background(), application.StartEvaluationRun{
-		TenantID:           tenantID,
-		AgentID:            agentID,
-		VersionID:          versionID,
-		BenchmarkSetID:     bsResp.BenchmarkSet.ID(),
-		EnvironmentDigest:  "env",
-		ScoringRuleVersion: domain.ScoringRuleVersionV1,
-		ActorID:            ownerID,
-		IsAdmin:            false,
-	})
+	evStore := evpostgres.NewStore(db)
+	bsRepo := evpostgres.NewBenchmarkSetRepository(db)
+	runRepo := evpostgres.NewEvaluationRunRepository(db)
+
+	bs, err := domain.NewBenchmarkSetWithTasks(
+		randomID(), tenantID, ownerID, 1,
+		"Set", "", nil, time.Now(),
+	)
 	require.NoError(t, err)
+	require.NoError(t, evStore.WithTx(context.Background(), func(tx application.Tx) error {
+		return bsRepo.Create(context.Background(), tx, bs)
+	}))
 
-	// Attempting to start another run on the same version should fail because the
-	// version is no longer draft.
-	_, err = svc.StartEvaluationRun(context.Background(), application.StartEvaluationRun{
-		TenantID:           tenantID,
-		AgentID:            agentID,
-		VersionID:          versionID,
-		BenchmarkSetID:     bsResp.BenchmarkSet.ID(),
-		EnvironmentDigest:  "env",
-		ScoringRuleVersion: domain.ScoringRuleVersionV1,
-		ActorID:            ownerID,
-		IsAdmin:            false,
+	run, err := domain.NewEvaluationRun(
+		randomID(), tenantID, versionID, bs.ID(),
+		"env-digest", domain.ScoringRuleVersionV1, time.Now(),
+	)
+	require.NoError(t, err)
+	require.NoError(t, evStore.WithTx(context.Background(), func(tx application.Tx) error {
+		return runRepo.Create(context.Background(), tx, run)
+	}))
+
+	// Attempting to mutate the version's content while an evaluation is running
+	// should be rejected by the repository guard.
+	mutated := *version
+	mutated.PromptRef = "sha256:prompt-mutated"
+	mutated.ContentHash = avdomain.ComputeContentHash(
+		mutated.Runtime, mutated.Model, mutated.Capabilities,
+		mutated.PromptRef, mutated.SkillRefs, mutated.MemoryRef, mutated.ToolRefs,
+	)
+	mutated.ConfigFingerprint = avdomain.ComputeConfigFingerprint(
+		mutated.Runtime, mutated.Model, mutated.Capabilities,
+		mutated.PromptRef, mutated.SkillRefs, mutated.MemoryRef, mutated.ToolRefs,
+	)
+	err = avStore.WithTx(context.Background(), func(tx avapplication.Tx) error {
+		return avRepo.UpdateContent(context.Background(), tx, &mutated)
 	})
-	require.ErrorIs(t, err, domain.ErrStateConflict)
+	require.ErrorIs(t, err, avdomain.ErrStateConflict)
+
+	// The original content must remain unchanged.
+	loaded, err := avRepo.GetByID(context.Background(), tenantID, agentID, versionID)
+	require.NoError(t, err)
+	require.Equal(t, version.PromptRef, loaded.PromptRef)
+	require.Equal(t, version.ContentHash, loaded.ContentHash)
+	require.Equal(t, version.ConfigFingerprint, loaded.ConfigFingerprint)
+
+	// Once the run completes, content updates are allowed again.
+	require.NoError(t, run.CompleteAt([]domain.ThresholdResult{{Name: "pass_rate", Passed: true}}, domain.EvaluationSummary{PassRate: 1.0}, time.Now()))
+	require.NoError(t, evStore.WithTx(context.Background(), func(tx application.Tx) error {
+		return runRepo.Complete(context.Background(), tx, run)
+	}))
+	require.NoError(t, avStore.WithTx(context.Background(), func(tx avapplication.Tx) error {
+		return avRepo.UpdateContent(context.Background(), tx, &mutated)
+	}))
 }

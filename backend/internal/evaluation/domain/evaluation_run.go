@@ -64,6 +64,12 @@ func NewEvaluationRun(
 	if benchmarkSetID == "" {
 		return nil, invalidArgument("benchmark_set_id")
 	}
+	if environmentDigest == "" {
+		return nil, invalidArgument("environment_digest")
+	}
+	if scoringRuleVersion == "" {
+		return nil, invalidArgument("scoring_rule_version")
+	}
 	if now.IsZero() {
 		return nil, invalidArgument("started_at")
 	}

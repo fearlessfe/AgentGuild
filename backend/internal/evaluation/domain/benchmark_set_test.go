@@ -9,7 +9,7 @@ import (
 )
 
 func TestBenchmarkSetVersionNumber(t *testing.T) {
-	bs, err := domain.NewBenchmarkSet("tenant-1", "bs-1", "owner-1", 5)
+	bs, err := domain.NewBenchmarkSet("bs-1", "tenant-1", "owner-1", 5)
 	require.NoError(t, err)
 	require.Equal(t, 5, bs.VersionNumber())
 }
@@ -31,12 +31,12 @@ func TestBenchmarkSetTasks(t *testing.T) {
 }
 
 func TestNewBenchmarkSetValidatesInputs(t *testing.T) {
-	_, err := domain.NewBenchmarkSet("", "bs-1", "owner-1", 1)
+	_, err := domain.NewBenchmarkSet("", "tenant-1", "owner-1", 1)
 	require.ErrorIs(t, err, domain.ErrInvalidArgument)
 
-	_, err = domain.NewBenchmarkSet("tenant-1", "", "owner-1", 1)
+	_, err = domain.NewBenchmarkSet("bs-1", "", "owner-1", 1)
 	require.ErrorIs(t, err, domain.ErrInvalidArgument)
 
-	_, err = domain.NewBenchmarkSet("tenant-1", "bs-1", "owner-1", 0)
+	_, err = domain.NewBenchmarkSet("bs-1", "tenant-1", "owner-1", 0)
 	require.ErrorIs(t, err, domain.ErrInvalidArgument)
 }

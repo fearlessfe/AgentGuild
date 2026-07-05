@@ -62,7 +62,7 @@ func (s *EvaluationService) CreateBenchmarkSet(
 		OwnerID:  cmd.CreatedBy,
 		IsAdmin:  cmd.IsAdmin,
 	}
-	if err := s.policy.RequireTenantAdmin(ctx, principal, cmd.TenantID); err != nil {
+	if err := s.policy.RequireTenantOwnerOrAdmin(principal, cmd.TenantID); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +125,7 @@ func (s *EvaluationService) StartEvaluationRun(
 			return err
 		}
 		if version.AgentID != cmd.AgentID {
-			return domain.ErrForbidden
+			return domain.ErrNotFound
 		}
 		if version.Status != "draft" {
 			return domain.ErrStateConflict

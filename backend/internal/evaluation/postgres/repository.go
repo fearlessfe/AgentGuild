@@ -179,6 +179,7 @@ func (r *benchmarkSetRepository) GetActiveByTenant(ctx context.Context, tenantID
 		       is_active, created_by, created_at
 		FROM benchmark_sets
 		WHERE tenant_id=$1 AND is_active=true
+		ORDER BY version_number DESC
 		LIMIT 1`,
 		tenantID,
 	)
@@ -286,7 +287,10 @@ func (r *evaluationRunRepository) Complete(ctx context.Context, tx application.T
 	}
 	completedAt := run.CompletedAt()
 	if completedAt == nil {
-		now := time.Now()
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
 		completedAt = &now
 	}
 	tag, err := tx.Exec(ctx, `
