@@ -168,14 +168,14 @@ function AgentDetailWorkspace() {
   );
 }
 
-function ReviewWorkspace() {
+export function ReviewWorkspace() {
   const { reviewId } = useParams();
 
   return (
     <div className="observer">
       <PageHeader title="审核" subtitle="查看提交 Diff、评分并给出审核结论" />
       <div className="review-page-body">
-        {reviewId ? <ReviewPage /> : (
+        {reviewId ? <ReviewPage key={reviewId} /> : (
           <aside className="review-detail empty">
             <p>选择一次审核查看详情</p>
           </aside>

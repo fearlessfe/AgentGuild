@@ -2,9 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { envelope } from "../../api/fixtures";
+import { ReviewWorkspace } from "../../app/AppShell";
 import { ReviewPage } from "./ReviewPage";
 import type { FileDiff, ReviewView } from "./reviews.types";
 
@@ -176,5 +177,124 @@ describe("ReviewPage", () => {
     expect(screen.getByText("缺少 nil 检查")).toBeVisible();
     // The server comment seeded on first load should also remain visible.
     expect(screen.getByText("服务端评论")).toBeVisible();
+  });
+
+  it("resets seeded comments and selected path when navigating to a different review", async () => {
+    // Polyfill around jsdom Request signal validation so React Router navigation works in tests.
+    const OriginalRequest = globalThis.Request;
+    globalThis.Request = class RequestPolyfill extends OriginalRequest {
+      constructor(input: RequestInfo | URL, init?: RequestInit) {
+        if (init?.signal) {
+          const { signal, ...rest } = init;
+          super(input, rest);
+        } else {
+          super(input, init);
+        }
+      }
+    } as typeof Request;
+
+    const rev1Review = {
+      ...reviewFixture,
+      id: "rev-1",
+      submission_id: "sub-1",
+      line_comments: [
+        {
+          id: "server-rev-1",
+          review_id: "rev-1",
+          submission_id: "sub-1",
+          file_path: diffFixture[0].path,
+          side: "right" as const,
+          line_number: 11,
+          hunk_hash: "",
+          diff_fingerprint: "",
+          text: "Rev1 server comment",
+          created_at: "2026-07-02T14:00:00Z",
+        },
+      ],
+    };
+
+    const rev2Review = {
+      ...reviewFixture,
+      id: "rev-2",
+      submission_id: "sub-2",
+      line_comments: [
+        {
+          id: "server-rev-2",
+          review_id: "rev-2",
+          submission_id: "sub-2",
+          file_path: "src/other.go",
+          side: "right" as const,
+          line_number: 2,
+          hunk_hash: "",
+          diff_fingerprint: "",
+          text: "Rev2 server comment",
+          created_at: "2026-07-02T15:00:00Z",
+        },
+      ],
+    };
+
+    const rev2Diff: FileDiff[] = [
+      {
+        path: "src/other.go",
+        old_path: "src/other.go",
+        hunks: [
+          {
+            old_start: 1,
+            old_lines: 1,
+            new_start: 1,
+            new_lines: 3,
+            hunk_hash: "h2",
+            lines: [
+              { type: "context" as const, text: "package other", old_line: 1, new_line: 1 },
+              { type: "add" as const, text: "func Other() {}", new_line: 2 },
+            ],
+          },
+        ],
+      },
+    ];
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(rev1Review)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(rev2Review)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(rev2Diff)), { status: 200 }));
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/reviews/:reviewId",
+          element: (
+            <QueryClientProvider client={client}>
+              <ReviewWorkspace />
+            </QueryClientProvider>
+          ),
+        },
+      ],
+      { initialEntries: ["/reviews/rev-1"] },
+    );
+
+    render(<RouterProvider router={router} />);
+
+    try {
+      // Wait for rev-1 to load.
+      expect(await screen.findByText("审核 rev-1")).toBeVisible();
+      expect(screen.getByText("Rev1 server comment")).toBeVisible();
+      expect(screen.getByLabelText("查看 src/payment.go")).toHaveAttribute("aria-pressed", "true");
+
+      // Navigate to rev-2 within the same route.
+      await router.navigate("/reviews/rev-2");
+
+      // Wait for rev-2 to load and assert new server comments / selected path.
+      expect(await screen.findByText("审核 rev-2")).toBeVisible();
+      expect(screen.getByText("Rev2 server comment")).toBeVisible();
+      expect(screen.queryByText("Rev1 server comment")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("查看 src/other.go")).toHaveAttribute("aria-pressed", "true");
+    } finally {
+      globalThis.Request = OriginalRequest;
+    }
   });
 });
