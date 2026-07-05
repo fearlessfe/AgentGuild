@@ -155,6 +155,20 @@ type EvaluationRunSummary struct {
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
+type EvaluationRunDetail struct {
+	ID                 string                   `json:"id"`
+	TenantID           string                   `json:"tenant_id"`
+	AgentVersionID     string                   `json:"agent_version_id"`
+	BenchmarkSetID     string                   `json:"benchmark_set_id"`
+	Status             string                   `json:"status"`
+	EnvironmentDigest  string                   `json:"environment_digest"`
+	ScoringRuleVersion string                   `json:"scoring_rule_version"`
+	ThresholdResults   []domain.ThresholdResult `json:"threshold_results,omitempty"`
+	Summary            domain.EvaluationSummary `json:"summary"`
+	StartedAt          time.Time                `json:"started_at"`
+	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+}
+
 // AgentOwnerProvider reads the owner of an agent.
 type AgentOwnerProvider interface {
 	GetAgentOwner(context.Context, string, string) (string, error)

@@ -75,6 +75,7 @@ type evaluationService interface {
 	CreateBenchmarkSet(ctx context.Context, cmd evaluationapp.CreateBenchmarkSet) (*evaluationapp.CreateBenchmarkSetResponse, error)
 	ListEvaluationRunSummaries(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]evaluationapp.EvaluationRunSummary, error)
 	GetEvaluationRunSummary(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*evaluationapp.EvaluationRunSummary, error)
+	GetEvaluationRunDetail(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*evaluationapp.EvaluationRunDetail, error)
 	StartEvaluationRun(ctx context.Context, cmd evaluationapp.StartEvaluationRun) (*evaluationapp.StartEvaluationRunResponse, error)
 }
 

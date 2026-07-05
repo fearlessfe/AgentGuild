@@ -2,11 +2,70 @@ package rest
 
 import (
 	"net/http"
+	"sort"
+	"strings"
 
 	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	"github.com/go-chi/chi/v5"
 )
+
+type versionDiffView struct {
+	BaseVersionID       string          `json:"base_version_id"`
+	TargetVersionID     string          `json:"target_version_id"`
+	AddedCapabilities   []string        `json:"added_capabilities,omitempty"`
+	RemovedCapabilities []string        `json:"removed_capabilities,omitempty"`
+	ChangedRefs         []refChangeView `json:"changed_refs,omitempty"`
+}
+
+type refChangeView struct {
+	Field string  `json:"field"`
+	From  *string `json:"from,omitempty"`
+	To    *string `json:"to,omitempty"`
+}
+
+func toVersionDiffView(targetVersionID string, diff *agentversionapp.VersionDiff) *versionDiffView {
+	view := &versionDiffView{
+		BaseVersionID:   diff.BaseVersionID,
+		TargetVersionID: targetVersionID,
+	}
+	view.AddedCapabilities = extractCapabilityNames(diff.Added)
+	view.RemovedCapabilities = extractCapabilityNames(diff.Removed)
+	for field, change := range diff.Changed {
+		view.ChangedRefs = append(view.ChangedRefs, refChangeView{
+			Field: field,
+			From:  stringPtrOrNil(change.From),
+			To:    stringPtrOrNil(change.To),
+		})
+	}
+	sort.Strings(view.AddedCapabilities)
+	sort.Strings(view.RemovedCapabilities)
+	sort.Slice(view.ChangedRefs, func(i, j int) bool {
+		return view.ChangedRefs[i].Field < view.ChangedRefs[j].Field
+	})
+	return view
+}
+
+func extractCapabilityNames(m map[string]agentversionapp.RefChange) []string {
+	var names []string
+	for key := range m {
+		if name, ok := strings.CutPrefix(key, "capability:"); ok {
+			names = append(names, name)
+		} else if name, ok := strings.CutPrefix(key, "skill:"); ok {
+			names = append(names, name)
+		} else if name, ok := strings.CutPrefix(key, "tool:"); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func stringPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
 
 func (s *Server) listAgentVersions(w http.ResponseWriter, r *http.Request) {
 	principal := identityPrincipalFromAuth(mustPrincipal(r))
@@ -91,7 +150,8 @@ func (s *Server) diffAgentVersion(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	view := toVersionDiffView(chi.URLParam(r, "version_id"), result)
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) startAgentVersionEvaluation(w http.ResponseWriter, r *http.Request) {

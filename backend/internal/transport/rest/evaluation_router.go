@@ -79,7 +79,7 @@ func (s *Server) listEvaluations(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getEvaluation(w http.ResponseWriter, r *http.Request) {
 	principal := identityPrincipalFromAuth(mustPrincipal(r))
-	result, err := s.evaluations.GetEvaluationRunSummary(r.Context(), principal, principal.TenantID, chi.URLParam(r, "id"))
+	result, err := s.evaluations.GetEvaluationRunDetail(r.Context(), principal, principal.TenantID, chi.URLParam(r, "id"))
 	if err != nil {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
