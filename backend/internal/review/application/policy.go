@@ -22,8 +22,12 @@ type ReviewRecord struct {
 }
 
 // CanViewReview decides whether the principal may read a review.
-// Allowed roles: admin, the publisher agent of the task, the owner of the
-// publisher agent, or the assigned reviewer.
+// Allowed roles: admin, the publisher agent of the task, the agent that owns
+// the execution, or the assigned reviewer.
+//
+// Note: human owner resolution for the executing agent would require identity
+// context; the current model checks the executing agent itself using the
+// agent version ID recorded on the execution.
 func (Policy) CanViewReview(_ context.Context, principal auth.Principal, review ReviewRecord, task application.TaskSummary) error {
 	if principal.TenantID == "" {
 		return domain.ErrForbidden
@@ -37,7 +41,7 @@ func (Policy) CanViewReview(_ context.Context, principal auth.Principal, review 
 	if principal.AgentID != "" && principal.AgentVersionID != "" && principal.AgentVersionID == task.PublisherAgentVersionID {
 		return nil
 	}
-	if principal.OwnerID != "" && principal.OwnerID == task.PublisherOwnerID {
+	if principal.AgentID != "" && principal.AgentVersionID != "" && principal.AgentVersionID == task.ExecutionAgentVersionID {
 		return nil
 	}
 	if principal.OwnerID != "" && principal.OwnerID == review.ReviewerUserID {

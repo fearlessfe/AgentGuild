@@ -21,6 +21,7 @@ func TestCreateReviewAllocatesReviewerAndCreatesPendingReview(t *testing.T) {
 	fixture.seedRubric("tenant-1", "rubric-1", 1)
 
 	got, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-1",
 		SubmissionID: "submission-1",
 		Capabilities: []string{"go"},
 	})
@@ -40,6 +41,7 @@ func TestCreateReviewRejectsSubmissionNotReady(t *testing.T) {
 	fixture.seedRubric("tenant-1", "rubric-1", 1)
 
 	_, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-1",
 		SubmissionID: "submission-1",
 		Capabilities: []string{"go"},
 	})
@@ -56,6 +58,7 @@ func TestCreateReviewPicksLowestLoadReviewer(t *testing.T) {
 	fixture.seedRubric("tenant-1", "rubric-1", 1)
 
 	got, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-1",
 		SubmissionID: "submission-1",
 		Capabilities: []string{"go"},
 	})
@@ -72,6 +75,7 @@ func TestCreateReviewFiltersByCapability(t *testing.T) {
 	fixture.seedRubric("tenant-1", "rubric-1", 1)
 
 	got, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-1",
 		SubmissionID: "submission-1",
 		Capabilities: []string{"python"},
 	})
@@ -86,6 +90,7 @@ func TestCreateReviewReturnsNotFoundForMissingSubmission(t *testing.T) {
 	fixture.seedRubric("tenant-1", "rubric-1", 1)
 
 	_, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-missing",
 		SubmissionID: "missing",
 		Capabilities: []string{"go"},
 	})
@@ -99,7 +104,8 @@ func TestSubmitDecisionAcceptsWhenHardGatesPass(t *testing.T) {
 	fixture.validation.pass = true
 
 	got, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
-		ReviewID: review.ID,
+		RequestID: "req-submit",
+		ReviewID:  review.ID,
 		Decision: reviewdomain.DecisionAccepted,
 		Scores:   []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
 		Summary:  "lgtm",
@@ -119,7 +125,8 @@ func TestSubmitDecisionRejectsWithoutHardGateValidation(t *testing.T) {
 	fixture.validation.pass = false
 
 	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
-		ReviewID: review.ID,
+		RequestID: "req-submit",
+		ReviewID:  review.ID,
 		Decision: reviewdomain.DecisionAccepted,
 		Scores:   []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
 	})
@@ -133,7 +140,8 @@ func TestSubmitDecisionRequiresCompleteScoresForAccept(t *testing.T) {
 	fixture.validation.pass = true
 
 	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
-		ReviewID: review.ID,
+		RequestID: "req-submit",
+		ReviewID:  review.ID,
 		Decision: reviewdomain.DecisionAccepted,
 		Scores:   []reviewdomain.RubricScore{},
 	})
@@ -147,7 +155,8 @@ func TestSubmitDecisionRejectsUnauthorizedReviewer(t *testing.T) {
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 
 	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-2"), reviewapp.SubmitDecision{
-		ReviewID: review.ID,
+		RequestID: "req-submit",
+		ReviewID:  review.ID,
 		Decision: reviewdomain.DecisionRejected,
 	})
 
@@ -159,7 +168,8 @@ func TestSubmitDecisionRequestsRevision(t *testing.T) {
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 
 	got, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
-		ReviewID: review.ID,
+		RequestID: "req-submit",
+		ReviewID:  review.ID,
 		Decision: reviewdomain.DecisionRevisionRequested,
 	})
 
@@ -174,6 +184,7 @@ func TestAddCommentByReviewerSucceeds(t *testing.T) {
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 
 	got, err := fixture.svc.AddComment(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.AddComment{
+		RequestID:       "req-comment",
 		ReviewID:        review.ID,
 		SubmissionID:    review.SubmissionID,
 		FilePath:        "main.go",
@@ -195,6 +206,7 @@ func TestAddCommentRejectsNonReviewer(t *testing.T) {
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 
 	_, err := fixture.svc.AddComment(context.Background(), reviewerPrincipal("tenant-1", "reviewer-2"), reviewapp.AddComment{
+		RequestID:       "req-comment",
 		ReviewID:        review.ID,
 		SubmissionID:    review.SubmissionID,
 		FilePath:        "main.go",
@@ -227,6 +239,114 @@ func TestGetReviewRejectsForeignTenant(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
+func TestGetReviewAllowsExecutingAgent(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	// Execution.AgentID in the fixture is "agent-v1".
+	_, err := fixture.svc.GetReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "exec-agent", AgentVersionID: "agent-v1"}, reviewapp.GetReview{ReviewID: review.ID})
+	require.NoError(t, err)
+}
+
+func TestCreateReviewRequiresExecutionReviewing(t *testing.T) {
+	fixture := newReviewFixture(t)
+	seedExecution(t, fixture, "tenant-1", "submission-submitted", domain.ExecutionSubmitted)
+	fixture.seedReviewer("tenant-1", "reviewer-1", "user-1", []string{"go"}, 0)
+	fixture.seedRubric("tenant-1", "rubric-1", 1)
+
+	_, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-submitted",
+		SubmissionID: "submission-submitted",
+		Capabilities: []string{"go"},
+	})
+	require.ErrorIs(t, err, domain.ErrStateConflict)
+
+	seedExecution(t, fixture, "tenant-1", "submission-validating", domain.ExecutionValidating)
+	_, err = fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-validating",
+		SubmissionID: "submission-validating",
+		Capabilities: []string{"go"},
+	})
+	require.ErrorIs(t, err, domain.ErrStateConflict)
+}
+
+func TestAddCommentRejectsMismatchedSubmissionID(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+
+	_, err := fixture.svc.AddComment(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.AddComment{
+		RequestID:       "req-comment-mismatch",
+		ReviewID:        review.ID,
+		SubmissionID:    "wrong-submission",
+		FilePath:        "main.go",
+		Side:            "right",
+		LineNumber:      10,
+		HunkHash:        "hunk",
+		DiffFingerprint: "fp",
+		Text:            "fix this",
+	})
+
+	require.Equal(t, "invalid_argument", domain.CodeOf(err))
+	require.Equal(t, "submission_id", domain.FieldOf(err))
+}
+
+func TestCreateReviewIsIdempotent(t *testing.T) {
+	fixture := newReviewFixture(t)
+	seedExecution(t, fixture, "tenant-1", "submission-1", domain.ExecutionReviewing)
+	fixture.seedReviewer("tenant-1", "reviewer-1", "user-1", []string{"go"}, 0)
+	fixture.seedRubric("tenant-1", "rubric-1", 1)
+
+	cmd := reviewapp.CreateReview{
+		RequestID:    "req-idem",
+		SubmissionID: "submission-1",
+		Capabilities: []string{"go"},
+	}
+	first, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), cmd)
+	require.NoError(t, err)
+
+	second, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), cmd)
+	require.NoError(t, err)
+	require.Equal(t, first.Data.ID, second.Data.ID)
+}
+
+func TestCreateReviewRejectsMismatchedIdempotencyPayload(t *testing.T) {
+	fixture := newReviewFixture(t)
+	seedExecution(t, fixture, "tenant-1", "submission-1", domain.ExecutionReviewing)
+	seedExecution(t, fixture, "tenant-1", "submission-2", domain.ExecutionReviewing)
+	fixture.seedReviewer("tenant-1", "reviewer-1", "user-1", []string{"go"}, 0)
+	fixture.seedRubric("tenant-1", "rubric-1", 1)
+
+	_, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-idem-mismatch",
+		SubmissionID: "submission-1",
+		Capabilities: []string{"go"},
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-idem-mismatch",
+		SubmissionID: "submission-2",
+		Capabilities: []string{"go"},
+	})
+	require.Equal(t, "idempotency_mismatch", domain.CodeOf(err))
+}
+
+func TestGetReviewDiffReturnsDiffForAuthorizedViewer(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+
+	got, err := fixture.svc.GetReviewDiff(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.GetReviewDiff{ReviewID: review.ID})
+	require.NoError(t, err)
+	require.Equal(t, []byte("diff"), got.Data)
+}
+
+func TestGetReviewDiffRejectsUnauthorizedViewer(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+
+	_, err := fixture.svc.GetReviewDiff(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-other"}, reviewapp.GetReviewDiff{ReviewID: review.ID})
+	require.ErrorIs(t, err, domain.ErrForbidden)
+}
+
 func TestPolicyRequiresReviewerForDecision(t *testing.T) {
 	policy := reviewapp.Policy{}
 	review := reviewapp.ReviewRecord{TenantID: "tenant-1", ReviewerUserID: "user-1"}
@@ -237,15 +357,17 @@ func TestPolicyRequiresReviewerForDecision(t *testing.T) {
 	require.ErrorIs(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-2", OwnerID: "user-1"}, review), domain.ErrForbidden)
 }
 
-func TestPolicyAllowsPublisherAndReviewerToView(t *testing.T) {
+func TestPolicyAllowsPublisherReviewerAndExecutingAgentToView(t *testing.T) {
 	policy := reviewapp.Policy{}
 	review := reviewapp.ReviewRecord{TenantID: "tenant-1", ReviewerUserID: "user-1"}
-	task := application.TaskSummary{TenantID: "tenant-1", PublisherAgentVersionID: "publisher-v1"}
+	task := application.TaskSummary{TenantID: "tenant-1", PublisherAgentVersionID: "publisher-v1", ExecutionAgentVersionID: "exec-v1"}
 
 	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "publisher-v1"}, review, task))
+	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", AgentID: "agent-2", AgentVersionID: "exec-v1"}, review, task))
 	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", OwnerID: "user-1"}, review, task))
 	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", IsAdmin: true}, review, task))
 	require.ErrorIs(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", OwnerID: "user-2"}, review, task), domain.ErrForbidden)
+	require.ErrorIs(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", AgentID: "agent-3", AgentVersionID: "other-v1"}, review, task), domain.ErrForbidden)
 }
 
 func TestAllocatorPicksLowestLoadAndTieBreaksByTimeAndID(t *testing.T) {
@@ -408,6 +530,7 @@ type reviewMemoryStore struct {
 	rubrics    map[string]reviewdomain.RubricVersion
 	reviews    map[string]*reviewdomain.Review
 	comments   map[string]*reviewdomain.LineComment
+	idem       map[application.IdempotencyKey]*application.IdempotencyRecord
 }
 
 func newReviewMemoryStore(now time.Time) *reviewMemoryStore {
@@ -419,6 +542,7 @@ func newReviewMemoryStore(now time.Time) *reviewMemoryStore {
 		rubrics:    map[string]reviewdomain.RubricVersion{},
 		reviews:    map[string]*reviewdomain.Review{},
 		comments:   map[string]*reviewdomain.LineComment{},
+		idem:       map[application.IdempotencyKey]*application.IdempotencyRecord{},
 	}
 }
 
@@ -469,8 +593,29 @@ func (tx *reviewMemoryTx) UpdateExecution(_ context.Context, e *domain.Execution
 func (tx *reviewMemoryTx) UpdateOwnedExecution(context.Context, *domain.Execution, int64, string, int64) (bool, error) { panic("not implemented") }
 func (tx *reviewMemoryTx) GetExecutionUsage(context.Context, string, string) (*application.UsageView, error) { panic("not implemented") }
 
-func (tx *reviewMemoryTx) AcquireIdempotency(context.Context, application.IdempotencyKey, [32]byte, time.Time) (*application.IdempotencyRecord, error) { panic("not implemented") }
-func (tx *reviewMemoryTx) CompleteIdempotency(context.Context, application.IdempotencyKey, string, int, []byte) error { panic("not implemented") }
+func (tx *reviewMemoryTx) AcquireIdempotency(_ context.Context, key application.IdempotencyKey, hash [32]byte, expires time.Time) (*application.IdempotencyRecord, error) {
+	if r := tx.store.idem[key]; r != nil {
+		if r.RequestHash != hash {
+			return nil, &domain.Error{Code: "idempotency_mismatch", Message: "mismatch"}
+		}
+		copy := *r
+		return &copy, nil
+	}
+	r := &application.IdempotencyRecord{Key: key, RequestHash: hash, ExpiresAt: expires, OwnerToken: "owner", Acquired: true}
+	tx.store.idem[key] = r
+	copy := *r
+	return &copy, nil
+}
+func (tx *reviewMemoryTx) CompleteIdempotency(_ context.Context, key application.IdempotencyKey, _ string, code int, body []byte) error {
+	r, ok := tx.store.idem[key]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	r.ResponseCode = &code
+	r.ResponseBody = body
+	r.Completed = true
+	return nil
+}
 
 func (tx *reviewMemoryTx) AppendTaskEvent(context.Context, application.TaskEvent) error { panic("not implemented") }
 func (tx *reviewMemoryTx) AppendOutboxEvent(context.Context, application.OutboxEvent) error { panic("not implemented") }

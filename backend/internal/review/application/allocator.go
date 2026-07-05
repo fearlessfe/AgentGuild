@@ -12,11 +12,16 @@ import (
 // Allocator selects a reviewer profile for a new review assignment.
 type Allocator struct{}
 
+// defaultAllocatorLimit is the maximum number of active reviewer profiles the
+// allocator will consider. It is a pragmatic cap to avoid unbounded scans; the
+// lowest-load selection still works correctly within this window.
+const defaultAllocatorLimit = 100
+
 // Allocate picks the active reviewer with the lowest current load that covers
 // all requested capabilities. Ties are broken by creation time (older first),
 // then by reviewer ID for deterministic ordering.
 func (Allocator) Allocate(ctx context.Context, tx application.Tx, tenantID string, caps []string) (string, error) {
-	reviewers, err := tx.Reviewers().ListActive(ctx, tenantID, 100)
+	reviewers, err := tx.Reviewers().ListActive(ctx, tenantID, defaultAllocatorLimit)
 	if err != nil {
 		return "", err
 	}

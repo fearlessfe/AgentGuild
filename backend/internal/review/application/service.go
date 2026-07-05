@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
@@ -53,20 +55,23 @@ func NewService(store application.Store, diff DiffProvider, validation Validatio
 
 // CreateReview assigns a reviewer to a submission and creates a pending review.
 type CreateReview struct {
+	RequestID    string
 	SubmissionID string
 	Capabilities []string
 }
 
 // SubmitDecision records the reviewer's final decision and scores.
 type SubmitDecision struct {
-	ReviewID string
-	Decision reviewdomain.Decision
-	Scores   []reviewdomain.RubricScore
-	Summary  string
+	RequestID string
+	ReviewID  string
+	Decision  reviewdomain.Decision
+	Scores    []reviewdomain.RubricScore
+	Summary   string
 }
 
 // AddComment adds a line-level comment to a review.
 type AddComment struct {
+	RequestID       string
 	ReviewID        string
 	SubmissionID    string
 	FilePath        string
@@ -79,6 +84,11 @@ type AddComment struct {
 
 // GetReview retrieves a single review by ID.
 type GetReview struct {
+	ReviewID string
+}
+
+// GetReviewDiff retrieves the raw diff for a review's submission.
+type GetReviewDiff struct {
 	ReviewID string
 }
 
@@ -125,6 +135,17 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return err
 		}
 
+		key, record, err := acquireReview(ctx, tx, principal, "review_create", cmd.RequestID, cmd, now)
+		if err != nil {
+			return err
+		}
+		if record.Completed {
+			return json.Unmarshal(record.ResponseBody, &result)
+		}
+		if !record.Acquired {
+			return &domain.Error{Code: "state_conflict", Message: "idempotency request is already in progress"}
+		}
+
 		execution, _, err := tx.GetExecution(ctx, principal.TenantID, cmd.SubmissionID)
 		if err != nil {
 			if domain.CodeOf(err) == "not_found" {
@@ -133,10 +154,7 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return err
 		}
 		if execution.Status != domain.ExecutionReviewing {
-			// Accept a small window where the submission has just been handed off.
-			if execution.Status != domain.ExecutionSubmitted && execution.Status != domain.ExecutionValidating {
-				return &domain.Error{Code: "state_conflict", Message: "submission is not ready for review"}
-			}
+			return &domain.Error{Code: "state_conflict", Message: "submission is not ready for review"}
 		}
 
 		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
@@ -144,7 +162,7 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return err
 		}
 
-		if err := s.policy.CanViewReview(ctx, principal, ReviewRecord{TenantID: principal.TenantID}, taskSummary(task)); err != nil {
+		if err := s.policy.CanViewReview(ctx, principal, ReviewRecord{TenantID: principal.TenantID}, taskSummary(task, execution)); err != nil {
 			return err
 		}
 
@@ -158,14 +176,6 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return err
 		}
 
-		reviewer, err := tx.Reviewers().GetByID(ctx, principal.TenantID, reviewerID)
-		if err != nil {
-			return err
-		}
-
-		if err := reviewer.Assign(now); err != nil {
-			return err
-		}
 		if err := tx.Reviewers().IncrementLoad(ctx, principal.TenantID, reviewerID); err != nil {
 			return err
 		}
@@ -182,7 +192,7 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			Data: reviewView(review),
 			Meta: application.Meta{ServerTime: now},
 		}
-		return nil
+		return completeReview(ctx, tx, key, record.OwnerToken, result)
 	})
 	return result, err
 }
@@ -200,6 +210,17 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			return err
 		}
 
+		key, record, err := acquireReview(ctx, tx, principal, "review_submit", cmd.RequestID, cmd, now)
+		if err != nil {
+			return err
+		}
+		if record.Completed {
+			return json.Unmarshal(record.ResponseBody, &result)
+		}
+		if !record.Acquired {
+			return &domain.Error{Code: "state_conflict", Message: "idempotency request is already in progress"}
+		}
+
 		review, err := tx.Reviews().GetByID(ctx, principal.TenantID, cmd.ReviewID)
 		if err != nil {
 			return err
@@ -210,8 +231,8 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			return err
 		}
 
-		record := reviewRecord(review, reviewer)
-		if err := s.policy.CanSubmitDecision(principal, record); err != nil {
+		rec := reviewRecord(review, reviewer)
+		if err := s.policy.CanSubmitDecision(principal, rec); err != nil {
 			return err
 		}
 
@@ -238,9 +259,6 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			return err
 		}
 
-		if err := reviewer.Release(now); err != nil {
-			return err
-		}
 		if err := tx.Reviewers().DecrementLoad(ctx, principal.TenantID, review.ReviewerID); err != nil {
 			return err
 		}
@@ -253,7 +271,7 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			Data: reviewView(review),
 			Meta: application.Meta{ServerTime: now},
 		}
-		return nil
+		return completeReview(ctx, tx, key, record.OwnerToken, result)
 	})
 	return result, err
 }
@@ -271,9 +289,24 @@ func (s *Service) AddComment(ctx context.Context, principal auth.Principal, cmd 
 			return err
 		}
 
+		key, record, err := acquireReview(ctx, tx, principal, "review_comment", cmd.RequestID, cmd, now)
+		if err != nil {
+			return err
+		}
+		if record.Completed {
+			return json.Unmarshal(record.ResponseBody, &result)
+		}
+		if !record.Acquired {
+			return &domain.Error{Code: "state_conflict", Message: "idempotency request is already in progress"}
+		}
+
 		review, err := tx.Reviews().GetByID(ctx, principal.TenantID, cmd.ReviewID)
 		if err != nil {
 			return err
+		}
+
+		if cmd.SubmissionID != review.SubmissionID {
+			return invalid("submission_id")
 		}
 
 		reviewer, err := tx.Reviewers().GetByID(ctx, principal.TenantID, review.ReviewerID)
@@ -303,12 +336,12 @@ func (s *Service) AddComment(ctx context.Context, principal auth.Principal, cmd 
 			Data: commentView(comment),
 			Meta: application.Meta{ServerTime: now},
 		}
-		return nil
+		return completeReview(ctx, tx, key, record.OwnerToken, result)
 	})
 	return result, err
 }
 
-// GetReview returns a review with its line comments.
+// GetReview returns a review by ID.
 func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query GetReview) (application.Envelope[ReviewView], error) {
 	var result application.Envelope[ReviewView]
 	if err := requireTenant(principal); err != nil {
@@ -341,7 +374,7 @@ func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query
 			return err
 		}
 
-		if err := s.policy.CanViewReview(ctx, principal, reviewRecord(review, reviewer), taskSummary(task)); err != nil {
+		if err := s.policy.CanViewReview(ctx, principal, reviewRecord(review, reviewer), taskSummary(task, execution)); err != nil {
 			return err
 		}
 
@@ -397,11 +430,94 @@ func reviewRecord(review *reviewdomain.Review, reviewer *reviewdomain.ReviewerPr
 	}
 }
 
-func taskSummary(task *application.TaskRecord) application.TaskSummary {
+func taskSummary(task *application.TaskRecord, execution *domain.Execution) application.TaskSummary {
 	return application.TaskSummary{
 		TenantID:                task.TenantID,
 		PublisherAgentVersionID: task.PublisherAgentVersionID,
+		ExecutionAgentVersionID: execution.AgentID,
 	}
+}
+
+// GetReviewDiff returns the raw diff for the submission associated with a review.
+// The caller must have permission to view the review.
+func (s *Service) GetReviewDiff(ctx context.Context, principal auth.Principal, query GetReviewDiff) (application.Envelope[[]byte], error) {
+	var result application.Envelope[[]byte]
+	if err := requireTenant(principal); err != nil {
+		return result, err
+	}
+
+	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+
+		review, err := tx.Reviews().GetByID(ctx, principal.TenantID, query.ReviewID)
+		if err != nil {
+			return err
+		}
+
+		execution, _, err := tx.GetExecution(ctx, principal.TenantID, review.SubmissionID)
+		if err != nil {
+			return err
+		}
+
+		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		if err != nil {
+			return err
+		}
+
+		reviewer, err := tx.Reviewers().GetByID(ctx, principal.TenantID, review.ReviewerID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.policy.CanViewReview(ctx, principal, reviewRecord(review, reviewer), taskSummary(task, execution)); err != nil {
+			return err
+		}
+
+		diff, err := s.diff.GetDiff(ctx, review.SubmissionID)
+		if err != nil {
+			return err
+		}
+
+		result = application.Envelope[[]byte]{
+			Data: diff,
+			Meta: application.Meta{ServerTime: now},
+		}
+		return nil
+	})
+	return result, err
+}
+
+const reviewIdempotencyTTL = 24 * time.Hour
+
+func acquireReview(ctx context.Context, tx application.Tx, principal auth.Principal, operation, requestID string, request any, now time.Time) (application.IdempotencyKey, *application.IdempotencyRecord, error) {
+	if requestID == "" {
+		return application.IdempotencyKey{}, nil, invalid("request_id")
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return application.IdempotencyKey{}, nil, err
+	}
+	key := application.IdempotencyKey{TenantID: principal.TenantID, ActorID: actorID(principal), Operation: operation, RequestID: requestID}
+	record, err := tx.AcquireIdempotency(ctx, key, sha256.Sum256(payload), now.Add(reviewIdempotencyTTL))
+	return key, record, err
+}
+
+func completeReview[T any](ctx context.Context, tx application.Tx, key application.IdempotencyKey, owner string, response application.Envelope[T]) error {
+	body, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	return tx.CompleteIdempotency(ctx, key, owner, 200, body)
+}
+
+func actorID(principal auth.Principal) string {
+	if principal.AgentVersionID != "" {
+		return principal.AgentVersionID
+	}
+	return principal.OwnerID
 }
 
 func reviewView(review *reviewdomain.Review) ReviewView {

@@ -170,6 +170,5 @@ type ReviewerRepository interface {
 type TaskSummary struct {
 	TenantID                string
 	PublisherAgentVersionID string
-	PublisherAgentID        string
-	PublisherOwnerID        string
+	ExecutionAgentVersionID string
 }
