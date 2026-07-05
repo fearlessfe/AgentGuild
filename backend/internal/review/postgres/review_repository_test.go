@@ -50,7 +50,8 @@ func TestReviewUpdatePersistsSubmissionAndScores(t *testing.T) {
 	require.NoError(t, repo.Insert(ctx, review))
 
 	now := time.Now()
-	require.NoError(t, review.Submit(domain.DecisionAccepted, []domain.RubricScore{{Dimension: "quality", Score: 90}}, now))
+	rubric := newRubricVersion(rubricID, "tenant-1", 1)
+	require.NoError(t, review.Submit(domain.DecisionAccepted, []domain.RubricScore{{Dimension: "quality", Score: 90}}, rubric, now))
 	require.NoError(t, repo.Update(ctx, review))
 
 	got, err := repo.GetByID(ctx, "tenant-1", review.ID)
@@ -66,11 +67,13 @@ func TestReviewListBySubmissionFiltersByTenant(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
 
-	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
-	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
-	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, newReview("review-1", "tenant-1", "sub-1", reviewerID, rubricID)))
-	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, newReview("review-2", "tenant-1", "sub-2", reviewerID, rubricID)))
-	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, newReview("review-3", "tenant-2", "sub-1", reviewerID, rubricID)))
+	reviewerID1 := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID1 := insertRubricVersion(t, db, "tenant-1", 1)
+	reviewerID2 := insertReviewer(t, db, "tenant-2", "reviewer-2")
+	rubricID2 := insertRubricVersion(t, db, "tenant-2", 1)
+	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, newReview("review-1", "tenant-1", "sub-1", reviewerID1, rubricID1)))
+	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, newReview("review-2", "tenant-1", "sub-2", reviewerID1, rubricID1)))
+	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, newReview("review-3", "tenant-2", "sub-1", reviewerID2, rubricID2)))
 
 	got, err := postgres.NewReviewRepository(db).ListBySubmission(ctx, "tenant-1", "sub-1")
 	require.NoError(t, err)
@@ -188,6 +191,44 @@ func TestReviewerListActiveOrdersByLoad(t *testing.T) {
 	require.Equal(t, "reviewer-1", got[2].ID)
 }
 
+func TestReviewerIncrementLoadDistinguishesInactiveFromNotFound(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	insertReviewer(t, db, "tenant-1", "reviewer-1")
+	_, err := db.Exec(ctx, "UPDATE reviewer_profiles SET is_active=false WHERE tenant_id=$1 AND id=$2", "tenant-1", "reviewer-1")
+	require.NoError(t, err)
+
+	repo := postgres.NewReviewerRepository(db)
+	require.ErrorIs(t, repo.IncrementLoad(ctx, "tenant-1", "reviewer-1"), appdomain.ErrStateConflict)
+	require.ErrorIs(t, repo.IncrementLoad(ctx, "tenant-1", "missing"), appdomain.ErrNotFound)
+}
+
+func TestReviewerInsertUsesTransactionTime(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	profile, err := domain.NewReviewerProfile("reviewer-time", "tenant-1", "user-time", []string{"go"}, time.Now().Add(-24*time.Hour))
+	require.NoError(t, err)
+
+	var txNow time.Time
+	store := postgres.NewStore(db)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		var err error
+		txNow, err = tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		return tx.Reviewers().Insert(ctx, profile)
+	}))
+
+	var createdAt, updatedAt time.Time
+	err = db.QueryRow(ctx, "SELECT created_at, updated_at FROM reviewer_profiles WHERE tenant_id=$1 AND id=$2", profile.TenantID, profile.ID).Scan(&createdAt, &updatedAt)
+	require.NoError(t, err)
+	require.WithinDuration(t, txNow, createdAt, 0)
+	require.WithinDuration(t, txNow, updatedAt, 0)
+}
+
 func TestCodeReviewMigrationCanRollbackAndReapply(t *testing.T) {
 	db := testdb.StartPostgres(t)
 
@@ -295,6 +336,7 @@ func TestReviewUpdateUsesTransactionTime(t *testing.T) {
 
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	rubric := newRubricVersion(rubricID, "tenant-1", 1)
 	review := newReview("review-update-time", "tenant-1", "sub-update", reviewerID, rubricID)
 	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, review))
 
@@ -306,7 +348,7 @@ func TestReviewUpdateUsesTransactionTime(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		require.NoError(t, review.Submit(domain.DecisionAccepted, []domain.RubricScore{{Dimension: "quality", Score: 80}}, txNow))
+		require.NoError(t, review.Submit(domain.DecisionAccepted, []domain.RubricScore{{Dimension: "quality", Score: 80}}, rubric, txNow))
 		return tx.Reviews().Update(ctx, review)
 	}))
 

@@ -56,6 +56,12 @@ func NewLineComment(
 	if lineNumber <= 0 {
 		return nil, invalidArgument("line_number")
 	}
+	if hunkHash == "" {
+		return nil, invalidArgument("hunk_hash")
+	}
+	if diffFingerprint == "" {
+		return nil, invalidArgument("diff_fingerprint")
+	}
 	if text == "" {
 		return nil, invalidArgument("text")
 	}

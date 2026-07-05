@@ -1,40 +1,3 @@
-CREATE TABLE reviews (
-    tenant_id text NOT NULL,
-    id text NOT NULL,
-    submission_id text NOT NULL,
-    reviewer_id text NOT NULL,
-    rubric_version_id text NOT NULL,
-    rubric_scores jsonb NOT NULL DEFAULT '[]'::jsonb,
-    summary text,
-    status text NOT NULL,
-    final_decision text,
-    submitted_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    PRIMARY KEY (tenant_id, id),
-    CONSTRAINT reviews_status_valid CHECK (status IN ('pending', 'submitted')),
-    CONSTRAINT reviews_decision_valid CHECK (
-        final_decision IS NULL OR final_decision IN ('accepted', 'rejected', 'revision_requested')
-    )
-);
-CREATE UNIQUE INDEX reviews_one_per_submission ON reviews (tenant_id, submission_id);
-
-CREATE TABLE line_comments (
-    tenant_id text NOT NULL,
-    id text NOT NULL,
-    review_id text NOT NULL,
-    submission_id text NOT NULL,
-    file_path text NOT NULL,
-    side text NOT NULL,
-    line_number int NOT NULL,
-    hunk_hash text NOT NULL,
-    diff_fingerprint text NOT NULL,
-    text text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-    PRIMARY KEY (tenant_id, id)
-);
-CREATE INDEX line_comments_review ON line_comments (tenant_id, review_id);
-
 CREATE TABLE rubric_versions (
     tenant_id text NOT NULL,
     id text NOT NULL,
@@ -62,6 +25,47 @@ CREATE TABLE reviewer_profiles (
     PRIMARY KEY (tenant_id, id),
     UNIQUE (tenant_id, user_id)
 );
+CREATE INDEX idx_reviewer_profiles_list_active ON reviewer_profiles (tenant_id, is_active, current_load, created_at);
+
+CREATE TABLE reviews (
+    tenant_id text NOT NULL,
+    id text NOT NULL,
+    submission_id text NOT NULL,
+    reviewer_id text NOT NULL,
+    rubric_version_id text NOT NULL,
+    rubric_scores jsonb NOT NULL DEFAULT '[]'::jsonb,
+    summary text,
+    status text NOT NULL,
+    final_decision text,
+    submitted_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (tenant_id, id),
+    CONSTRAINT reviews_status_valid CHECK (status IN ('pending', 'submitted')),
+    CONSTRAINT reviews_decision_valid CHECK (
+        final_decision IS NULL OR final_decision IN ('accepted', 'rejected', 'revision_requested')
+    ),
+    CONSTRAINT fk_reviews_reviewer FOREIGN KEY (tenant_id, reviewer_id) REFERENCES reviewer_profiles(tenant_id, id),
+    CONSTRAINT fk_reviews_rubric_version FOREIGN KEY (tenant_id, rubric_version_id) REFERENCES rubric_versions(tenant_id, id)
+);
+CREATE UNIQUE INDEX reviews_one_per_submission ON reviews (tenant_id, submission_id);
+
+CREATE TABLE line_comments (
+    tenant_id text NOT NULL,
+    id text NOT NULL,
+    review_id text NOT NULL,
+    submission_id text NOT NULL,
+    file_path text NOT NULL,
+    side text NOT NULL,
+    line_number int NOT NULL,
+    hunk_hash text NOT NULL,
+    diff_fingerprint text NOT NULL,
+    text text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (tenant_id, id),
+    CONSTRAINT fk_line_comments_review FOREIGN KEY (tenant_id, review_id) REFERENCES reviews(tenant_id, id)
+);
+CREATE INDEX line_comments_review ON line_comments (tenant_id, review_id);
 
 CREATE TABLE reputation_projections (
     tenant_id text NOT NULL,

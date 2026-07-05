@@ -74,8 +74,9 @@ func NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID string, n
 }
 
 // Submit transitions the review from pending to submitted.
-// Accepted decisions require non-empty, valid rubric scores.
-func (r *Review) Submit(decision Decision, scores []RubricScore, now time.Time) error {
+// Accepted decisions require a complete set of rubric scores covering every
+// dimension defined by the supplied RubricVersion with no duplicates.
+func (r *Review) Submit(decision Decision, scores []RubricScore, rubric *RubricVersion, now time.Time) error {
 	if r.Status != ReviewPending {
 		return appdomain.ErrStateConflict
 	}
@@ -85,8 +86,10 @@ func (r *Review) Submit(decision Decision, scores []RubricScore, now time.Time) 
 	if now.IsZero() {
 		return invalidArgument("submitted_at")
 	}
-	if decision == DecisionAccepted && !rubricComplete(scores, r.RubricVersionID) {
-		return invalidArgument("rubric_scores")
+	if decision == DecisionAccepted {
+		if rubric == nil || !rubric.Complete(scores) {
+			return invalidArgument("rubric_scores")
+		}
 	}
 	r.FinalDecision = decision
 	r.RubricScores = scores
@@ -101,21 +104,6 @@ func decisionValid(d Decision) bool {
 		return true
 	}
 	return false
-}
-
-func rubricComplete(scores []RubricScore, rubricVersionID string) bool {
-	if rubricVersionID == "" {
-		return false
-	}
-	if len(scores) == 0 {
-		return false
-	}
-	for _, s := range scores {
-		if s.Dimension == "" || s.Score < 0 || s.Score > 100 {
-			return false
-		}
-	}
-	return true
 }
 
 func invalidArgument(field string) error {

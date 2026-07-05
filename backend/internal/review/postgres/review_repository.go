@@ -55,10 +55,9 @@ func (r *reviewRepository) Update(ctx context.Context, review *domain.Review) er
 	}
 	tag, err := r.q.Exec(ctx, `
 		UPDATE reviews
-		SET submission_id=$3, reviewer_id=$4, rubric_version_id=$5, rubric_scores=$6,
-		    summary=$7, status=$8, final_decision=$9, submitted_at=$10, updated_at=$11
+		SET rubric_scores=$3, summary=$4, status=$5, final_decision=$6, submitted_at=$7, updated_at=$8
 		WHERE tenant_id=$1 AND id=$2`,
-		review.TenantID, review.ID, review.SubmissionID, review.ReviewerID, review.RubricVersionID,
+		review.TenantID, review.ID,
 		scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
 		nullTime(review.SubmittedAt), now,
 	)

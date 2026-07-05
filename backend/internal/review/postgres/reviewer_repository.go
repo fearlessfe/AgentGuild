@@ -22,13 +22,17 @@ func NewReviewerRepository(pool *pgxpool.Pool) application.ReviewerRepository {
 }
 
 func (r *reviewerRepository) Insert(ctx context.Context, profile *domain.ReviewerProfile) error {
-	_, err := r.q.Exec(ctx, `
+	now, err := r.now(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.Exec(ctx, `
 		INSERT INTO reviewer_profiles (
 			tenant_id, id, user_id, capabilities, current_load,
 			is_active, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
 		profile.TenantID, profile.ID, profile.UserID, stringSlice(profile.Capabilities),
-		profile.CurrentLoad, profile.IsActive, profile.CreatedAt,
+		profile.CurrentLoad, profile.IsActive, now,
 	)
 	return err
 }
@@ -101,7 +105,22 @@ func (r *reviewerRepository) IncrementLoad(ctx context.Context, tenantID, review
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return appdomain.ErrNotFound
+		var active bool
+		err := r.q.QueryRow(ctx, `
+			SELECT is_active
+			FROM reviewer_profiles
+			WHERE tenant_id=$1 AND id=$2`,
+			tenantID, reviewerID,
+		).Scan(&active)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return appdomain.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !active {
+			return appdomain.ErrStateConflict
+		}
 	}
 	return nil
 }

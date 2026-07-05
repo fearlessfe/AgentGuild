@@ -18,6 +18,17 @@ func mustNewReview(t *testing.T, id, submissionID, reviewerID, rubricVersionID s
 	return review
 }
 
+func mustNewRubricVersionForReview(t *testing.T, id string, dimensions []reviewdomain.RubricDimension) *reviewdomain.RubricVersion {
+	t.Helper()
+	weights := make(map[string]float64, len(dimensions))
+	for _, d := range dimensions {
+		weights[d.ID] = 1.0
+	}
+	rv, err := reviewdomain.NewRubricVersion(id, "tenant-1", "Rubric "+id, 1, dimensions, weights, "v1", time.Now())
+	require.NoError(t, err)
+	return rv
+}
+
 func decisionAccepted() reviewdomain.Decision {
 	return reviewdomain.DecisionAccepted
 }
@@ -36,7 +47,8 @@ func assertInvalidArgument(t *testing.T, err error, field string) {
 
 func TestReviewSubmitRequiresPending(t *testing.T) {
 	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
-	if err := review.Submit(decisionAccepted(), nil, time.Now()); err == nil {
+	rubric := mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "quality", Name: "Quality"}})
+	if err := review.Submit(decisionAccepted(), nil, rubric, time.Now()); err == nil {
 		t.Fatal("expected error when scores are empty")
 	}
 }
@@ -79,20 +91,23 @@ func TestReviewStateMachine(t *testing.T) {
 		name       string
 		decision   reviewdomain.Decision
 		scores     []reviewdomain.RubricScore
+		rubric     *reviewdomain.RubricVersion
 		wantStatus reviewdomain.ReviewStatus
 		wantErr    error
 	}{
 		{
-			name:       "accepted with scores",
+			name:       "accepted with complete scores",
 			decision:   reviewdomain.DecisionAccepted,
 			scores:     []reviewdomain.RubricScore{{Dimension: "correctness", Score: 80}},
+			rubric:     mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}}),
 			wantStatus: reviewdomain.ReviewSubmitted,
 		},
 		{
-			name:       "accepted without scores fails",
-			decision:   reviewdomain.DecisionAccepted,
-			scores:     nil,
-			wantErr:    appdomain.Error{Code: "invalid_argument"},
+			name:     "accepted without scores fails",
+			decision: reviewdomain.DecisionAccepted,
+			scores:   nil,
+			rubric:   mustNewRubricVersionForReview(t, "rubric-2", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}}),
+			wantErr:  appdomain.Error{Code: "invalid_argument"},
 		},
 		{
 			name:       "rejected without scores",
@@ -111,7 +126,7 @@ func TestReviewStateMachine(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
-			err := review.Submit(tc.decision, tc.scores, now)
+			err := review.Submit(tc.decision, tc.scores, tc.rubric, now)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
 				return
@@ -127,37 +142,95 @@ func TestReviewStateMachine(t *testing.T) {
 func TestReviewCannotSubmitTwice(t *testing.T) {
 	now := time.Now()
 	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
-	require.NoError(t, review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "correctness", Score: 80}}, now))
-	require.ErrorIs(t, review.Submit(decisionRejected(), nil, now.Add(time.Minute)), appdomain.ErrStateConflict)
+	rubric := mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}})
+	require.NoError(t, review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "correctness", Score: 80}}, rubric, now))
+	require.ErrorIs(t, review.Submit(decisionRejected(), nil, nil, now.Add(time.Minute)), appdomain.ErrStateConflict)
 }
 
-func TestReviewAcceptedRequiresValidRubricScores(t *testing.T) {
+func TestReviewAcceptedRequiresCompleteRubricScores(t *testing.T) {
 	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
 	now := time.Now()
 
-	err := review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "", Score: 80}}, now)
-	assertInvalidArgument(t, err, "rubric_scores")
+	cases := []struct {
+		name   string
+		rubric *reviewdomain.RubricVersion
+		scores []reviewdomain.RubricScore
+	}{
+		{
+			name:   "empty dimension",
+			rubric: mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}}),
+			scores: []reviewdomain.RubricScore{{Dimension: "", Score: 80}},
+		},
+		{
+			name:   "score below range",
+			rubric: mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}}),
+			scores: []reviewdomain.RubricScore{{Dimension: "correctness", Score: -1}},
+		},
+		{
+			name:   "score above range",
+			rubric: mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}}),
+			scores: []reviewdomain.RubricScore{{Dimension: "correctness", Score: 101}},
+		},
+		{
+			name:   "missing dimension",
+			rubric: mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{
+				{ID: "correctness", Name: "Correctness"},
+				{ID: "readability", Name: "Readability"},
+			}),
+			scores: []reviewdomain.RubricScore{{Dimension: "correctness", Score: 80}},
+		},
+		{
+			name:   "duplicate dimension",
+			rubric: mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{{ID: "correctness", Name: "Correctness"}}),
+			scores: []reviewdomain.RubricScore{
+				{Dimension: "correctness", Score: 80},
+				{Dimension: "correctness", Score: 90},
+			},
+		},
+		{
+			name:   "nil rubric",
+			rubric: nil,
+			scores: []reviewdomain.RubricScore{{Dimension: "correctness", Score: 80}},
+		},
+	}
 
-	err = review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "correctness", Score: -1}}, now)
-	assertInvalidArgument(t, err, "rubric_scores")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := review.Submit(decisionAccepted(), tc.scores, tc.rubric, now)
+			assertInvalidArgument(t, err, "rubric_scores")
+		})
+	}
+}
 
-	err = review.Submit(decisionAccepted(), []reviewdomain.RubricScore{{Dimension: "correctness", Score: 101}}, now)
-	assertInvalidArgument(t, err, "rubric_scores")
+func TestReviewAcceptedRequiresAllDimensions(t *testing.T) {
+	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
+	rubric := mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{
+		{ID: "correctness", Name: "Correctness"},
+		{ID: "readability", Name: "Readability"},
+	})
+	now := time.Now()
+
+	err := review.Submit(decisionAccepted(), []reviewdomain.RubricScore{
+		{Dimension: "correctness", Score: 80},
+		{Dimension: "readability", Score: 70},
+	}, rubric, now)
+	require.NoError(t, err)
+	require.Equal(t, reviewdomain.ReviewSubmitted, review.Status)
 }
 
 func TestReviewSubmitRejectsInvalidDecision(t *testing.T) {
 	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
 	now := time.Now()
 
-	err := review.Submit("", nil, now)
+	err := review.Submit("", nil, nil, now)
 	assertInvalidArgument(t, err, "final_decision")
 
-	err = review.Submit("unknown", nil, now)
+	err = review.Submit("unknown", nil, nil, now)
 	assertInvalidArgument(t, err, "final_decision")
 }
 
 func TestReviewSubmitRejectsZeroNow(t *testing.T) {
 	review := mustNewReview(t, "rev-1", "sub-1", "revi-1", "rubric-1")
-	err := review.Submit(decisionRejected(), nil, time.Time{})
+	err := review.Submit(decisionRejected(), nil, nil, time.Time{})
 	assertInvalidArgument(t, err, "submitted_at")
 }
