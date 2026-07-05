@@ -56,6 +56,8 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 		}
 	case "state_conflict":
 		errContent = MCPError{Code: "STATE_CONFLICT", Message: err.Error()}
+	case "hard_gates_failed":
+		errContent = MCPError{Code: "HARD_GATES_FAILED", Message: err.Error()}
 	case "lease_expired":
 		errContent = MCPError{Code: "LEASE_EXPIRED", Message: err.Error()}
 	case "idempotency_mismatch":

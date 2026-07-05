@@ -103,6 +103,8 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	case "state_conflict":
 		writeError(w, http.StatusConflict, "STATE_CONFLICT", err.Error())
+	case "hard_gates_failed":
+		writeError(w, http.StatusConflict, "HARD_GATES_FAILED", err.Error())
 	case "lease_expired":
 		writeError(w, http.StatusConflict, "LEASE_EXPIRED", err.Error())
 	case "idempotency_mismatch":
