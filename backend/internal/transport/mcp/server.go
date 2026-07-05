@@ -33,11 +33,13 @@ type noopRateLimiter struct{}
 
 func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true, 0 }
 
-// Server 暴露任务生命周期的 MCP 工具。
+// Server 暴露任务生命周期与代码评审的 MCP 工具。
 type Server struct {
-	svc      applicationService
-	verifier auth.TokenVerifier
-	limiter  RateLimiter
+	svc           applicationService
+	reviewSvc     reviewService
+	reputationSvc reputationService
+	verifier      auth.TokenVerifier
+	limiter       RateLimiter
 }
 
 // Option 配置 Server。
@@ -46,6 +48,16 @@ type Option func(*Server)
 // WithRateLimiter 替换默认的无限流实现。
 func WithRateLimiter(l RateLimiter) Option {
 	return func(s *Server) { s.limiter = l }
+}
+
+// WithReviewService 挂载代码评审 MCP 工具。
+func WithReviewService(svc reviewService) Option {
+	return func(s *Server) { s.reviewSvc = svc }
+}
+
+// WithReputationService 挂载声望投影 MCP 工具。
+func WithReputationService(svc reputationService) Option {
+	return func(s *Server) { s.reputationSvc = svc }
 }
 
 // NewServer 创建 MCP server；svc 通常是 *application.Service。
@@ -90,7 +102,7 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 		nil,
 	)
 	principal, _ := auth.PrincipalFrom(r.Context())
-	registerTools(server, s.svc, principal)
+	registerTools(server, s.svc, s.reviewSvc, s.reputationSvc, principal)
 	return server
 }
 

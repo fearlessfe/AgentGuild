@@ -73,9 +73,9 @@ type GetExecutionInput struct {
 	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
 }
 
-// registerTools 注册全部 8 个任务生命周期工具。
+// registerTools 注册全部任务生命周期与代码评审 MCP 工具。
 // Principal 已按请求注入，每个 handler 只调用共享 applicationService。
-func registerTools(server *mcp.Server, svc applicationService, principal auth.Principal) {
+func registerTools(server *mcp.Server, svc applicationService, reviewSvc reviewService, reputationSvc reputationService, principal auth.Principal) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_publish",
 		Description: "发布新任务",
@@ -202,6 +202,7 @@ func registerTools(server *mcp.Server, svc applicationService, principal auth.Pr
 		}
 		return successResult(result), nil, nil
 	})
+	registerReviewTools(server, reviewSvc, reputationSvc, principal)
 	wrapSchemaValidationErrors(server)
 }
 
