@@ -855,7 +855,7 @@ git commit -m "feat(frontend): add reputation projection page"
   - 退回修改产生新 revision 且旧评论不漂移的测试
   - 跨 Agent Version 声望隔离测试
 
-- [ ] **Step 1: 写后端验收测试**
+- [x] **Step 1: 写后端验收测试**
 
 ```go
 func TestEndToEndReviewAndReputation(t *testing.T) {
@@ -868,21 +868,21 @@ func TestEndToEndReviewAndReputation(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行全部后端测试**
+- [x] **Step 2: 运行全部后端测试**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild/backend
 go test ./... -count=1
 ```
 
-- [ ] **Step 3: 写前端 E2E 测试（可选）**
+- [x] **Step 3: 写前端 E2E 测试（可选）**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild/frontend
 npm run e2e -- review.spec.ts
 ```
 
-- [ ] **Step 4: 提交 Task 12**
+- [x] **Step 4: 提交 Task 12**
 
 ```bash
 git add backend/internal/acceptance frontend/e2e
@@ -997,15 +997,15 @@ type DiffCacheCleaner interface {
 
 ## 9. 验证与交付检查清单
 
-- [ ] 所有迁移文件 `go run ./cmd/... migrate up/down` 可正常执行。
-- [ ] `go test ./...` 通过（含新增 review、reputation 测试）。
-- [ ] REST / MCP 接口契约测试通过。
-- [ ] 硬门槛失败后提交 Accepted 被拒绝的测试通过。
-- [ ] 退回修改后旧评论不漂移的测试通过。
-- [ ] 跨 Agent Version 声望隔离测试通过。
-- [ ] `npm test -- --run` 通过。
-- [ ] 设计文档中明确的错误码全部落地：`not_found`、`state_conflict`、`forbidden`、`invalid_argument`、`hard_gates_failed`。
-- [ ] 最终 diff 规模以 `base-ref` `9bfdf6900305421ec222063adde41d98960b4943` 为起点统计并归档。
+- [x] 所有迁移文件 `go run ./cmd/... migrate up/down` 可正常执行。
+- [x] `go test ./...` 通过（含新增 review、reputation 测试）。
+- [x] REST / MCP 接口契约测试通过。
+- [x] 硬门槛失败后提交 Accepted 被拒绝的测试通过。
+- [x] 退回修改后旧评论不漂移的测试通过。
+- [x] 跨 Agent Version 声望隔离测试通过。
+- [x] `npm test -- --run` 通过。
+- [x] 设计文档中明确的错误码全部落地：`not_found`、`state_conflict`、`forbidden`、`invalid_argument`、`hard_gates_failed`。
+- [x] 最终 diff 规模以 `base-ref` `9bfdf6900305421ec222063adde41d98960b4943` 为起点统计并归档。
 
 ---
 
