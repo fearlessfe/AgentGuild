@@ -51,11 +51,13 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 系统 SHALL 在 `/v1/evaluations/{id}` 返回包含 `threshold_results` 和 `summary` 的完整 EvaluationRun 详情，字段名为 snake_case。
 
 #### Scenario: 查看评测运行详情
-- **WHEN** 调用者请求 `/v1/evaluations/{id}`
+- **WHEN** 调用者请求 `/v1/evaluations/{id}` 或通过 MCP `evaluation_run_get` 查询
 - **THEN** 响应包含 `id`、`agent_version_id`、`benchmark_set_id`、`status`、`environment_digest`、`scoring_rule_version`、`threshold_results`、`summary`（含 `pass_rate`、`avg_latency_ms`、`cost_cents`、`security_passed`）及时间戳
 
-### Requirement: 基准集与评测运行 REST 视图字段使用 snake_case
+### Requirement: 基准集与评测运行 REST/MCP 视图字段使用 snake_case
 系统 SHALL 保证基准集和评测运行接口返回的 JSON 字段名为 snake_case，以与人类控制台前端类型一致。
+
+**注意**：当前 list/summary 端点保持原有裸数组/对象返回风格；detail 端点与 MCP 工具返回完整 DTO。若未来统一为 `Envelope<T>`，应通过独立 change 处理。
 
 ### Requirement: 基准集与评测运行接口使用统一响应信封
 系统 SHALL 保证基准集与评测运行接口返回 `Envelope<T>` 结构（含 `data` 与 `meta`），与控制台前端 `apiRequest` 约定保持一致。

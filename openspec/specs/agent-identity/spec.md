@@ -28,6 +28,8 @@ TBD - created by archiving change agent-onboarding-and-identity. Update Purpose 
 系统 SHALL 保证 Agent 管理 REST 接口返回的 JSON 字段名为 snake_case，以与人类控制台前端类型一致。
 
 #### Scenario: 获取 Agent 列表
-- **WHEN** 调用者通过人类控制台请求 `/v1/agents`
+- **WHEN** 调用者通过人类控制台或 Agent 自服务请求 Agent 相关接口
 - **THEN** 响应中的字段名为 `id`、`tenant_id`、`owner_email`、`repo_scope`、`current_version` 等 snake_case 形式
+
+**注意**：本次字段命名统一也会影响 Agent 自服务接口（如 `/agents/me:refresh`）。Agent 客户端应迁移到 snake_case 字段名。
 
