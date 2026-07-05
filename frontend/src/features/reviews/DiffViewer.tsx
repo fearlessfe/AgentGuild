@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { DiffLine, FileDiff, LineComment } from "./reviews.types";
 
 type DiffMode = "split" | "unified";
@@ -91,7 +91,7 @@ export function DiffViewer({
               const leftComments = line.old_line ? commentsForLine(comments, line.old_line, "left") : [];
               const rightComments = line.new_line ? commentsForLine(comments, line.new_line, "right") : [];
               return (
-                <DiffRowGroup key={keyBase}>
+                <Fragment key={keyBase}>
                   <tr className={`diff-line ${line.type}`}>
                     <td className="line-number old">
                       {line.old_line !== undefined ? (
@@ -149,7 +149,7 @@ export function DiffViewer({
                       colSpan={4}
                     />
                   ) : null}
-                </DiffRowGroup>
+                </Fragment>
               );
             })}
           </tbody>
@@ -172,7 +172,7 @@ export function DiffViewer({
               const leftComments = line.old_line ? commentsForLine(comments, line.old_line, "left") : [];
               const rightComments = line.new_line ? commentsForLine(comments, line.new_line, "right") : [];
               return (
-                <DiffRowGroup key={keyBase}>
+                <Fragment key={keyBase}>
                   <tr className={`diff-line ${line.type}`}>
                     <td className="line-number old">
                       {line.old_line !== undefined ? (
@@ -231,7 +231,7 @@ export function DiffViewer({
                       colSpan={4}
                     />
                   ) : null}
-                </DiffRowGroup>
+                </Fragment>
               );
             })}
           </tbody>
@@ -239,10 +239,6 @@ export function DiffViewer({
       )}
     </div>
   );
-}
-
-function DiffRowGroup({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
 }
 
 function CommentList({ items, sideLabel }: { items: LineComment[]; sideLabel: string }) {
@@ -277,11 +273,11 @@ function CommentFormRow({
     <tr className="comment-form-row">
       <td colSpan={colSpan}>
         <div className="comment-form">
-          <label htmlFor="comment-draft">
+          <label htmlFor={`comment-draft-${selected.key}`}>
             在{selected.side === "left" ? "左侧" : "右侧"}第 {selected.lineNumber} 行添加评论
           </label>
           <textarea
-            id="comment-draft"
+            id={`comment-draft-${selected.key}`}
             value={draft}
             onChange={(e) => onChange(e.target.value)}
             rows={3}

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getReview, getSubmissionDiff } from "./reviews.api";
 import { DiffViewer } from "./DiffViewer";
 import { FileTree } from "./FileTree";
@@ -39,6 +39,7 @@ export function ReviewPage() {
     queryKey: ["review", reviewId],
     queryFn: () => getReview(reviewId ?? ""),
     enabled: !!reviewId,
+    refetchOnWindowFocus: false,
   });
 
   const submissionId = reviewQuery.data?.data.submission_id;
@@ -59,9 +60,12 @@ export function ReviewPage() {
 
   const selectedFile = useMemo(() => files.find((f) => f.path === selectedPath), [files, selectedPath]);
 
-  // Seed local comments from the review response once it loads.
+  // Seed local comments from the review response once on first load only,
+  // so background refetches do not discard locally added comments.
+  const hasSeededComments = useRef(false);
   useEffect(() => {
-    if (reviewQuery.data) {
+    if (reviewQuery.data && !hasSeededComments.current) {
+      hasSeededComments.current = true;
       setComments(reviewQuery.data.data.line_comments ?? []);
     }
   }, [reviewQuery.data]);
@@ -70,7 +74,9 @@ export function ReviewPage() {
     return <div className="review-page empty">请选择一次审核</div>;
   }
 
-  if (reviewQuery.isPending || diffQuery.isPending) {
+  const isDiffPending = !!submissionId && diffQuery.isPending;
+
+  if (reviewQuery.isPending || isDiffPending) {
     return <div className="review-page loading">正在加载审核详情…</div>;
   }
 

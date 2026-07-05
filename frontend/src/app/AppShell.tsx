@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AgentDetail } from "../features/agents/AgentDetail";
 import { AgentList } from "../features/agents/AgentList";
@@ -11,11 +11,11 @@ import { TaskList } from "../features/tasks/TaskList";
 
 export function AppShell() {
   const location = useLocation();
-  const workspace = location.pathname.startsWith("/agents")
-    ? "Agents"
-    : location.pathname.startsWith("/reviews")
-      ? "审核"
-      : "任务";
+  const workspace = useMemo(() => {
+    if (location.pathname.startsWith("/agents")) return "Agents";
+    if (location.pathname.startsWith("/reviews")) return "审核";
+    return "任务";
+  }, [location.pathname]);
 
   return (
     <div className="app-shell">

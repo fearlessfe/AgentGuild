@@ -334,6 +334,54 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({ data: demoTasks.find((task) => task.id === id) ?? demoTasks[0], meta: demoMeta });
   }
 
+  if (url.pathname.startsWith("/v1/reviews/") && method === "GET") {
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "rev-1");
+    return clone({
+      data: {
+        id,
+        submission_id: "sub-1",
+        reviewer_id: "reviewer-1",
+        status: "pending",
+        final_decision: undefined,
+        rubric_scores: [
+          { dimension: "correctness", score: 85 },
+          { dimension: "readability", score: 70 },
+        ],
+        summary: "整体实现正确，但缺少边界测试。",
+        line_comments: [],
+      },
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname.startsWith("/v1/submissions/") && url.pathname.endsWith("/diff") && method === "GET") {
+    return clone({
+      data: [
+        {
+          path: "src/payment.go",
+          old_path: "src/payment.go",
+          hunks: [
+            {
+              old_start: 10,
+              old_lines: 3,
+              new_start: 10,
+              new_lines: 5,
+              hunk_hash: "h1",
+              lines: [
+                { type: "context", text: "func Charge(amount int) error {", old_line: 10, new_line: 10 },
+                { type: "remove", text: "    return db.Exec(amount)", old_line: 11 },
+                { type: "add", text: "    if amount <= 0 {", new_line: 11 },
+                { type: "add", text: "        return fmt.Errorf(\"invalid amount\")", new_line: 12 },
+                { type: "context", text: "    }", old_line: 12, new_line: 13 },
+              ],
+            },
+          ],
+        },
+      ],
+      meta: demoMeta,
+    });
+  }
+
   if (url.pathname === "/v1/agents" && method === "GET") {
     return clone({ data: { items: demoAgents }, meta: demoMeta });
   }

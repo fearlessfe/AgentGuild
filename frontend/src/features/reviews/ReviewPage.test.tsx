@@ -15,15 +15,18 @@ function renderWithProviders(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <QueryClientProvider client={client}>
-        <Routes>
-          <Route path="/reviews/:reviewId" element={ui} />
-        </Routes>
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
+  return {
+    client,
+    ...render(
+      <MemoryRouter initialEntries={initialEntries}>
+        <QueryClientProvider client={client}>
+          <Routes>
+            <Route path="/reviews/:reviewId" element={ui} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>
+    ),
+  };
 }
 
 const reviewFixture: ReviewView = {
@@ -106,21 +109,72 @@ describe("ReviewPage", () => {
     expect(screen.getByText("func Charge(amount int) error {")).toBeVisible();
   });
 
-  it("adds a line comment on the right side", async () => {
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(reviewFixture)), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }));
+  it("does not get stuck loading when the review request fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
     renderWithProviders(<ReviewPage />);
 
+    expect(await screen.findByText(/无法加载审核/)).toBeVisible();
+    expect(screen.queryByText("正在加载审核详情…")).not.toBeInTheDocument();
+  });
+
+  it("does not get stuck loading when the review has no submission_id", async () => {
+    const reviewWithoutSubmission = { ...reviewFixture, submission_id: "" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(envelope(reviewWithoutSubmission)), { status: 200 }),
+    );
+
+    renderWithProviders(<ReviewPage />);
+
+    await waitFor(() => expect(screen.queryByText("正在加载审核详情…")).not.toBeInTheDocument());
+    expect(screen.getByText("审核 rev-1")).toBeVisible();
+  });
+
+  it("keeps locally added comments after a review refetch", async () => {
+    const reviewWithServerComment = {
+      ...reviewFixture,
+      line_comments: [
+        {
+          id: "server-1",
+          review_id: reviewFixture.id,
+          submission_id: reviewFixture.submission_id,
+          file_path: diffFixture[0].path,
+          side: "right" as const,
+          line_number: 11,
+          hunk_hash: "",
+          diff_fingerprint: "",
+          text: "服务端评论",
+          created_at: "2026-07-02T14:00:00Z",
+        },
+      ],
+    };
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(reviewWithServerComment)), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(envelope(diffFixture)), { status: 200 }));
+
+    const { client } = renderWithProviders(<ReviewPage />);
+
     await screen.findAllByText("func Charge(amount int) error {");
+    expect(screen.getByText("服务端评论")).toBeVisible();
 
     await userEvent.click(screen.getByLabelText("在右侧第 12 行添加评论"));
-
     await userEvent.type(screen.getByPlaceholderText("输入评论…"), "缺少 nil 检查");
     await userEvent.click(screen.getByRole("button", { name: "添加评论" }));
 
     expect(await screen.findByText("缺少 nil 检查")).toBeVisible();
-    expect(screen.getByText(/第 12 行/)).toBeVisible();
+
+    // Simulate a background refetch returning empty comments. Before the fix,
+    // this would have overwritten local comments and removed them.
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify(envelope({ ...reviewFixture, line_comments: [] })), { status: 200 }),
+    );
+
+    await client.refetchQueries({ queryKey: ["review", "rev-1"] });
+
+    expect(screen.getByText("缺少 nil 检查")).toBeVisible();
+    // The server comment seeded on first load should also remain visible.
+    expect(screen.getByText("服务端评论")).toBeVisible();
   });
 });
