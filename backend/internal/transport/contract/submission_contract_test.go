@@ -73,7 +73,7 @@ func newSubmissionService(t *testing.T, svc *application.Service, driver git.Dri
 	db := testdb.StartPostgres(t)
 	store := gitpostgres.NewStore(db)
 	verifier := gitapp.NewCommitVerifier(driver, gitpostgres.NewSubmissionRepository(db))
-	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil)
+	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil, nil)
 	require.NoError(t, err)
 	return subSvc
 }

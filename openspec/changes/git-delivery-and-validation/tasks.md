@@ -17,3 +17,16 @@
 - [x] 3.2 实现 Build、公开测试、隐藏测试、静态分析和安全扫描步骤
 - [x] 3.3 实现日志摘要、资源预算、硬门槛和安全失败输出
 - [x] 3.4 完成 force-push、重复作业、Runner 隔离和失败恢复验收测试
+
+## 4. 运行时接入
+
+- [x] 4.1 补齐 Execution submitted/validating/validation_failed/reviewing 状态机
+- [x] 4.2 定义 ExecutionNotifier 端口与无操作实现
+- [x] 4.3 SubmissionService 创建 Submission 后通知 Execution 进入 submitted
+- [x] 4.4 ValidationJob 增加 ExecutionID，Worker 通知 Execution 进入 validating/reviewing/failed
+- [x] 4.5 核心应用服务实现 CoreExecutionNotifier
+- [x] 4.6 REST 凭证签发/查询/撤销路由
+- [x] 4.7 MCP 凭证 issue/get/revoke 工具
+- [x] 4.8 main.go 挂载 Git Driver、CredentialService、SubmissionService、ValidationWorker
+- [x] 4.9 配置 Worker 间隔/租约/重试，UpdateExecution 持久化 submitted_at
+- [x] 4.10 后端全量编译通过，非集成单元测试全部通过

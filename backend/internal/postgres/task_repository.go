@@ -328,7 +328,9 @@ func (tx *Tx) UpdateExecution(
 		UPDATE executions
 		SET status=$4, state_version=state_version+1, stage=$5, progress=$6, lease_generation=$7,
 		    lease_soft_expires_at=$8, lease_hard_expires_at=$9,
-		    last_heartbeat_at=$10, started_at=CASE WHEN $4='running' AND started_at IS NULL THEN $11 ELSE started_at END,
+		    last_heartbeat_at=$10,
+		    started_at=CASE WHEN $4='running' AND started_at IS NULL THEN $11 ELSE started_at END,
+		    submitted_at=CASE WHEN $4='submitted' AND submitted_at IS NULL THEN $11 ELSE submitted_at END,
 		    expired_at=CASE WHEN $4='expired' AND expired_at IS NULL THEN $11 ELSE expired_at END,
 		    updated_at=$11
 		WHERE tenant_id=$1 AND id=$2 AND state_version=$3`,
