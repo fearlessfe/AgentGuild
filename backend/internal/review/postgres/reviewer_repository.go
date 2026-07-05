@@ -6,7 +6,7 @@ import (
 	"time"
 
 	appdomain "agentguild.dev/agentguild/backend/internal/domain"
-	"agentguild.dev/agentguild/backend/internal/review/application"
+	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -146,3 +146,8 @@ func (r *reviewerRepository) DecrementLoad(ctx context.Context, tenantID, review
 }
 
 var _ application.ReviewerRepository = (*reviewerRepository)(nil)
+
+// NewReviewerRepositoryFromTx returns a reviewer repository bound to an existing pgx transaction.
+func NewReviewerRepositoryFromTx(tx pgx.Tx, now func(context.Context) (time.Time, error)) application.ReviewerRepository {
+	return &reviewerRepository{q: tx, now: now}
+}

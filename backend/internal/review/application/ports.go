@@ -4,44 +4,38 @@ import (
 	"context"
 	"time"
 
-	"agentguild.dev/agentguild/backend/internal/review/domain"
+	"agentguild.dev/agentguild/backend/internal/application"
 )
 
+// Store is the review application transaction boundary.
+// It exposes only the code-review repositories plus transaction time.
 type Store interface {
 	WithTx(context.Context, func(Tx) error) error
 }
 
+// Tx is the review application transaction handle.
+// It exposes only the code-review repositories plus transaction time.
+// The review service itself orchestrates with the global application.Tx
+// interface, which embeds these same repository interfaces.
 type Tx interface {
-	Reviews() ReviewRepository
-	LineComments() LineCommentRepository
-	Rubrics() RubricRepository
-	Reviewers() ReviewerRepository
 	Now(context.Context) (time.Time, error)
+	Reviews() application.ReviewRepository
+	LineComments() application.LineCommentRepository
+	Rubrics() application.RubricRepository
+	Reviewers() application.ReviewerRepository
 }
 
-type ReviewRepository interface {
-	Insert(context.Context, *domain.Review) error
-	Update(context.Context, *domain.Review) error
-	GetByID(context.Context, string, string) (*domain.Review, error)
-	ListBySubmission(context.Context, string, string) ([]domain.Review, error)
+// DiffProvider supplies the raw diff for a submission.
+type DiffProvider interface {
+	GetDiff(ctx context.Context, submissionID string) ([]byte, error)
 }
 
-type LineCommentRepository interface {
-	Insert(context.Context, *domain.LineComment) error
-	ListByReview(context.Context, string, string) ([]domain.LineComment, error)
+// ValidationStatus is the result returned by a ValidationProvider.
+type ValidationStatus interface {
+	AllHardGatesPassed() bool
 }
 
-type RubricRepository interface {
-	GetActive(context.Context, string) (*domain.RubricVersion, error)
-	GetByID(context.Context, string, string) (*domain.RubricVersion, error)
-	ListVersions(context.Context, string) ([]domain.RubricVersion, error)
-	CreateVersion(context.Context, *domain.RubricVersion) error
-}
-
-type ReviewerRepository interface {
-	Insert(context.Context, *domain.ReviewerProfile) error
-	GetByID(context.Context, string, string) (*domain.ReviewerProfile, error)
-	ListActive(context.Context, string, int) ([]domain.ReviewerProfile, error)
-	IncrementLoad(context.Context, string, string) error
-	DecrementLoad(context.Context, string, string) error
+// ValidationProvider reports whether a submission has passed its hard gates.
+type ValidationProvider interface {
+	GetValidationStatus(ctx context.Context, submissionID string) (ValidationStatus, error)
 }

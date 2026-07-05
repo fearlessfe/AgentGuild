@@ -7,7 +7,7 @@ import (
 	"time"
 
 	appdomain "agentguild.dev/agentguild/backend/internal/domain"
-	"agentguild.dev/agentguild/backend/internal/review/application"
+	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -119,6 +119,11 @@ func (r *rubricRepository) ListVersions(ctx context.Context, tenantID string) ([
 }
 
 var _ application.RubricRepository = (*rubricRepository)(nil)
+
+// NewRubricRepositoryFromTx returns a rubric repository bound to an existing pgx transaction.
+func NewRubricRepositoryFromTx(tx pgx.Tx, now func(context.Context) (time.Time, error)) application.RubricRepository {
+	return &rubricRepository{q: tx, now: now}
+}
 
 type rubricScanner interface {
 	Scan(...any) error

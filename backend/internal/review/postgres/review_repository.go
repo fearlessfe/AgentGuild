@@ -8,7 +8,7 @@ import (
 	"time"
 
 	appdomain "agentguild.dev/agentguild/backend/internal/domain"
-	"agentguild.dev/agentguild/backend/internal/review/application"
+	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -129,6 +129,11 @@ func (r *reviewRepository) ListBySubmission(ctx context.Context, tenantID, submi
 }
 
 var _ application.ReviewRepository = (*reviewRepository)(nil)
+
+// NewReviewRepositoryFromTx returns a review repository bound to an existing pgx transaction.
+func NewReviewRepositoryFromTx(tx pgx.Tx, now func(context.Context) (time.Time, error)) application.ReviewRepository {
+	return &reviewRepository{q: tx, now: now}
+}
 
 type reviewScanner interface {
 	Scan(...any) error

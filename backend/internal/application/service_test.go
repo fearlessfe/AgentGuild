@@ -733,3 +733,8 @@ func (tx *fakeTx) GetLatestExecutionEvent(_ context.Context, _, executionID stri
 	}
 	return application.TaskEventSummary{}, nil
 }
+
+func (tx *fakeTx) Reviews() application.ReviewRepository      { return nil }
+func (tx *fakeTx) LineComments() application.LineCommentRepository { return nil }
+func (tx *fakeTx) Rubrics() application.RubricRepository      { return nil }
+func (tx *fakeTx) Reviewers() application.ReviewerRepository  { return nil }

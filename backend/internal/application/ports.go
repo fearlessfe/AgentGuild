@@ -6,6 +6,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/shopspring/decimal"
 )
 
@@ -18,6 +19,10 @@ type Tx interface {
 	ExecutionRepository
 	IdempotencyRepository
 	EventRepository
+	Reviews() ReviewRepository
+	LineComments() LineCommentRepository
+	Rubrics() RubricRepository
+	Reviewers() ReviewerRepository
 	Now(context.Context) (time.Time, error)
 	RequireLiveAgent(context.Context, auth.Principal) error
 }
@@ -133,4 +138,38 @@ type EventRepository interface {
 	AppendOutboxEvent(context.Context, OutboxEvent) error
 	ListTaskEvents(context.Context, string, string, int64, int) ([]TaskEventSummary, error)
 	GetLatestExecutionEvent(context.Context, string, string) (TaskEventSummary, error)
+}
+
+type ReviewRepository interface {
+	Insert(context.Context, *reviewdomain.Review) error
+	Update(context.Context, *reviewdomain.Review) error
+	GetByID(context.Context, string, string) (*reviewdomain.Review, error)
+	ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error)
+}
+
+type LineCommentRepository interface {
+	Insert(context.Context, *reviewdomain.LineComment) error
+	ListByReview(context.Context, string, string) ([]reviewdomain.LineComment, error)
+}
+
+type RubricRepository interface {
+	GetActive(context.Context, string) (*reviewdomain.RubricVersion, error)
+	GetByID(context.Context, string, string) (*reviewdomain.RubricVersion, error)
+	ListVersions(context.Context, string) ([]reviewdomain.RubricVersion, error)
+	CreateVersion(context.Context, *reviewdomain.RubricVersion) error
+}
+
+type ReviewerRepository interface {
+	Insert(context.Context, *reviewdomain.ReviewerProfile) error
+	GetByID(context.Context, string, string) (*reviewdomain.ReviewerProfile, error)
+	ListActive(context.Context, string, int) ([]reviewdomain.ReviewerProfile, error)
+	IncrementLoad(context.Context, string, string) error
+	DecrementLoad(context.Context, string, string) error
+}
+
+type TaskSummary struct {
+	TenantID                string
+	PublisherAgentVersionID string
+	PublisherAgentID        string
+	PublisherOwnerID        string
 }

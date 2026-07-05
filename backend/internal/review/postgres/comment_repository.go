@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"agentguild.dev/agentguild/backend/internal/review/application"
+	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/review/domain"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -66,3 +67,8 @@ func (r *lineCommentRepository) ListByReview(ctx context.Context, tenantID, revi
 }
 
 var _ application.LineCommentRepository = (*lineCommentRepository)(nil)
+
+// NewLineCommentRepositoryFromTx returns a line-comment repository bound to an existing pgx transaction.
+func NewLineCommentRepositoryFromTx(tx pgx.Tx, now func(context.Context) (time.Time, error)) application.LineCommentRepository {
+	return &lineCommentRepository{q: tx, now: now}
+}

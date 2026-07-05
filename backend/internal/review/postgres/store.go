@@ -5,18 +5,15 @@ import (
 	"sync"
 	"time"
 
-	"agentguild.dev/agentguild/backend/internal/review/application"
+	"agentguild.dev/agentguild/backend/internal/application"
+	reviewapplication "agentguild.dev/agentguild/backend/internal/review/application"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type queryer interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-	Query(context.Context, string, ...any) (pgx.Rows, error)
-	QueryRow(context.Context, string, ...any) pgx.Row
-}
-
+// Store implements reviewapplication.Store with a dedicated transaction boundary
+// for the code-review repositories. It intentionally does not depend on the
+// global postgres package to avoid an import cycle.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -25,7 +22,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-func (s *Store) WithTx(ctx context.Context, fn func(application.Tx) error) error {
+func (s *Store) WithTx(ctx context.Context, fn func(reviewapplication.Tx) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -39,6 +36,9 @@ func (s *Store) WithTx(ctx context.Context, fn func(application.Tx) error) error
 	return tx.Commit(ctx)
 }
 
+// Tx implements reviewapplication.Tx. It exposes only the code-review
+// repositories plus transaction-time access; the review application service
+// itself runs on the global application.Tx interface.
 type Tx struct {
 	tx pgx.Tx
 
@@ -55,20 +55,20 @@ func (tx *Tx) Now(ctx context.Context) (time.Time, error) {
 }
 
 func (tx *Tx) Reviews() application.ReviewRepository {
-	return &reviewRepository{q: tx.tx, now: tx.Now}
+	return NewReviewRepositoryFromTx(tx.tx, tx.Now)
 }
 
 func (tx *Tx) LineComments() application.LineCommentRepository {
-	return &lineCommentRepository{q: tx.tx, now: tx.Now}
+	return NewLineCommentRepositoryFromTx(tx.tx, tx.Now)
 }
 
 func (tx *Tx) Rubrics() application.RubricRepository {
-	return &rubricRepository{q: tx.tx, now: tx.Now}
+	return NewRubricRepositoryFromTx(tx.tx, tx.Now)
 }
 
 func (tx *Tx) Reviewers() application.ReviewerRepository {
-	return &reviewerRepository{q: tx.tx, now: tx.Now}
+	return NewReviewerRepositoryFromTx(tx.tx, tx.Now)
 }
 
-var _ application.Store = (*Store)(nil)
-var _ application.Tx = (*Tx)(nil)
+var _ reviewapplication.Store = (*Store)(nil)
+var _ reviewapplication.Tx = (*Tx)(nil)
