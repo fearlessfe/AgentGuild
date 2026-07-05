@@ -22,6 +22,7 @@ type Config struct {
 	SessionCookieSecure                                    bool
 	ReaperInterval, OutboxInterval, ShutdownTimeout        time.Duration
 	ReputationWorkerInterval                               time.Duration
+	ReviewSeedTenantID                                     string
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
@@ -41,6 +42,7 @@ func Load(get LookupEnv) (Config, error) {
 		OIDCAdminEmails: splitCSV(get("OIDC_ADMIN_EMAILS")),
 		LangfuseBaseURL: get("LANGFUSE_BASE_URL"), LangfusePublicKey: get("LANGFUSE_PUBLIC_KEY"), LangfuseSecretKey: get("LANGFUSE_SECRET_KEY"),
 		LangfuseMode: value(get, "LANGFUSE_MODE", "cloud"), LangfuseMetricsPath: get("LANGFUSE_METRICS_PATH"), LangfuseCompleteTag: get("LANGFUSE_COMPLETE_COVERAGE_TAG"),
+		ReviewSeedTenantID: get("REVIEW_SEED_TENANT_ID"),
 	}
 	var err error
 	if cfg.MCPEnabled, err = boolean(get, "MCP_ENABLED", true); err != nil {

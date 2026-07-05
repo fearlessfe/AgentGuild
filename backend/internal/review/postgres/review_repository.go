@@ -140,7 +140,15 @@ func (r *reviewRepository) ListUnprojected(ctx context.Context, batchSize int) (
 			COALESCE(rp.capabilities[1], t.type) AS capability,
 			t.type AS task_type,
 			r.final_decision,
-			0 AS cost_cents,
+			COALESCE((
+				SELECT observed_cost::bigint
+				FROM execution_usage eu
+				WHERE eu.tenant_id = e.tenant_id
+				  AND eu.execution_id = e.id
+				  AND eu.observed_cost IS NOT NULL
+				ORDER BY eu.observed_at DESC
+				LIMIT 1
+			), 0) AS cost_cents,
 			COALESCE(EXTRACT(EPOCH FROM (r.submitted_at - e.started_at)) * 1000, 0)::bigint AS latency_ms
 		FROM reviews r
 		JOIN executions e ON e.tenant_id = r.tenant_id AND e.id = r.submission_id

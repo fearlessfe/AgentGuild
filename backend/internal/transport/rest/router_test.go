@@ -15,6 +15,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
 	"github.com/stretchr/testify/require"
@@ -90,15 +91,19 @@ func (f *fakeApplication) GetExecution(ctx context.Context, p auth.Principal, q 
 
 // fakeReviewService 记录 review 应用服务调用参数并按预置值返回。
 type fakeReviewService struct {
-	calls             []call
-	createReview      application.Envelope[reviewapp.ReviewView]
-	createReviewErr   error
-	submitDecision    application.Envelope[reviewapp.ReviewView]
-	submitDecisionErr error
-	addComment        application.Envelope[reviewapp.CommentView]
-	addCommentErr     error
-	getReview         application.Envelope[reviewapp.ReviewView]
-	getReviewErr      error
+	calls                 []call
+	createReview          application.Envelope[reviewapp.ReviewView]
+	createReviewErr       error
+	submitDecision        application.Envelope[reviewapp.ReviewView]
+	submitDecisionErr     error
+	addComment            application.Envelope[reviewapp.CommentView]
+	addCommentErr         error
+	getReview             application.Envelope[reviewapp.ReviewView]
+	getReviewErr          error
+	getSubmissionDiff     application.Envelope[[]reviewapp.FileDiff]
+	getSubmissionDiffErr  error
+	submitForReview       application.Envelope[application.ExecutionView]
+	submitForReviewErr    error
 }
 
 func (f *fakeReviewService) CreateReview(ctx context.Context, p auth.Principal, cmd reviewapp.CreateReview) (application.Envelope[reviewapp.ReviewView], error) {
@@ -121,6 +126,16 @@ func (f *fakeReviewService) GetReview(ctx context.Context, p auth.Principal, q r
 	return f.getReview, f.getReviewErr
 }
 
+func (f *fakeReviewService) GetSubmissionDiff(ctx context.Context, p auth.Principal, q reviewapp.GetSubmissionDiff) (application.Envelope[[]reviewapp.FileDiff], error) {
+	f.calls = append(f.calls, call{method: "GetSubmissionDiff", principal: p, payload: q})
+	return f.getSubmissionDiff, f.getSubmissionDiffErr
+}
+
+func (f *fakeReviewService) SubmitForReview(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error) {
+	f.calls = append(f.calls, call{method: "SubmitForReview", principal: p, payload: cmd})
+	return f.submitForReview, f.submitForReviewErr
+}
+
 // fakeRubricService 记录 rubric 应用服务调用参数并按预置值返回。
 type fakeRubricService struct {
 	calls     []call
@@ -136,11 +151,11 @@ func (f *fakeRubricService) GetActiveRubric(ctx context.Context, p auth.Principa
 // fakeReputationService 记录 reputation 占位服务调用参数并按预置值返回。
 type fakeReputationService struct {
 	calls         []call
-	projection    application.Envelope[rest.ProjectionView]
+	projection    application.Envelope[reputationapp.ProjectionView]
 	projectionErr error
 }
 
-func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, q rest.ReputationQuery) (application.Envelope[rest.ProjectionView], error) {
+func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, q reputationapp.GetProjection) (application.Envelope[reputationapp.ProjectionView], error) {
 	f.calls = append(f.calls, call{method: "GetProjection", principal: p, payload: q})
 	return f.projection, f.projectionErr
 }
@@ -541,15 +556,15 @@ func TestGetReputationWithoutServiceReturns501(t *testing.T) {
 
 func TestGetReputationWithService(t *testing.T) {
 	reputation := &fakeReputationService{
-		projection: application.Envelope[rest.ProjectionView]{
-			Data: rest.ProjectionView{},
+		projection: application.Envelope[reputationapp.ProjectionView]{
+			Data: reputationapp.ProjectionView{},
 		},
 	}
 	server := newTestServer(&fakeApplication{}, rest.WithReputationService(reputation))
 	res := get(t, server, "/v1/reputation?agent_version_id=av-1&capability=go&task_type=code", "token-publisher")
 	require.Equal(t, http.StatusOK, res.Code)
 	require.Len(t, reputation.calls, 1)
-	q := reputation.calls[0].payload.(rest.ReputationQuery)
+	q := reputation.calls[0].payload.(reputationapp.GetProjection)
 	require.Equal(t, "av-1", q.AgentVersionID)
 	require.Equal(t, "go", q.Capability)
 	require.Equal(t, "code", q.TaskType)

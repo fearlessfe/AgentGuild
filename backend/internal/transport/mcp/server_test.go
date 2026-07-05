@@ -14,6 +14,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 
@@ -91,11 +92,13 @@ func (f *fakeApplication) GetExecution(ctx context.Context, p auth.Principal, q 
 
 // fakeReviewService 记录代码评审应用服务调用并按预置值返回。
 type fakeReviewService struct {
-	calls        []call
-	submitResult application.Envelope[reviewapp.ReviewView]
-	submitErr    error
-	getResult    application.Envelope[reviewapp.ReviewView]
-	getErr       error
+	calls                 []call
+	submitResult          application.Envelope[reviewapp.ReviewView]
+	submitErr             error
+	getResult             application.Envelope[reviewapp.ReviewView]
+	getErr                error
+	submitForReviewResult application.Envelope[application.ExecutionView]
+	submitForReviewErr    error
 }
 
 func (f *fakeReviewService) SubmitDecision(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitDecision) (application.Envelope[reviewapp.ReviewView], error) {
@@ -108,14 +111,19 @@ func (f *fakeReviewService) GetReview(ctx context.Context, p auth.Principal, que
 	return f.getResult, f.getErr
 }
 
+func (f *fakeReviewService) SubmitForReview(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error) {
+	f.calls = append(f.calls, call{method: "SubmitForReview", principal: p, payload: cmd})
+	return f.submitForReviewResult, f.submitForReviewErr
+}
+
 // fakeReputationService 是声望投影服务的占位实现。
 type fakeReputationService struct {
 	calls         []call
-	projection    application.Envelope[ProjectionView]
+	projection    application.Envelope[reputationapp.ProjectionView]
 	projectionErr error
 }
 
-func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, query ReputationQuery) (application.Envelope[ProjectionView], error) {
+func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, query reputationapp.GetProjection) (application.Envelope[reputationapp.ProjectionView], error) {
 	f.calls = append(f.calls, call{method: "GetProjection", principal: p, payload: query})
 	return f.projection, f.projectionErr
 }

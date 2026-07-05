@@ -97,16 +97,16 @@ func TestRevisionRequestedNewExecutionCommentsIsolated(t *testing.T) {
 
 	review2ViaAPI := env.MCP.As("token-reviewer").ReviewGet(review2.ID).Review
 	require.Equal(t, newExecutionID, review2ViaAPI.SubmissionID)
-	require.Len(t, review2ViaAPI.Comments, 1)
-	require.Equal(t, "new comment", review2ViaAPI.Comments[0].Text)
-	for _, c := range review2ViaAPI.Comments {
+	require.Len(t, review2ViaAPI.LineComments, 1)
+	require.Equal(t, "new comment", review2ViaAPI.LineComments[0].Text)
+	for _, c := range review2ViaAPI.LineComments {
 		require.NotEqual(t, "old comment", c.Text)
 	}
 
 	review1ViaAPI := env.MCP.As("token-reviewer").ReviewGet(review1.ID).Review
 	require.Equal(t, claimed.ID, review1ViaAPI.SubmissionID)
-	require.Len(t, review1ViaAPI.Comments, 1)
-	require.Equal(t, "old comment", review1ViaAPI.Comments[0].Text)
+	require.Len(t, review1ViaAPI.LineComments, 1)
+	require.Equal(t, "old comment", review1ViaAPI.LineComments[0].Text)
 
 	oldComments := env.ListComments("tenant-1", review1.ID)
 	require.Len(t, oldComments, 1)

@@ -5,6 +5,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 
@@ -31,6 +32,12 @@ type ReviewGetInput struct {
 	ReviewID string `json:"review_id" jsonschema:"review identifier"`
 }
 
+// ExecutionSubmitForReviewInput 是 execution_submit_for_review 工具的输入。
+type ExecutionSubmitForReviewInput struct {
+	RequestID   string `json:"request_id" jsonschema:"unique mutation request id"`
+	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
+}
+
 // ReputationGetInput 是 reputation_get 工具的输入。
 type ReputationGetInput struct {
 	AgentVersionID string `json:"agent_version_id" jsonschema:"agent version identifier"`
@@ -42,35 +49,12 @@ type ReputationGetInput struct {
 type reviewService interface {
 	SubmitDecision(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitDecision) (application.Envelope[reviewapp.ReviewView], error)
 	GetReview(ctx context.Context, principal auth.Principal, query reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error)
-}
-
-// ReputationQuery 是声望投影查询参数。
-type ReputationQuery struct {
-	AgentVersionID string
-	Capability     string
-	TaskType       string
-}
-
-// ProjectionView 是声望投影视图，字段与 reputationdomain.Projection 保持一致。
-type ProjectionView struct {
-	AgentVersionID         string  `json:"agent_version_id"`
-	Capability             string  `json:"capability"`
-	TaskType               string  `json:"task_type"`
-	TotalReviews           int     `json:"total_reviews"`
-	AcceptedCount          int     `json:"accepted_count"`
-	RejectedCount          int     `json:"rejected_count"`
-	RevisionRequestedCount int     `json:"revision_requested_count"`
-	PassRate               float64 `json:"pass_rate"`
-	ReworkRate             float64 `json:"rework_rate"`
-	AvgReviewCostCents     float64 `json:"avg_review_cost_cents"`
-	AvgReviewLatencyMs     float64 `json:"avg_review_latency_ms"`
-	SampleSizeHint         string  `json:"sample_size_hint"`
-	AlgorithmVersion       string  `json:"algorithm_version"`
+	SubmitForReview(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error)
 }
 
 // ReputationService 是声望投影服务边界。
 type ReputationService interface {
-	GetProjection(ctx context.Context, principal auth.Principal, query ReputationQuery) (application.Envelope[ProjectionView], error)
+	GetProjection(ctx context.Context, principal auth.Principal, query reputationapp.GetProjection) (application.Envelope[reputationapp.ProjectionView], error)
 }
 
 // registerReviewTools 注册代码评审与声望相关 MCP 工具。
@@ -114,13 +98,30 @@ func registerReviewTools(server *mcp.Server, reviewSvc reviewService, reputation
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "execution_submit_for_review",
+		Description: "将运行中的 execution 推进到 reviewing 状态（临时调试入口）",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input ExecutionSubmitForReviewInput) (*mcp.CallToolResult, any, error) {
+		if reviewSvc == nil {
+			return errorResult(MCPError{Code: "NOT_IMPLEMENTED", Message: "review service is not configured"}), nil, nil
+		}
+		result, err := reviewSvc.SubmitForReview(ctx, principal, reviewapp.SubmitForReview{
+			RequestID:   input.RequestID,
+			ExecutionID: input.ExecutionID,
+		})
+		if err != nil {
+			return mapDomainError(err, principal), nil, nil
+		}
+		return successResult(result), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "reputation_get",
 		Description: "查询声望投影",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ReputationGetInput) (*mcp.CallToolResult, any, error) {
 		if reputationSvc == nil {
 			return errorResult(MCPError{Code: "NOT_IMPLEMENTED", Message: "reputation projection is not implemented"}), nil, nil
 		}
-		result, err := reputationSvc.GetProjection(ctx, principal, ReputationQuery{
+		result, err := reputationSvc.GetProjection(ctx, principal, reputationapp.GetProjection{
 			AgentVersionID: input.AgentVersionID,
 			Capability:     input.Capability,
 			TaskType:       input.TaskType,

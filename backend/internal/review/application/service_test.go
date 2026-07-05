@@ -245,7 +245,7 @@ func TestGetReviewAllowsExecutingAgent(t *testing.T) {
 	fixture := newReviewFixture(t)
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 	// Execution.AgentID in the fixture is "agent-v1".
-	_, err := fixture.svc.GetReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "exec-agent", AgentVersionID: "agent-v1"}, reviewapp.GetReview{ReviewID: review.ID})
+	_, err := fixture.svc.GetReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "exec-agent", AgentVersionID: "agent-v1", Scopes: []string{"reviews:read"}}, reviewapp.GetReview{ReviewID: review.ID})
 	require.NoError(t, err)
 }
 
@@ -332,20 +332,21 @@ func TestCreateReviewRejectsMismatchedIdempotencyPayload(t *testing.T) {
 	require.Equal(t, "idempotency_mismatch", domain.CodeOf(err))
 }
 
-func TestGetReviewDiffReturnsDiffForAuthorizedViewer(t *testing.T) {
+func TestGetSubmissionDiffReturnsDiffForAuthorizedViewer(t *testing.T) {
 	fixture := newReviewFixture(t)
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 
-	got, err := fixture.svc.GetReviewDiff(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.GetReviewDiff{ReviewID: review.ID})
+	got, err := fixture.svc.GetSubmissionDiff(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.GetSubmissionDiff{SubmissionID: review.SubmissionID})
 	require.NoError(t, err)
-	require.Equal(t, []byte("diff"), got.Data)
+	require.Len(t, got.Data, 1)
+	require.Equal(t, "main.go", got.Data[0].Path)
 }
 
-func TestGetReviewDiffRejectsUnauthorizedViewer(t *testing.T) {
+func TestGetSubmissionDiffRejectsUnauthorizedViewer(t *testing.T) {
 	fixture := newReviewFixture(t)
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
 
-	_, err := fixture.svc.GetReviewDiff(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-other"}, reviewapp.GetReviewDiff{ReviewID: review.ID})
+	_, err := fixture.svc.GetSubmissionDiff(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-other"}, reviewapp.GetSubmissionDiff{SubmissionID: review.SubmissionID})
 	require.ErrorIs(t, err, domain.ErrForbidden)
 }
 
@@ -353,10 +354,10 @@ func TestPolicyRequiresReviewerForDecision(t *testing.T) {
 	policy := reviewapp.Policy{}
 	review := reviewapp.ReviewRecord{TenantID: "tenant-1", ReviewerUserID: "user-1"}
 
-	require.NoError(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-1", OwnerID: "user-1"}, review))
-	require.NoError(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-1", IsAdmin: true}, review))
-	require.ErrorIs(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-1", OwnerID: "user-2"}, review), domain.ErrForbidden)
-	require.ErrorIs(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-2", OwnerID: "user-1"}, review), domain.ErrForbidden)
+	require.NoError(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-1", Scopes: []string{"reviews:write"}}, review))
+	require.NoError(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-1", IsAdmin: true}, review))
+	require.ErrorIs(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-2", Scopes: []string{"reviews:write"}}, review), domain.ErrForbidden)
+	require.ErrorIs(t, policy.CanSubmitDecision(auth.Principal{TenantID: "tenant-2", Type: auth.PrincipalTypeHuman, OwnerID: "user-1", Scopes: []string{"reviews:write"}}, review), domain.ErrForbidden)
 }
 
 func TestPolicyAllowsPublisherReviewerAndExecutingAgentToView(t *testing.T) {
@@ -364,12 +365,12 @@ func TestPolicyAllowsPublisherReviewerAndExecutingAgentToView(t *testing.T) {
 	review := reviewapp.ReviewRecord{TenantID: "tenant-1", ReviewerUserID: "user-1"}
 	task := application.TaskSummary{TenantID: "tenant-1", PublisherAgentVersionID: "publisher-v1", ExecutionAgentVersionID: "exec-v1"}
 
-	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "publisher-v1"}, review, task))
-	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", AgentID: "agent-2", AgentVersionID: "exec-v1"}, review, task))
-	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", OwnerID: "user-1"}, review, task))
-	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", IsAdmin: true}, review, task))
-	require.ErrorIs(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", OwnerID: "user-2"}, review, task), domain.ErrForbidden)
-	require.ErrorIs(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", AgentID: "agent-3", AgentVersionID: "other-v1"}, review, task), domain.ErrForbidden)
+	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "agent-1", AgentVersionID: "publisher-v1", Scopes: []string{"reviews:read"}}, review, task))
+	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "agent-2", AgentVersionID: "exec-v1", Scopes: []string{"reviews:read"}}, review, task))
+	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-1", Scopes: []string{"reviews:read"}}, review, task))
+	require.NoError(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-1", IsAdmin: true}, review, task))
+	require.ErrorIs(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-2", Scopes: []string{"reviews:read"}}, review, task), domain.ErrForbidden)
+	require.ErrorIs(t, policy.CanViewReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "agent-3", AgentVersionID: "other-v1", Scopes: []string{"reviews:read"}}, review, task), domain.ErrForbidden)
 }
 
 func TestAllocatorPicksLowestLoadAndTieBreaksByTimeAndID(t *testing.T) {
@@ -435,7 +436,7 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newReviewMemoryStore(now)
 	validation := &fakeValidationProvider{pass: true}
-	diff := &fakeDiffProvider{data: []byte("diff")}
+	diff := &fakeDiffProvider{data: []reviewapp.FileDiff{{Path: "main.go"}}}
 	svc, err := reviewapp.NewService(store, diff, validation, reviewapp.Options{
 		NewID: sequenceIDs("review-1", "comment-1", "review-2"),
 	})
@@ -515,11 +516,11 @@ func (f *reviewFixture) seedRubric(tenantID, rubricID string, versionNumber int)
 }
 
 func publisherPrincipal(tenantID, versionID string) auth.Principal {
-	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeAgent, AgentID: "agent-1", AgentVersionID: versionID, Scopes: []string{"tasks:publish"}}
+	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeAgent, AgentID: "agent-1", AgentVersionID: versionID, Scopes: []string{"tasks:publish", "reviews:read", "reviews:write", "tasks:execute"}}
 }
 
 func reviewerPrincipal(tenantID, reviewerID string) auth.Principal {
-	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeHuman, OwnerID: "user-" + reviewerID}
+	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeHuman, OwnerID: "user-" + reviewerID, Scopes: []string{"reviews:read", "reviews:write", "reputation:read"}}
 }
 
 // --- memory store ---
@@ -853,11 +854,11 @@ func sequenceIDs(values ...string) func() string {
 // --- providers ---
 
 type fakeDiffProvider struct {
-	data []byte
+	data []reviewapp.FileDiff
 	err  error
 }
 
-func (f *fakeDiffProvider) GetDiff(context.Context, string) ([]byte, error) {
+func (f *fakeDiffProvider) GetDiff(context.Context, string) ([]reviewapp.FileDiff, error) {
 	return f.data, f.err
 }
 

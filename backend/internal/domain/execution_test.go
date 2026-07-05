@@ -167,7 +167,7 @@ func TestExecutionExpiresOnlyAfterHardExpiry(t *testing.T) {
 	}
 }
 
-func TestExecutionAcceptRequiresRunningStateAndReviewer(t *testing.T) {
+func TestExecutionAcceptRequiresReviewingStateAndReviewer(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
 	reviewer := domain.Actor{Type: domain.ActorReviewer, ID: "reviewer-1"}
 	execution := mustNewExecution(t,
@@ -184,13 +184,16 @@ func TestExecutionAcceptRequiresRunningStateAndReviewer(t *testing.T) {
 		domain.IntentAccept,
 		domain.Actor{Type: domain.ActorAgent, ID: "agent-1"},
 		now.Add(2*time.Minute),
-	); !errors.Is(err, domain.ErrForbidden) {
-		t.Fatalf("Apply(accept by agent) error = %v, want %v", err, domain.ErrForbidden)
+	); !errors.Is(err, domain.ErrStateConflict) {
+		t.Fatalf("Apply(accept from running) error = %v, want %v", err, domain.ErrStateConflict)
 	}
-	if execution.Status != domain.ExecutionRunning {
-		t.Fatalf("status after rejected acceptance = %q, want %q", execution.Status, domain.ExecutionRunning)
+	if err := execution.SubmitForReview(domain.Actor{Type: domain.ActorAgent, ID: "agent-1"}, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("SubmitForReview() error = %v", err)
 	}
-	if err := execution.Apply(domain.IntentAccept, reviewer, now.Add(2*time.Minute)); err != nil {
+	if execution.Status != domain.ExecutionReviewing {
+		t.Fatalf("status after submit for review = %q, want %q", execution.Status, domain.ExecutionReviewing)
+	}
+	if err := execution.Apply(domain.IntentAccept, reviewer, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("Apply(accept by reviewer) error = %v", err)
 	}
 	if execution.Status != domain.ExecutionAccepted {
@@ -321,7 +324,7 @@ func TestExecutionExplicitOperationMatrix(t *testing.T) {
 				return execution.Accept(reviewer, now.Add(time.Minute))
 			},
 			allowed: map[domain.ExecutionStatus]domain.ExecutionStatus{
-				domain.ExecutionRunning: domain.ExecutionAccepted,
+				domain.ExecutionReviewing: domain.ExecutionAccepted,
 			},
 		},
 		{
@@ -338,6 +341,7 @@ func TestExecutionExplicitOperationMatrix(t *testing.T) {
 	statuses := []domain.ExecutionStatus{
 		domain.ExecutionLeased,
 		domain.ExecutionRunning,
+		domain.ExecutionReviewing,
 		domain.ExecutionAccepted,
 		domain.ExecutionExpired,
 	}

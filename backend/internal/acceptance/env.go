@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reputationdomain "agentguild.dev/agentguild/backend/internal/reputation/domain"
 	reputationpostgres "agentguild.dev/agentguild/backend/internal/reputation/postgres"
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
@@ -80,12 +80,11 @@ func Start(t *testing.T) *Env {
 	seedAcceptanceRubric(t, db)
 	seedAcceptanceReviewer(t, db)
 
-	reputationSvc := &acceptanceReputationService{db: db}
-	mcpReputationSvc := &acceptanceMCPReputationService{db: db}
+	reputationSvc := application.NewReputationQueryService(store)
 
 	mcpHandler := transportmcp.NewServer(svc, verifier,
 		transportmcp.WithReviewService(reviewSvc),
-		transportmcp.WithReputationService(mcpReputationSvc),
+		transportmcp.WithReputationService(reputationSvc),
 	).Handler()
 	restHandler := rest.NewServer(svc, verifier,
 		rest.WithIdentityService(identitySvc),
@@ -159,15 +158,21 @@ func (env *Env) RunReaper() int {
 	return n
 }
 
-// SubmitForReview 将执行状态直接置为 reviewing，模拟 git-delivery-and-validation 提交后的状态。
-// 当前该模块尚未实现，因此验收测试通过数据库直接推进状态。
+// SubmitForReview 将运行中的执行推进到 reviewing 状态。
+// 当前为临时入口，待 git-delivery-and-validation 模块合入后替换。
 func (env *Env) SubmitForReview(executionID string) {
 	env.T.Helper()
-	_, err := env.DB.Exec(context.Background(), `
-		UPDATE executions
-		SET status = 'reviewing', submitted_at = clock_timestamp(), updated_at = clock_timestamp()
-		WHERE tenant_id = $1 AND id = $2`, "tenant-1", executionID)
+	ctx := context.Background()
+	var agentVersionID string
+	err := env.DB.QueryRow(ctx, `SELECT agent_version_id FROM executions WHERE tenant_id=$1 AND id=$2`, "tenant-1", executionID).Scan(&agentVersionID)
 	require.NoError(env.T, err)
+	token := "token-agent"
+	var i int
+	if _, err := fmt.Sscanf(agentVersionID, "acceptance-agent-%d", &i); err == nil && i > 1 {
+		token = fmt.Sprintf("token-agent-%d", i)
+	}
+	res := env.REST.As(token).SubmitForReview(executionID, executionID+"-submit-for-review")
+	require.Empty(env.T, res.Code, "submit for review failed: %s", res.Code)
 }
 
 // CreateResubmissionExecution 模拟 revision requested 后 agent 重新提交产生的新 execution。
@@ -355,7 +360,7 @@ func publisherPrincipal() auth.Principal {
 		Type:           auth.PrincipalTypeAgent,
 		AgentID:        "publisher",
 		AgentVersionID: "publisher-v1",
-		Scopes:         []string{"tasks:publish", "tasks:read", "tasks:cancel"},
+		Scopes:         []string{"tasks:publish", "tasks:read", "tasks:cancel", "reviews:read", "reviews:write", "tasks:execute"},
 	}
 }
 
@@ -586,7 +591,7 @@ type mcpReviewResult struct {
 
 type mcpReputationResult struct {
 	Code       string
-	Projection transportmcp.ProjectionView
+	Projection reputationapp.ProjectionView
 	Meta       application.Meta
 }
 
@@ -670,8 +675,8 @@ func (c *MCPClient) parseReputationResult(rec *httptest.ResponseRecorder) mcpRep
 
 	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
 	var envelope struct {
-		Data transportmcp.ProjectionView `json:"data"`
-		Meta application.Meta            `json:"meta"`
+		Data reputationapp.ProjectionView `json:"data"`
+		Meta application.Meta             `json:"meta"`
 	}
 	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
 	c.lastMeta = envelope.Meta
@@ -820,6 +825,14 @@ func (c *RESTClient) AddComment(reviewID, submissionID, text, requestID string) 
 	})
 }
 
+// SubmitForReview 将运行中的 execution 推进到 reviewing。
+func (c *RESTClient) SubmitForReview(executionID, requestID string) restResult {
+	c.t.Helper()
+	return c.post("/v1/executions/"+executionID+":submit_for_review", requestID, map[string]any{
+		"request_id": requestID,
+	})
+}
+
 // GetReputation 查询指定 key 的声望投影。
 func (c *RESTClient) GetReputation(agentVersionID, capability, taskType string) restReputationResult {
 	c.t.Helper()
@@ -839,8 +852,8 @@ func (c *RESTClient) GetReputation(agentVersionID, capability, taskType string) 
 		return restReputationResult{Code: resp.Error.Code}
 	}
 	var envelope struct {
-		Data rest.ProjectionView `json:"data"`
-		Meta application.Meta    `json:"meta"`
+		Data reputationapp.ProjectionView `json:"data"`
+		Meta application.Meta             `json:"meta"`
 	}
 	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
 	c.lastMeta = envelope.Meta
@@ -849,7 +862,7 @@ func (c *RESTClient) GetReputation(agentVersionID, capability, taskType string) 
 
 type restReputationResult struct {
 	Code       string
-	Projection rest.ProjectionView
+	Projection reputationapp.ProjectionView
 	Meta       application.Meta
 }
 
@@ -1380,12 +1393,24 @@ func seedAcceptanceReviewer(t *testing.T, db *pgxpool.Pool) {
 	require.NoError(t, repo.Insert(context.Background(), profile))
 }
 
-// acceptanceDiffProvider 是 diff provider 的内存桩，返回固定 diff 内容。
+// acceptanceDiffProvider 是 diff provider 的内存桩，返回固定结构化 diff 内容。
 // TODO: replace with git-delivery-and-validation implementation
 type acceptanceDiffProvider struct{}
 
-func (acceptanceDiffProvider) GetDiff(context.Context, string) ([]byte, error) {
-	return []byte("fake diff for acceptance test"), nil
+func (acceptanceDiffProvider) GetDiff(context.Context, string) ([]reviewapp.FileDiff, error) {
+	return []reviewapp.FileDiff{{
+		Path: "main.go",
+		Hunks: []reviewapp.Hunk{{
+			OldStart: 1,
+			OldLines: 0,
+			NewStart: 1,
+			NewLines: 1,
+			HunkHash: "h1",
+			Lines: []reviewapp.DiffLine{
+				{Type: "add", Text: "+func Run() {}", NewLine: 1},
+			},
+		}},
+	}}, nil
 }
 
 // acceptanceValidationProvider 是 validation provider 的内存桩，可控制硬 gate 结果。
@@ -1403,81 +1428,3 @@ type acceptanceValidationStatus struct {
 }
 
 func (v acceptanceValidationStatus) AllHardGatesPassed() bool { return v.pass }
-
-func loadReputationProjection(ctx context.Context, db *pgxpool.Pool, tenantID, agentVersionID, capability, taskType string) (*reputationdomain.Projection, error) {
-	repo := reputationpostgres.NewProjectionRepository(db)
-	proj, err := repo.GetByKey(ctx, tenantID, reputationdomain.ProjectionKey{
-		AgentVersionID: agentVersionID,
-		Capability:     capability,
-		TaskType:       taskType,
-	})
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return reputationdomain.NewProjection(agentVersionID, capability, taskType), nil
-		}
-		return nil, err
-	}
-	return proj, nil
-}
-
-// acceptanceReputationService 是验收测试中的真实声望 REST 查询服务，直接读取 projection 仓库。
-type acceptanceReputationService struct {
-	db *pgxpool.Pool
-}
-
-func (s acceptanceReputationService) GetProjection(ctx context.Context, principal auth.Principal, query rest.ReputationQuery) (application.Envelope[rest.ProjectionView], error) {
-	proj, err := loadReputationProjection(ctx, s.db, principal.TenantID, query.AgentVersionID, query.Capability, query.TaskType)
-	if err != nil {
-		return application.Envelope[rest.ProjectionView]{}, err
-	}
-	return application.Envelope[rest.ProjectionView]{Data: toRESTProjectionView(proj)}, nil
-}
-
-// acceptanceMCPReputationService 是验收测试中的真实声望 MCP 查询服务。
-type acceptanceMCPReputationService struct {
-	db *pgxpool.Pool
-}
-
-func (s acceptanceMCPReputationService) GetProjection(ctx context.Context, principal auth.Principal, query transportmcp.ReputationQuery) (application.Envelope[transportmcp.ProjectionView], error) {
-	proj, err := loadReputationProjection(ctx, s.db, principal.TenantID, query.AgentVersionID, query.Capability, query.TaskType)
-	if err != nil {
-		return application.Envelope[transportmcp.ProjectionView]{}, err
-	}
-	return application.Envelope[transportmcp.ProjectionView]{Data: toMCPProjectionView(proj)}, nil
-}
-
-func toRESTProjectionView(proj *reputationdomain.Projection) rest.ProjectionView {
-	return rest.ProjectionView{
-		AgentVersionID:         proj.Key.AgentVersionID,
-		Capability:             proj.Key.Capability,
-		TaskType:               proj.Key.TaskType,
-		TotalReviews:           proj.TotalReviews,
-		AcceptedCount:          proj.AcceptedCount,
-		RejectedCount:          proj.RejectedCount,
-		RevisionRequestedCount: proj.RevisionRequestedCount,
-		PassRate:               proj.PassRate,
-		ReworkRate:             proj.ReworkRate,
-		AvgReviewCostCents:     proj.AvgReviewCostCents,
-		AvgReviewLatencyMs:     proj.AvgReviewLatencyMs,
-		SampleSizeHint:         proj.SampleSizeHint,
-		AlgorithmVersion:       proj.AlgorithmVersion,
-	}
-}
-
-func toMCPProjectionView(proj *reputationdomain.Projection) transportmcp.ProjectionView {
-	return transportmcp.ProjectionView{
-		AgentVersionID:         proj.Key.AgentVersionID,
-		Capability:             proj.Key.Capability,
-		TaskType:               proj.Key.TaskType,
-		TotalReviews:           proj.TotalReviews,
-		AcceptedCount:          proj.AcceptedCount,
-		RejectedCount:          proj.RejectedCount,
-		RevisionRequestedCount: proj.RevisionRequestedCount,
-		PassRate:               proj.PassRate,
-		ReworkRate:             proj.ReworkRate,
-		AvgReviewCostCents:     proj.AvgReviewCostCents,
-		AvgReviewLatencyMs:     proj.AvgReviewLatencyMs,
-		SampleSizeHint:         proj.SampleSizeHint,
-		AlgorithmVersion:       proj.AlgorithmVersion,
-	}
-}

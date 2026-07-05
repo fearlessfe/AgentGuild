@@ -6,6 +6,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,8 @@ type ReviewService interface {
 	SubmitDecision(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitDecision) (application.Envelope[reviewapp.ReviewView], error)
 	AddComment(ctx context.Context, principal auth.Principal, cmd reviewapp.AddComment) (application.Envelope[reviewapp.CommentView], error)
 	GetReview(ctx context.Context, principal auth.Principal, query reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error)
+	GetSubmissionDiff(ctx context.Context, principal auth.Principal, query reviewapp.GetSubmissionDiff) (application.Envelope[[]reviewapp.FileDiff], error)
+	SubmitForReview(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error)
 }
 
 // RubricService 是 REST 层消费的评分标准服务边界。
@@ -24,33 +27,9 @@ type RubricService interface {
 	GetActiveRubric(ctx context.Context, principal auth.Principal) (application.Envelope[reviewapp.RubricView], error)
 }
 
-// ReputationQuery 是声望投影查询参数；实际投影逻辑尚未实现。
-type ReputationQuery struct {
-	AgentVersionID string
-	Capability     string
-	TaskType       string
-}
-
-// ProjectionView 是声望投影视图，字段与 reputationdomain.Projection 保持一致。
-type ProjectionView struct {
-	AgentVersionID         string  `json:"agent_version_id"`
-	Capability             string  `json:"capability"`
-	TaskType               string  `json:"task_type"`
-	TotalReviews           int     `json:"total_reviews"`
-	AcceptedCount          int     `json:"accepted_count"`
-	RejectedCount          int     `json:"rejected_count"`
-	RevisionRequestedCount int     `json:"revision_requested_count"`
-	PassRate               float64 `json:"pass_rate"`
-	ReworkRate             float64 `json:"rework_rate"`
-	AvgReviewCostCents     float64 `json:"avg_review_cost_cents"`
-	AvgReviewLatencyMs     float64 `json:"avg_review_latency_ms"`
-	SampleSizeHint         string  `json:"sample_size_hint"`
-	AlgorithmVersion       string  `json:"algorithm_version"`
-}
-
-// ReputationService 是声望投影占位服务边界。
+// ReputationService 是声望投影服务边界。
 type ReputationService interface {
-	GetProjection(ctx context.Context, principal auth.Principal, query ReputationQuery) (application.Envelope[ProjectionView], error)
+	GetProjection(ctx context.Context, principal auth.Principal, query reputationapp.GetProjection) (application.Envelope[reputationapp.ProjectionView], error)
 }
 
 // WithReviewService 挂载代码评审 REST API。
@@ -202,13 +181,55 @@ func (s *Server) getActiveRubric(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) getSubmissionDiff(w http.ResponseWriter, r *http.Request) {
+	if s.reviewSvc == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "review service is not configured")
+		return
+	}
+	principal := mustPrincipal(r)
+	result, err := s.reviewSvc.GetSubmissionDiff(r.Context(), principal, reviewapp.GetSubmissionDiff{SubmissionID: chi.URLParam(r, "id")})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) submitForReview(w http.ResponseWriter, r *http.Request) {
+	if s.reviewSvc == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "review service is not configured")
+		return
+	}
+	principal := mustPrincipal(r)
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	idempotencyKey, ok := resolveIdempotencyKey(r, body.RequestID, w)
+	if !ok {
+		return
+	}
+
+	result, err := s.reviewSvc.SubmitForReview(r.Context(), principal, reviewapp.SubmitForReview{
+		RequestID:   idempotencyKey,
+		ExecutionID: chi.URLParam(r, "id"),
+	})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) getReputation(w http.ResponseWriter, r *http.Request) {
 	if s.reputationSvc == nil {
 		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "reputation projection is not implemented")
 		return
 	}
 	principal := mustPrincipal(r)
-	query := ReputationQuery{
+	query := reputationapp.GetProjection{
 		AgentVersionID: r.URL.Query().Get("agent_version_id"),
 		Capability:     r.URL.Query().Get("capability"),
 		TaskType:       r.URL.Query().Get("task_type"),

@@ -23,8 +23,8 @@ const (
 
 // RubricScore records the score given for a single rubric dimension.
 type RubricScore struct {
-	Dimension string
-	Score     int
+	Dimension string `json:"dimension"`
+	Score     int    `json:"score"`
 }
 
 // Review represents a review of a submission by a reviewer against a rubric version.

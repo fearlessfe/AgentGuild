@@ -146,11 +146,14 @@ func (s *Server) Router() http.Handler {
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:heartbeat", s.heartbeatExecution)
 
 		r.With(s.authenticate, s.rateLimit).Post("/submissions/{id}/reviews", s.createReview)
+		r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}/diff", s.getSubmissionDiff)
 		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/decision", s.submitDecision)
 		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/comments", s.addComment)
 		r.With(s.authenticate, s.rateLimit).Get("/reviews/{id}", s.getReview)
 		r.With(s.authenticate, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
 		r.With(s.authenticate, s.rateLimit).Get("/reputation", s.getReputation)
+
+		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:submit_for_review", s.submitForReview)
 	})
 	return r
 }

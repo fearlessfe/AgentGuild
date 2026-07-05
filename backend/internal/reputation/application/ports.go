@@ -14,6 +14,30 @@ type ProjectionRecord struct {
 	Projection reputationdomain.Projection
 }
 
+// GetProjection is a reputation query.
+type GetProjection struct {
+	AgentVersionID string
+	Capability     string
+	TaskType       string
+}
+
+// ProjectionView is the serialized representation of a reputation projection.
+type ProjectionView struct {
+	AgentVersionID         string  `json:"agent_version_id"`
+	Capability             string  `json:"capability"`
+	TaskType               string  `json:"task_type"`
+	TotalReviews           int     `json:"total_reviews"`
+	AcceptedCount          int     `json:"accepted_count"`
+	RejectedCount          int     `json:"rejected_count"`
+	RevisionRequestedCount int     `json:"revision_requested_count"`
+	PassRate               float64 `json:"pass_rate"`
+	ReworkRate             float64 `json:"rework_rate"`
+	AvgReviewCostCents     float64 `json:"avg_review_cost_cents,omitempty"`
+	AvgReviewLatencyMs     float64 `json:"avg_review_latency_ms,omitempty"`
+	SampleSizeHint         string  `json:"sample_size_hint"`
+	AlgorithmVersion       string  `json:"algorithm_version"`
+}
+
 // ProjectionRepository stores projected reputation slices.
 type ProjectionRepository interface {
 	GetByKey(ctx context.Context, tenantID string, key reputationdomain.ProjectionKey) (*reputationdomain.Projection, error)

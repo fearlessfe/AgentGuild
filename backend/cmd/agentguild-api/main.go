@@ -23,6 +23,8 @@ import (
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
+	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
+	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
 	mcptransport "agentguild.dev/agentguild/backend/internal/transport/mcp"
 	resttransport "agentguild.dev/agentguild/backend/internal/transport/rest"
@@ -69,8 +71,29 @@ func run() error {
 	if oidcProvider != nil {
 		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
 	}
+
+	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), reviewapp.SyntheticDiffProvider{}, reviewapp.AlwaysPassValidationProvider{}, reviewapp.Options{})
+	if err != nil {
+		return err
+	}
+	reputationSvc := application.NewReputationQueryService(postgres.NewStore(pool))
+
+	restOptions = append(restOptions,
+		resttransport.WithReviewService(reviewSvc),
+		resttransport.WithRubricService(reviewSvc),
+		resttransport.WithReputationService(reputationSvc),
+	)
 	restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
-	mcpHandler := mcptransport.NewServer(service, verifier).Handler()
+	mcpHandler := mcptransport.NewServer(service, verifier,
+		mcptransport.WithReviewService(reviewSvc),
+		mcptransport.WithReputationService(reputationSvc),
+	).Handler()
+
+	if cfg.ReviewSeedTenantID != "" {
+		if err := reviewpostgres.SeedReviewDefaults(ctx, pool, cfg.ReviewSeedTenantID); err != nil {
+			return fmt.Errorf("seed review defaults: %w", err)
+		}
+	}
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: adapterHandler(cfg.WebEnabled, cfg.MCPEnabled, restHandler, mcpHandler), ReadHeaderTimeout: 5 * time.Second}
 
 	workerCtx, cancelWorkers := context.WithCancel(ctx)

@@ -87,59 +87,65 @@ type GetReview struct {
 	ReviewID string
 }
 
-// GetReviewDiff retrieves the raw diff for a review's submission.
-type GetReviewDiff struct {
-	ReviewID string
+// GetSubmissionDiff retrieves the structured diff for a submission.
+type GetSubmissionDiff struct {
+	SubmissionID string
+}
+
+// SubmitForReview transitions a running execution to the reviewing state.
+type SubmitForReview struct {
+	RequestID   string
+	ExecutionID string
 }
 
 // ReviewView is the serialized representation of a review.
 type ReviewView struct {
-	ID              string
-	TenantID        string
-	SubmissionID    string
-	ReviewerID      string
-	RubricVersionID string
-	Scores          []reviewdomain.RubricScore
-	Summary         string
-	Status          string
-	FinalDecision   string
-	SubmittedAt     time.Time
-	CreatedAt       time.Time
-	Comments        []CommentView
+	ID              string                 `json:"id"`
+	TenantID        string                 `json:"tenant_id"`
+	SubmissionID    string                 `json:"submission_id"`
+	ReviewerID      string                 `json:"reviewer_id"`
+	RubricVersionID string                 `json:"rubric_version_id"`
+	RubricScores    []reviewdomain.RubricScore `json:"rubric_scores"`
+	Summary         string                 `json:"summary,omitempty"`
+	Status          string                 `json:"status"`
+	FinalDecision   string                 `json:"final_decision,omitempty"`
+	SubmittedAt     time.Time              `json:"submitted_at,omitempty"`
+	CreatedAt       time.Time              `json:"created_at"`
+	LineComments    []CommentView          `json:"line_comments"`
 }
 
 // RubricDimensionView is the serialized representation of a rubric dimension.
 type RubricDimensionView struct {
-	ID   string
-	Name string
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // RubricView is the serialized representation of the active rubric.
 type RubricView struct {
-	ID               string
-	TenantID         string
-	VersionNumber    int
-	Name             string
-	Dimensions       []RubricDimensionView
-	Weights          map[string]float64
-	AlgorithmVersion string
-	IsActive         bool
-	CreatedAt        time.Time
+	ID               string                 `json:"id"`
+	TenantID         string                 `json:"tenant_id"`
+	VersionNumber    int                    `json:"version_number"`
+	Name             string                 `json:"name"`
+	Dimensions       []RubricDimensionView  `json:"dimensions"`
+	Weights          map[string]float64     `json:"weights"`
+	AlgorithmVersion string                 `json:"algorithm_version"`
+	IsActive         bool                   `json:"is_active"`
+	CreatedAt        time.Time              `json:"created_at"`
 }
 
 // CommentView is the serialized representation of a line comment.
 type CommentView struct {
-	ID              string
-	TenantID        string
-	ReviewID        string
-	SubmissionID    string
-	FilePath        string
-	Side            string
-	LineNumber      int
-	HunkHash        string
-	DiffFingerprint string
-	Text            string
-	CreatedAt       time.Time
+	ID              string    `json:"id"`
+	TenantID        string    `json:"tenant_id"`
+	ReviewID        string    `json:"review_id"`
+	SubmissionID    string    `json:"submission_id"`
+	FilePath        string    `json:"file_path"`
+	Side            string    `json:"side"`
+	LineNumber      int       `json:"line_number"`
+	HunkHash        string    `json:"hunk_hash"`
+	DiffFingerprint string    `json:"diff_fingerprint"`
+	Text            string    `json:"text"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // CreateReview assigns a reviewer and creates a pending review for the submission.
@@ -367,6 +373,9 @@ func (s *Service) GetActiveRubric(ctx context.Context, principal auth.Principal)
 	if err := requireTenant(principal); err != nil {
 		return result, err
 	}
+	if err := requireScope(principal, "reviews:read"); err != nil {
+		return result, err
+	}
 	err := s.store.WithTx(ctx, func(tx application.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
@@ -491,10 +500,10 @@ func taskSummary(task *application.TaskRecord, execution *domain.Execution) appl
 	}
 }
 
-// GetReviewDiff returns the raw diff for the submission associated with a review.
-// The caller must have permission to view the review.
-func (s *Service) GetReviewDiff(ctx context.Context, principal auth.Principal, query GetReviewDiff) (application.Envelope[[]byte], error) {
-	var result application.Envelope[[]byte]
+// GetSubmissionDiff returns the structured diff for a submission.
+// The caller must be allowed to view the associated review.
+func (s *Service) GetSubmissionDiff(ctx context.Context, principal auth.Principal, query GetSubmissionDiff) (application.Envelope[[]FileDiff], error) {
+	var result application.Envelope[[]FileDiff]
 	if err := requireTenant(principal); err != nil {
 		return result, err
 	}
@@ -505,12 +514,60 @@ func (s *Service) GetReviewDiff(ctx context.Context, principal auth.Principal, q
 			return err
 		}
 
-		review, err := tx.Reviews().GetByID(ctx, principal.TenantID, query.ReviewID)
+		execution, _, err := tx.GetExecution(ctx, principal.TenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
 
-		execution, _, err := tx.GetExecution(ctx, principal.TenantID, review.SubmissionID)
+		_, err = tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.policy.CanViewSubmission(principal); err != nil {
+			return err
+		}
+
+		diff, err := s.diff.GetDiff(ctx, query.SubmissionID)
+		if err != nil {
+			return err
+		}
+
+		result = application.Envelope[[]FileDiff]{
+			Data: diff,
+			Meta: application.Meta{ServerTime: now},
+		}
+		return nil
+	})
+	return result, err
+}
+
+// SubmitForReview moves a running execution to the reviewing state.
+// TODO: replace with git-delivery-and-validation integration
+func (s *Service) SubmitForReview(ctx context.Context, principal auth.Principal, cmd SubmitForReview) (application.Envelope[application.ExecutionView], error) {
+	var result application.Envelope[application.ExecutionView]
+	if err := requireTenant(principal); err != nil {
+		return result, err
+	}
+
+	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+
+		key, record, err := acquireReview(ctx, tx, principal, "execution_submit_for_review", cmd.RequestID, cmd, now)
+		if err != nil {
+			return err
+		}
+		if record.Completed {
+			return json.Unmarshal(record.ResponseBody, &result)
+		}
+		if !record.Acquired {
+			return &domain.Error{Code: "state_conflict", Message: "idempotency request is already in progress"}
+		}
+
+		execution, version, err := tx.GetExecutionForUpdate(ctx, principal.TenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
 		}
@@ -520,25 +577,39 @@ func (s *Service) GetReviewDiff(ctx context.Context, principal auth.Principal, q
 			return err
 		}
 
-		reviewer, err := tx.Reviewers().GetByID(ctx, principal.TenantID, review.ReviewerID)
+		if err := s.policy.CanSubmitForReview(principal, taskSummary(task, execution), execution); err != nil {
+			return err
+		}
+
+		actor := domain.Actor{Type: domain.ActorSystem, ID: "system"}
+		if principal.Type == auth.PrincipalTypeAgent {
+			actor = domain.Actor{Type: domain.ActorAgent, ID: principal.AgentID}
+		} else if principal.Type == auth.PrincipalTypeHuman {
+			actor = domain.Actor{Type: domain.ActorPublisher, ID: principal.OwnerID}
+		}
+		if err := execution.SubmitForReview(actor, now); err != nil {
+			return err
+		}
+
+		updated, err := tx.UpdateExecution(ctx, execution, version)
 		if err != nil {
 			return err
 		}
-
-		if err := s.policy.CanViewReview(ctx, principal, reviewRecord(review, reviewer), taskSummary(task, execution)); err != nil {
-			return err
+		if !updated {
+			return &domain.Error{Code: "state_conflict", Message: "execution changed concurrently"}
 		}
 
-		diff, err := s.diff.GetDiff(ctx, review.SubmissionID)
-		if err != nil {
-			return err
-		}
-
-		result = application.Envelope[[]byte]{
-			Data: diff,
+		result = application.Envelope[application.ExecutionView]{
+			Data: application.ExecutionView{
+				ID:             execution.ID,
+				TaskID:         execution.TaskID,
+				TenantID:       execution.TenantID,
+				AgentVersionID: execution.AgentID,
+				Status:         execution.Status,
+			},
 			Meta: application.Meta{ServerTime: now},
 		}
-		return nil
+		return completeReview(ctx, tx, key, record.OwnerToken, result)
 	})
 	return result, err
 }
@@ -574,19 +645,22 @@ func actorID(principal auth.Principal) string {
 }
 
 func reviewView(review *reviewdomain.Review, comments []CommentView) ReviewView {
+	if comments == nil {
+		comments = []CommentView{}
+	}
 	return ReviewView{
 		ID:              review.ID,
 		TenantID:        review.TenantID,
 		SubmissionID:    review.SubmissionID,
 		ReviewerID:      review.ReviewerID,
 		RubricVersionID: review.RubricVersionID,
-		Scores:          append([]reviewdomain.RubricScore(nil), review.RubricScores...),
+		RubricScores:    append([]reviewdomain.RubricScore(nil), review.RubricScores...),
 		Summary:         review.Summary,
 		Status:          string(review.Status),
 		FinalDecision:   string(review.FinalDecision),
 		SubmittedAt:     review.SubmittedAt,
 		CreatedAt:       review.CreatedAt,
-		Comments:        comments,
+		LineComments:    comments,
 	}
 }
 

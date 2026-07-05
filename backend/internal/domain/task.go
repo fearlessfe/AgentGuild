@@ -27,6 +27,7 @@ const (
 	IntentAccept
 	IntentReject
 	IntentRequestRevision
+	IntentSubmitForReview
 )
 
 type ActorType string
