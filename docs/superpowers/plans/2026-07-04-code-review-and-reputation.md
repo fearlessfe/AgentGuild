@@ -646,7 +646,7 @@ git commit -m "feat(reputation): add projection domain and projector"
   - `ReviewRepository.ListUnprojected(ctx, batchSize)` 与 `MarkProjected(ctx, reviewID)`
   - `Worker.Run(ctx)` 循环
 
-- [ ] **Step 1: 实现仓库方法**
+- [x] **Step 1: 实现仓库方法**
 
 ```go
 func (tx *Tx) UpsertReputationProjection(ctx context.Context, p reputationapp.ProjectionRecord) error {
@@ -659,7 +659,7 @@ func (tx *Tx) UpsertReputationProjection(ctx context.Context, p reputationapp.Pr
 }
 ```
 
-- [ ] **Step 2: 实现 Worker**
+- [x] **Step 2: 实现 Worker**
 
 ```go
 func (w *Worker) Run(ctx context.Context) {
@@ -675,7 +675,7 @@ func (w *Worker) Run(ctx context.Context) {
 }
 ```
 
-- [ ] **Step 3: 运行 Worker 与仓库测试**
+- [x] **Step 3: 运行 Worker 与仓库测试**
 
 ```bash
 go test ./internal/reputation/... -v
