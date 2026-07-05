@@ -765,7 +765,7 @@ git commit -m "feat(frontend): add review page, file tree and diff viewer"
   - Rubric 表单与总分计算
   - 退回/通过/拒绝按钮
 
-- [ ] **Step 1: 实现 LineComment 组件**
+- [x] **Step 1: 实现 LineComment 组件**
 
 ```tsx
 export function LineComment({ comment }: { comment: LineComment }) {
@@ -773,7 +773,7 @@ export function LineComment({ comment }: { comment: LineComment }) {
 }
 ```
 
-- [ ] **Step 2: 实现 RubricForm**
+- [x] **Step 2: 实现 RubricForm**
 
 ```tsx
 export function RubricForm({ dimensions, weights, onChange }: RubricFormProps) {
@@ -785,7 +785,7 @@ export function RubricForm({ dimensions, weights, onChange }: RubricFormProps) {
 }
 ```
 
-- [ ] **Step 3: 实现决策提交并在失败时展示硬门槛错误**
+- [x] **Step 3: 实现决策提交并在失败时展示硬门槛错误**
 
 ```tsx
 const submit = useMutation({
@@ -794,7 +794,7 @@ const submit = useMutation({
 });
 ```
 
-- [ ] **Step 4: 提交 Task 10**
+- [x] **Step 4: 提交 Task 10**
 
 ```bash
 npm test -- --run
