@@ -31,8 +31,22 @@ type ReputationQuery struct {
 	TaskType       string
 }
 
-// ProjectionView 是声望投影占位视图；实际字段将在后续任务中定义。
-type ProjectionView struct{}
+// ProjectionView 是声望投影视图，字段与 reputationdomain.Projection 保持一致。
+type ProjectionView struct {
+	AgentVersionID         string  `json:"agent_version_id"`
+	Capability             string  `json:"capability"`
+	TaskType               string  `json:"task_type"`
+	TotalReviews           int     `json:"total_reviews"`
+	AcceptedCount          int     `json:"accepted_count"`
+	RejectedCount          int     `json:"rejected_count"`
+	RevisionRequestedCount int     `json:"revision_requested_count"`
+	PassRate               float64 `json:"pass_rate"`
+	ReworkRate             float64 `json:"rework_rate"`
+	AvgReviewCostCents     float64 `json:"avg_review_cost_cents"`
+	AvgReviewLatencyMs     float64 `json:"avg_review_latency_ms"`
+	SampleSizeHint         string  `json:"sample_size_hint"`
+	AlgorithmVersion       string  `json:"algorithm_version"`
+}
 
 // ReputationService 是声望投影占位服务边界。
 type ReputationService interface {

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -79,14 +80,18 @@ func Start(t *testing.T) *Env {
 	seedAcceptanceRubric(t, db)
 	seedAcceptanceReviewer(t, db)
 
+	reputationSvc := &acceptanceReputationService{db: db}
+	mcpReputationSvc := &acceptanceMCPReputationService{db: db}
+
 	mcpHandler := transportmcp.NewServer(svc, verifier,
 		transportmcp.WithReviewService(reviewSvc),
+		transportmcp.WithReputationService(mcpReputationSvc),
 	).Handler()
 	restHandler := rest.NewServer(svc, verifier,
 		rest.WithIdentityService(identitySvc),
 		rest.WithReviewService(reviewSvc),
 		rest.WithRubricService(reviewSvc),
-		rest.WithReputationService(acceptanceReputationService{}),
+		rest.WithReputationService(reputationSvc),
 		rest.WithSession("acceptance-session-secret-0123456789abcdef", false),
 	).Router()
 
@@ -166,7 +171,7 @@ func (env *Env) SubmitForReview(executionID string) {
 }
 
 // CreateResubmissionExecution 模拟 revision requested 后 agent 重新提交产生的新 execution。
-// 当前 git-delivery-and-validation 模块尚未实现，因此直接操作数据库生成新 submission。
+// 当前 git-delivery-and-validation 模块尚未实现，因此直接操作数据库生成新 execution。
 func (env *Env) CreateResubmissionExecution(taskID, oldExecutionID, newExecutionID, agentVersionID string) string {
 	env.T.Helper()
 	ctx := context.Background()
@@ -562,10 +567,27 @@ func (c *MCPClient) ReviewGet(reviewID string) mcpReviewResult {
 	return c.parseReviewResult(rec)
 }
 
+// ReputationGet 通过 MCP 查询声望投影。
+func (c *MCPClient) ReputationGet(agentVersionID, capability, taskType string) mcpReputationResult {
+	c.t.Helper()
+	rec := c.callRaw("reputation_get", map[string]any{
+		"agent_version_id": agentVersionID,
+		"capability":       capability,
+		"task_type":        taskType,
+	})
+	return c.parseReputationResult(rec)
+}
+
 type mcpReviewResult struct {
 	Code   string
 	Review reviewapp.ReviewView
 	Meta   application.Meta
+}
+
+type mcpReputationResult struct {
+	Code       string
+	Projection transportmcp.ProjectionView
+	Meta       application.Meta
 }
 
 type mcpResult struct {
@@ -616,6 +638,44 @@ func (c *MCPClient) parseReviewResult(rec *httptest.ResponseRecorder) mcpReviewR
 	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
 	c.lastMeta = envelope.Meta
 	return mcpReviewResult{Review: envelope.Data, Meta: envelope.Meta}
+}
+
+func (c *MCPClient) parseReputationResult(rec *httptest.ResponseRecorder) mcpReputationResult {
+	c.t.Helper()
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+			IsError bool `json:"isError"`
+		} `json:"result"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &rpcResp))
+
+	if rpcResp.Error.Code != 0 {
+		return mcpReputationResult{Code: "MCP_ERROR"}
+	}
+	if rpcResp.Result.IsError {
+		require.NotEmpty(c.t, rpcResp.Result.Content, "error result has no content")
+		var mcpErr struct {
+			Code string `json:"code"`
+		}
+		require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &mcpErr))
+		return mcpReputationResult{Code: mcpErr.Code}
+	}
+
+	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
+	var envelope struct {
+		Data transportmcp.ProjectionView `json:"data"`
+		Meta application.Meta            `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
+	c.lastMeta = envelope.Meta
+	return mcpReputationResult{Projection: envelope.Data, Meta: envelope.Meta}
 }
 
 func (c *MCPClient) callRaw(tool string, args map[string]any) *httptest.ResponseRecorder {
@@ -758,6 +818,39 @@ func (c *RESTClient) AddComment(reviewID, submissionID, text, requestID string) 
 		"diff_fingerprint": "d1",
 		"text":             text,
 	})
+}
+
+// GetReputation 查询指定 key 的声望投影。
+func (c *RESTClient) GetReputation(agentVersionID, capability, taskType string) restReputationResult {
+	c.t.Helper()
+	path := fmt.Sprintf("/v1/reputation?agent_version_id=%s&capability=%s&task_type=%s", agentVersionID, capability, taskType)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	rec := httptest.NewRecorder()
+	c.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		var resp struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		return restReputationResult{Code: resp.Error.Code}
+	}
+	var envelope struct {
+		Data rest.ProjectionView `json:"data"`
+		Meta application.Meta    `json:"meta"`
+	}
+	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	c.lastMeta = envelope.Meta
+	return restReputationResult{Projection: envelope.Data, Meta: envelope.Meta}
+}
+
+type restReputationResult struct {
+	Code       string
+	Projection rest.ProjectionView
+	Meta       application.Meta
 }
 
 type restReviewResult struct {
@@ -1311,25 +1404,80 @@ type acceptanceValidationStatus struct {
 
 func (v acceptanceValidationStatus) AllHardGatesPassed() bool { return v.pass }
 
-// acceptanceReputationService 是声望 REST 边界的占位实现，用于避免 NOT_IMPLEMENTED。
-// 验收测试直接读取 projection repository 来断言。
-// TODO: replace with real reputation query service
-type acceptanceReputationService struct{}
-
-func (acceptanceReputationService) GetProjection(ctx context.Context, principal auth.Principal, query rest.ReputationQuery) (application.Envelope[rest.ProjectionView], error) {
-	return application.Envelope[rest.ProjectionView]{Data: rest.ProjectionView{}}, nil
+func loadReputationProjection(ctx context.Context, db *pgxpool.Pool, tenantID, agentVersionID, capability, taskType string) (*reputationdomain.Projection, error) {
+	repo := reputationpostgres.NewProjectionRepository(db)
+	proj, err := repo.GetByKey(ctx, tenantID, reputationdomain.ProjectionKey{
+		AgentVersionID: agentVersionID,
+		Capability:     capability,
+		TaskType:       taskType,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return reputationdomain.NewProjection(agentVersionID, capability, taskType), nil
+		}
+		return nil, err
+	}
+	return proj, nil
 }
 
-func reviewerSession() *http.Cookie {
-	cookie, err := auth.NewSessionCookie(auth.Session{
-		TenantID:   "tenant-1",
-		OwnerID:    "reviewer-user-1",
-		OwnerEmail: "reviewer-1@example.com",
-		IsAdmin:    false,
-		ExpiresAt:  time.Now().Add(time.Hour),
-	}, "acceptance-session-secret-0123456789abcdef", false)
+// acceptanceReputationService 是验收测试中的真实声望 REST 查询服务，直接读取 projection 仓库。
+type acceptanceReputationService struct {
+	db *pgxpool.Pool
+}
+
+func (s acceptanceReputationService) GetProjection(ctx context.Context, principal auth.Principal, query rest.ReputationQuery) (application.Envelope[rest.ProjectionView], error) {
+	proj, err := loadReputationProjection(ctx, s.db, principal.TenantID, query.AgentVersionID, query.Capability, query.TaskType)
 	if err != nil {
-		panic(err)
+		return application.Envelope[rest.ProjectionView]{}, err
 	}
-	return cookie
+	return application.Envelope[rest.ProjectionView]{Data: toRESTProjectionView(proj)}, nil
+}
+
+// acceptanceMCPReputationService 是验收测试中的真实声望 MCP 查询服务。
+type acceptanceMCPReputationService struct {
+	db *pgxpool.Pool
+}
+
+func (s acceptanceMCPReputationService) GetProjection(ctx context.Context, principal auth.Principal, query transportmcp.ReputationQuery) (application.Envelope[transportmcp.ProjectionView], error) {
+	proj, err := loadReputationProjection(ctx, s.db, principal.TenantID, query.AgentVersionID, query.Capability, query.TaskType)
+	if err != nil {
+		return application.Envelope[transportmcp.ProjectionView]{}, err
+	}
+	return application.Envelope[transportmcp.ProjectionView]{Data: toMCPProjectionView(proj)}, nil
+}
+
+func toRESTProjectionView(proj *reputationdomain.Projection) rest.ProjectionView {
+	return rest.ProjectionView{
+		AgentVersionID:         proj.Key.AgentVersionID,
+		Capability:             proj.Key.Capability,
+		TaskType:               proj.Key.TaskType,
+		TotalReviews:           proj.TotalReviews,
+		AcceptedCount:          proj.AcceptedCount,
+		RejectedCount:          proj.RejectedCount,
+		RevisionRequestedCount: proj.RevisionRequestedCount,
+		PassRate:               proj.PassRate,
+		ReworkRate:             proj.ReworkRate,
+		AvgReviewCostCents:     proj.AvgReviewCostCents,
+		AvgReviewLatencyMs:     proj.AvgReviewLatencyMs,
+		SampleSizeHint:         proj.SampleSizeHint,
+		AlgorithmVersion:       proj.AlgorithmVersion,
+	}
+}
+
+func toMCPProjectionView(proj *reputationdomain.Projection) transportmcp.ProjectionView {
+	return transportmcp.ProjectionView{
+		AgentVersionID:         proj.Key.AgentVersionID,
+		Capability:             proj.Key.Capability,
+		TaskType:               proj.Key.TaskType,
+		TotalReviews:           proj.TotalReviews,
+		AcceptedCount:          proj.AcceptedCount,
+		RejectedCount:          proj.RejectedCount,
+		RevisionRequestedCount: proj.RevisionRequestedCount,
+		PassRate:               proj.PassRate,
+		ReworkRate:             proj.ReworkRate,
+		AvgReviewCostCents:     proj.AvgReviewCostCents,
+		AvgReviewLatencyMs:     proj.AvgReviewLatencyMs,
+		SampleSizeHint:         proj.SampleSizeHint,
+		AlgorithmVersion:       proj.AlgorithmVersion,
+	}
 }

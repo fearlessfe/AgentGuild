@@ -44,23 +44,37 @@ type reviewService interface {
 	GetReview(ctx context.Context, principal auth.Principal, query reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error)
 }
 
-// reputationQuery 是声望投影查询参数；实际投影逻辑尚未实现。
-type reputationQuery struct {
+// ReputationQuery 是声望投影查询参数。
+type ReputationQuery struct {
 	AgentVersionID string
 	Capability     string
 	TaskType       string
 }
 
-// ProjectionView 是声望投影占位视图；实际字段将在后续任务中定义。
-type ProjectionView struct{}
+// ProjectionView 是声望投影视图，字段与 reputationdomain.Projection 保持一致。
+type ProjectionView struct {
+	AgentVersionID         string  `json:"agent_version_id"`
+	Capability             string  `json:"capability"`
+	TaskType               string  `json:"task_type"`
+	TotalReviews           int     `json:"total_reviews"`
+	AcceptedCount          int     `json:"accepted_count"`
+	RejectedCount          int     `json:"rejected_count"`
+	RevisionRequestedCount int     `json:"revision_requested_count"`
+	PassRate               float64 `json:"pass_rate"`
+	ReworkRate             float64 `json:"rework_rate"`
+	AvgReviewCostCents     float64 `json:"avg_review_cost_cents"`
+	AvgReviewLatencyMs     float64 `json:"avg_review_latency_ms"`
+	SampleSizeHint         string  `json:"sample_size_hint"`
+	AlgorithmVersion       string  `json:"algorithm_version"`
+}
 
-// reputationService 是声望投影占位服务边界。
-type reputationService interface {
-	GetProjection(ctx context.Context, principal auth.Principal, query reputationQuery) (application.Envelope[ProjectionView], error)
+// ReputationService 是声望投影服务边界。
+type ReputationService interface {
+	GetProjection(ctx context.Context, principal auth.Principal, query ReputationQuery) (application.Envelope[ProjectionView], error)
 }
 
 // registerReviewTools 注册代码评审与声望相关 MCP 工具。
-func registerReviewTools(server *mcp.Server, reviewSvc reviewService, reputationSvc reputationService, principal auth.Principal) {
+func registerReviewTools(server *mcp.Server, reviewSvc reviewService, reputationSvc ReputationService, principal auth.Principal) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "review_submit",
 		Description: "提交审核决策",
@@ -106,7 +120,7 @@ func registerReviewTools(server *mcp.Server, reviewSvc reviewService, reputation
 		if reputationSvc == nil {
 			return errorResult(MCPError{Code: "NOT_IMPLEMENTED", Message: "reputation projection is not implemented"}), nil, nil
 		}
-		result, err := reputationSvc.GetProjection(ctx, principal, reputationQuery{
+		result, err := reputationSvc.GetProjection(ctx, principal, ReputationQuery{
 			AgentVersionID: input.AgentVersionID,
 			Capability:     input.Capability,
 			TaskType:       input.TaskType,

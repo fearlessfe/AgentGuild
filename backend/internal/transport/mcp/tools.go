@@ -75,7 +75,7 @@ type GetExecutionInput struct {
 
 // registerTools 注册全部任务生命周期与代码评审 MCP 工具。
 // Principal 已按请求注入，每个 handler 只调用共享 applicationService。
-func registerTools(server *mcp.Server, svc applicationService, reviewSvc reviewService, reputationSvc reputationService, principal auth.Principal) {
+func registerTools(server *mcp.Server, svc applicationService, reviewSvc reviewService, reputationSvc ReputationService, principal auth.Principal) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_publish",
 		Description: "发布新任务",

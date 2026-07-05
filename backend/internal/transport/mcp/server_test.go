@@ -115,7 +115,7 @@ type fakeReputationService struct {
 	projectionErr error
 }
 
-func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, query reputationQuery) (application.Envelope[ProjectionView], error) {
+func (f *fakeReputationService) GetProjection(ctx context.Context, p auth.Principal, query ReputationQuery) (application.Envelope[ProjectionView], error) {
 	f.calls = append(f.calls, call{method: "GetProjection", principal: p, payload: query})
 	return f.projection, f.projectionErr
 }
@@ -346,7 +346,7 @@ func newMCPServerWithAppAndPrincipal(t *testing.T, app *fakeApplication, princip
 	return s.mcpServer(req)
 }
 
-func newMCPServerWithReview(t *testing.T, reviewSvc reviewService, reputationSvc reputationService) *mcp.Server {
+func newMCPServerWithReview(t *testing.T, reviewSvc reviewService, reputationSvc ReputationService) *mcp.Server {
 	t.Helper()
 	app := &fakeApplication{}
 	verifier := &fakeVerifier{principal: testPrincipal("tasks:read", "tasks:publish", "tasks:claim", "tasks:execute")}

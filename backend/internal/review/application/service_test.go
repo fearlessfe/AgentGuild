@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -717,8 +718,17 @@ func (r reviewMemoryCommentRepository) Insert(_ context.Context, comment *review
 	return nil
 }
 
-func (r reviewMemoryCommentRepository) ListByReview(context.Context, string, string) ([]reviewdomain.LineComment, error) {
-	panic("not implemented")
+func (r reviewMemoryCommentRepository) ListByReview(_ context.Context, tenantID, reviewID string) ([]reviewdomain.LineComment, error) {
+	var out []reviewdomain.LineComment
+	for _, c := range r.store.comments {
+		if c.TenantID == tenantID && c.ReviewID == reviewID {
+			out = append(out, *c)
+		}
+	}
+	slices.SortFunc(out, func(a, b reviewdomain.LineComment) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out, nil
 }
 
 type reviewMemoryRubricRepository struct{ store *reviewMemoryStore }

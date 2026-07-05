@@ -105,6 +105,7 @@ type ReviewView struct {
 	FinalDecision   string
 	SubmittedAt     time.Time
 	CreatedAt       time.Time
+	Comments        []CommentView
 }
 
 // RubricDimensionView is the serialized representation of a rubric dimension.
@@ -208,7 +209,7 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 		}
 
 		result = application.Envelope[ReviewView]{
-			Data: reviewView(review),
+			Data: reviewView(review, nil),
 			Meta: application.Meta{ServerTime: now},
 		}
 		return completeReview(ctx, tx, key, record.OwnerToken, result)
@@ -287,7 +288,7 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 		}
 
 		result = application.Envelope[ReviewView]{
-			Data: reviewView(review),
+			Data: reviewView(review, nil),
 			Meta: application.Meta{ServerTime: now},
 		}
 		return completeReview(ctx, tx, key, record.OwnerToken, result)
@@ -421,8 +422,17 @@ func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query
 			return err
 		}
 
+		comments, err := tx.LineComments().ListByReview(ctx, principal.TenantID, review.ID)
+		if err != nil {
+			return err
+		}
+		commentViews := make([]CommentView, len(comments))
+		for i := range comments {
+			commentViews[i] = commentView(&comments[i])
+		}
+
 		result = application.Envelope[ReviewView]{
-			Data: reviewView(review),
+			Data: reviewView(review, commentViews),
 			Meta: application.Meta{ServerTime: now},
 		}
 		return nil
@@ -563,7 +573,7 @@ func actorID(principal auth.Principal) string {
 	return principal.OwnerID
 }
 
-func reviewView(review *reviewdomain.Review) ReviewView {
+func reviewView(review *reviewdomain.Review, comments []CommentView) ReviewView {
 	return ReviewView{
 		ID:              review.ID,
 		TenantID:        review.TenantID,
@@ -576,6 +586,7 @@ func reviewView(review *reviewdomain.Review) ReviewView {
 		FinalDecision:   string(review.FinalDecision),
 		SubmittedAt:     review.SubmittedAt,
 		CreatedAt:       review.CreatedAt,
+		Comments:        comments,
 	}
 }
 

@@ -37,7 +37,7 @@ func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true,
 type Server struct {
 	svc           applicationService
 	reviewSvc     reviewService
-	reputationSvc reputationService
+	reputationSvc ReputationService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
 }
@@ -56,7 +56,7 @@ func WithReviewService(svc reviewService) Option {
 }
 
 // WithReputationService 挂载声望投影 MCP 工具。
-func WithReputationService(svc reputationService) Option {
+func WithReputationService(svc ReputationService) Option {
 	return func(s *Server) { s.reputationSvc = svc }
 }
 

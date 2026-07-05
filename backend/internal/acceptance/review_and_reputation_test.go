@@ -10,7 +10,8 @@ import (
 )
 
 // TestEndToEndReviewAcceptedUpdatesProjection 验证完整流程：
-// 发布任务 → 领取/开始 → 提交 review → review accepted → worker tick → 声望投影更新。
+// 发布任务 → 领取/开始 → 提交 review → review accepted → worker tick → 声望投影更新，
+// 且 REST /v1/reputation 与 MCP reputation_get 返回一致。
 func TestEndToEndReviewAcceptedUpdatesProjection(t *testing.T) {
 	env := Start(t)
 
@@ -35,10 +36,22 @@ func TestEndToEndReviewAcceptedUpdatesProjection(t *testing.T) {
 	require.Equal(t, 0, proj.RevisionRequestedCount)
 	require.InDelta(t, 1.0, proj.PassRate, 0.0001)
 	require.InDelta(t, 0.0, proj.ReworkRate, 0.0001)
+
+	restProj := env.REST.As("token-reviewer").GetReputation("acceptance-agent-1", "go", "code")
+	require.Empty(t, restProj.Code, "REST reputation failed: %s", restProj.Code)
+	require.Equal(t, 1, restProj.Projection.TotalReviews)
+	require.Equal(t, 1, restProj.Projection.AcceptedCount)
+	require.InDelta(t, 1.0, restProj.Projection.PassRate, 0.0001)
+
+	mcpProj := env.MCP.As("token-reviewer").ReputationGet("acceptance-agent-1", "go", "code")
+	require.Empty(t, mcpProj.Code, "MCP reputation failed: %s", mcpProj.Code)
+	require.Equal(t, 1, mcpProj.Projection.TotalReviews)
+	require.Equal(t, 0, mcpProj.Projection.RejectedCount)
+	require.InDelta(t, 1.0, mcpProj.Projection.PassRate, 0.0001)
 }
 
 // TestHardGatesFailedPreventsAcceptDecision 验证硬 gate 失败时无法 accept，
-// 但可以 reject；重新打开 gate 后可以 accept。
+// 但可以 reject；reject 后 review 与 execution 进入终态。
 func TestHardGatesFailedPreventsAcceptDecision(t *testing.T) {
 	env := Start(t)
 
@@ -82,6 +95,19 @@ func TestRevisionRequestedNewExecutionCommentsIsolated(t *testing.T) {
 	review2 := env.CreateReviewViaREST(newExecutionID, []string{"go"}, "req-create-review-2")
 	env.AddCommentViaREST(review2.ID, newExecutionID, "new comment", "token-reviewer", "req-comment-2")
 
+	review2ViaAPI := env.MCP.As("token-reviewer").ReviewGet(review2.ID).Review
+	require.Equal(t, newExecutionID, review2ViaAPI.SubmissionID)
+	require.Len(t, review2ViaAPI.Comments, 1)
+	require.Equal(t, "new comment", review2ViaAPI.Comments[0].Text)
+	for _, c := range review2ViaAPI.Comments {
+		require.NotEqual(t, "old comment", c.Text)
+	}
+
+	review1ViaAPI := env.MCP.As("token-reviewer").ReviewGet(review1.ID).Review
+	require.Equal(t, claimed.ID, review1ViaAPI.SubmissionID)
+	require.Len(t, review1ViaAPI.Comments, 1)
+	require.Equal(t, "old comment", review1ViaAPI.Comments[0].Text)
+
 	oldComments := env.ListComments("tenant-1", review1.ID)
 	require.Len(t, oldComments, 1)
 	require.Equal(t, "old comment", oldComments[0].Text)
@@ -124,4 +150,15 @@ func TestCrossAgentVersionReputationIsolation(t *testing.T) {
 	require.Equal(t, 1, proj2.TotalReviews)
 	require.Equal(t, 0, proj2.AcceptedCount)
 	require.Equal(t, 1, proj2.RejectedCount)
+
+	restProj1 := env.REST.As("token-reviewer").GetReputation("acceptance-agent-1", "go", "code")
+	require.Empty(t, restProj1.Code)
+	require.Equal(t, 1, restProj1.Projection.TotalReviews)
+	require.Equal(t, 1, restProj1.Projection.AcceptedCount)
+
+	mcpProj2 := env.MCP.As("token-reviewer").ReputationGet("acceptance-agent-2", "go", "code")
+	require.Empty(t, mcpProj2.Code)
+	require.Equal(t, 1, mcpProj2.Projection.TotalReviews)
+	require.Equal(t, 1, mcpProj2.Projection.RejectedCount)
+	require.InDelta(t, 0.0, mcpProj2.Projection.PassRate, 0.0001)
 }
