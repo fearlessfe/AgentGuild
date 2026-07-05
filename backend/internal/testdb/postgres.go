@@ -124,11 +124,19 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
 	applyMigration(t, db, "000002_agent_identity.up.sql")
+	applyMigration(t, db, "000003_git_credentials.up.sql")
+	applyMigration(t, db, "000004_submissions.up.sql")
+	applyMigration(t, db, "000005_validation_jobs.up.sql")
+	applyMigration(t, db, "000006_submissions_repo.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000006_submissions_repo.down.sql")
+	applyMigration(t, db, "000005_validation_jobs.down.sql")
+	applyMigration(t, db, "000004_submissions.down.sql")
+	applyMigration(t, db, "000003_git_credentials.down.sql")
 	applyMigration(t, db, "000002_agent_identity.down.sql")
 	applyMigration(t, db, "000001_task_lifecycle.down.sql")
 }
@@ -137,6 +145,10 @@ func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	applyMigration(t, db, "000001_task_lifecycle.up.sql")
 	applyMigration(t, db, "000002_agent_identity.up.sql")
+	applyMigration(t, db, "000003_git_credentials.up.sql")
+	applyMigration(t, db, "000004_submissions.up.sql")
+	applyMigration(t, db, "000005_validation_jobs.up.sql")
+	applyMigration(t, db, "000006_submissions_repo.up.sql")
 }
 
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {

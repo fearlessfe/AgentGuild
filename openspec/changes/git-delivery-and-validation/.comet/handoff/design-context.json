@@ -4,11 +4,11 @@
   "mode": "compact",
   "canonical_spec": "openspec",
   "generated_by": "comet-handoff.sh",
-  "context_hash": "3338fdbee91dd16aed1e70e88f87fd3899d7a6b4f9138d156a611572fa348f1a",
+  "context_hash": "ab1f07effb73c5f73ea495bdbd7646860ff017b513363ca4b874254c0f68245b",
   "files": [
     { "path": "openspec/changes/git-delivery-and-validation/proposal.md", "sha256": "bdc17d9cbc366c6ca432748048e417891a98096696217628592391e5944a6bd1" },
     { "path": "openspec/changes/git-delivery-and-validation/design.md", "sha256": "2cdd5b5c70350de7404ee77007a70d4aa97e65067a893cef82736b37bf4f566c" },
-    { "path": "openspec/changes/git-delivery-and-validation/tasks.md", "sha256": "b2e81813c9f1d1c567902badc0af78050d0f6831e9c859f169be3f3aa9c232af" },
+    { "path": "openspec/changes/git-delivery-and-validation/tasks.md", "sha256": "96cccaf8c11b79cb7d5cac5c97fcf0f988111d4a0bbcacd3fea9eac286b1c605" },
     { "path": "openspec/changes/git-delivery-and-validation/specs/git-delivery/spec.md", "sha256": "c14520835a163325b220ffb07a2e87696d87f934ae68a1b7c3eac36a294f288a" },
     { "path": "openspec/changes/git-delivery-and-validation/specs/submission-validation/spec.md", "sha256": "f7478617a4a17a503616f7c4d26501adb6dea42ec4e07a328083fde9677c73f7" }
   ]

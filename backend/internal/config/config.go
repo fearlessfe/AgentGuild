@@ -24,6 +24,12 @@ type Config struct {
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
+	GitHub                                                 struct {
+		AppID          int64
+		PrivateKey     string
+		InstallationID int64
+		BaseURL        string
+	}
 }
 
 type LookupEnv func(string) string
@@ -55,6 +61,14 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.LangfuseSupportsCost, err = boolean(get, "LANGFUSE_SUPPORTS_COST", true); err != nil {
+		return Config{}, err
+	}
+	cfg.GitHub.BaseURL = value(get, "GITHUB_BASE_URL", "https://api.github.com")
+	cfg.GitHub.PrivateKey = get("GITHUB_PRIVATE_KEY")
+	if cfg.GitHub.AppID, err = integer(get, "GITHUB_APP_ID"); err != nil {
+		return Config{}, err
+	}
+	if cfg.GitHub.InstallationID, err = integer(get, "GITHUB_INSTALLATION_ID"); err != nil {
 		return Config{}, err
 	}
 	if cfg.ReaperInterval, err = duration(get, "REAPER_INTERVAL", 5*time.Second); err != nil {
@@ -153,6 +167,18 @@ func duration(get LookupEnv, key string, fallback time.Duration) (time.Duration,
 	parsed, err := time.ParseDuration(v)
 	if err != nil || parsed <= 0 {
 		return 0, fmt.Errorf("%s must be a positive duration", key)
+	}
+	return parsed, nil
+}
+
+func integer(get LookupEnv, key string) (int64, error) {
+	v := get(key)
+	if v == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer", key)
 	}
 	return parsed, nil
 }

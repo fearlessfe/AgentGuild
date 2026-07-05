@@ -95,6 +95,29 @@ func TestLoadParsesIdentityRuntimeConfiguration(t *testing.T) {
 	require.True(t, cfg.SessionCookieSecure)
 }
 
+func TestLoadParsesGitHubConfiguration(t *testing.T) {
+	env := validEnv()
+	env["GITHUB_APP_ID"] = "42"
+	env["GITHUB_INSTALLATION_ID"] = "123"
+	env["GITHUB_PRIVATE_KEY"] = "-----BEGIN RSA PRIVATE KEY-----\nMIIB"
+	env["GITHUB_BASE_URL"] = "https://github.example.com/api/v3"
+
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, int64(42), cfg.GitHub.AppID)
+	require.Equal(t, int64(123), cfg.GitHub.InstallationID)
+	require.Equal(t, "https://github.example.com/api/v3", cfg.GitHub.BaseURL)
+	require.Equal(t, "-----BEGIN RSA PRIVATE KEY-----\nMIIB", cfg.GitHub.PrivateKey)
+}
+
+func TestLoadRejectsInvalidGitHubAppID(t *testing.T) {
+	env := validEnv()
+	env["GITHUB_APP_ID"] = "not-a-number"
+
+	_, err := config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "GITHUB_APP_ID")
+}
+
 func validEnv() map[string]string {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

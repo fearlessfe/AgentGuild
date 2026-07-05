@@ -81,6 +81,7 @@ type ExecutionView struct {
 	SubmittedAt        time.Time              `json:"submitted_at,omitempty"`
 	ExpiredAt          time.Time              `json:"expired_at,omitempty"`
 	Cost               *CostView              `json:"cost,omitempty"`
+	TaskConstraints    []string               `json:"task_constraints,omitempty"`
 	AuditSummary       string                 `json:"audit_summary,omitempty"`
 }
 

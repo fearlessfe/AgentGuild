@@ -1,0 +1,1 @@
+ALTER TABLE submissions ADD COLUMN repo TEXT NOT NULL DEFAULT '';

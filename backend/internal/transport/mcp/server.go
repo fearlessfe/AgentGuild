@@ -8,6 +8,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -24,6 +25,12 @@ type applicationService interface {
 	GetExecution(ctx context.Context, principal auth.Principal, query application.GetExecution) (application.Envelope[application.ExecutionView], error)
 }
 
+// submissionService 是 MCP 层消费的 Submission 应用服务边界。
+type submissionService interface {
+	CreateSubmission(ctx context.Context, principal gitapp.Principal, command gitapp.CreateSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
+	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
+}
+
 // RateLimiter 决定请求是否被限流；若不允许，返回建议等待秒数。
 type RateLimiter interface {
 	Allow(ctx context.Context, key string) (allowed bool, retryAfter int)
@@ -35,9 +42,10 @@ func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true,
 
 // Server 暴露任务生命周期的 MCP 工具。
 type Server struct {
-	svc      applicationService
-	verifier auth.TokenVerifier
-	limiter  RateLimiter
+	svc         applicationService
+	submissions submissionService
+	verifier    auth.TokenVerifier
+	limiter     RateLimiter
 }
 
 // Option 配置 Server。
@@ -46,6 +54,11 @@ type Option func(*Server)
 // WithRateLimiter 替换默认的无限流实现。
 func WithRateLimiter(l RateLimiter) Option {
 	return func(s *Server) { s.limiter = l }
+}
+
+// WithSubmissionService 挂载 Submission 创建与查询工具。
+func WithSubmissionService(submissions submissionService) Option {
+	return func(s *Server) { s.submissions = submissions }
 }
 
 // NewServer 创建 MCP server；svc 通常是 *application.Service。
@@ -90,7 +103,7 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 		nil,
 	)
 	principal, _ := auth.PrincipalFrom(r.Context())
-	registerTools(server, s.svc, principal)
+	registerTools(server, s.svc, s.submissions, principal)
 	return server
 }
 

@@ -67,7 +67,7 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 		if err := tx.InsertExecution(ctx, execution, hash[:]); err != nil {
 			return err
 		}
-		result = executionEnvelope(execution, now, 0, nil, TaskEventSummary{})
+		result = executionEnvelope(execution, now, 0, nil, TaskEventSummary{}, taskRecord.Constraints)
 		if err := appendExecutionEvents(ctx, tx, principal, execution, "claim", string(taskRecord.Status), string(task.Status), now); err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 				return conflict("task changed concurrently")
 			}
 		}
-		result = executionEnvelope(execution, now, version+1, nil, TaskEventSummary{})
+		result = executionEnvelope(execution, now, version+1, nil, TaskEventSummary{}, taskRecord.Constraints)
 		if err := appendExecutionEvents(ctx, tx, principal, execution, intent, string(from), string(execution.Status), now); err != nil {
 			return err
 		}
@@ -211,6 +211,15 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 		if requireOwner && execution.AgentID != principal.AgentVersionID {
 			return notFound()
 		}
+		taskRecord, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		var constraints []byte
+		if err != nil {
+			if domain.CodeOf(err) != "not_found" {
+				return err
+			}
+		} else {
+			constraints = taskRecord.Constraints
+		}
 		usage, err := tx.GetExecutionUsage(ctx, principal.TenantID, query.ExecutionID)
 		if err != nil {
 			return err
@@ -219,19 +228,34 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 		if err != nil {
 			return err
 		}
-		result = executionEnvelope(execution, now, version, usage, latestEvent)
+		result = executionEnvelope(execution, now, version, usage, latestEvent, constraints)
 		return nil
 	})
 	return result, err
 }
 
-func executionEnvelope(execution *domain.Execution, now time.Time, version int64, usage *UsageView, latestEvent TaskEventSummary) Envelope[ExecutionView] {
+func parseConstraints(data []byte) []string {
+	if len(data) == 0 {
+		return nil
+	}
+	var constraints []string
+	if err := json.Unmarshal(data, &constraints); err != nil {
+		return nil
+	}
+	if len(constraints) == 0 {
+		return nil
+	}
+	return constraints
+}
+
+func executionEnvelope(execution *domain.Execution, now time.Time, version int64, usage *UsageView, latestEvent TaskEventSummary, taskConstraints []byte) Envelope[ExecutionView] {
 	view := ExecutionView{
 		ID: execution.ID, TaskID: execution.TaskID, TenantID: execution.TenantID, AgentVersionID: execution.AgentID,
 		Status: execution.Status, Stage: execution.Stage, Progress: execution.Progress,
 		LeaseGeneration: execution.Lease.Generation, LeaseSoftExpiresAt: execution.Lease.SoftExpiry, LeaseHardExpiresAt: execution.Lease.HardExpiry,
 		ClaimedAt: execution.ClaimedAt, StartedAt: execution.StartedAt, SubmittedAt: execution.SubmittedAt,
 		ExpiredAt: execution.ExpiredAt, LastHeartbeatAt: execution.LastHeartbeatAt,
+		TaskConstraints: parseConstraints(taskConstraints),
 	}
 	if usage != nil {
 		cost := CostView{Coverage: usage.Coverage, Provider: usage.Provider, ObservedAt: usage.ObservedAt}
