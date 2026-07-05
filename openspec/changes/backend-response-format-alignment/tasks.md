@@ -24,5 +24,5 @@
 
 ## 5. 文档与收尾
 
-- [ ] 5.1 更新 change tasks.md
-- [ ] 5.2 运行 Comet open 阶段守卫
+- [x] 5.1 更新 change tasks.md
+- [x] 5.2 运行 Comet open 阶段守卫
