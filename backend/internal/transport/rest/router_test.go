@@ -233,6 +233,50 @@ func TestInvalidTokenReturns401(t *testing.T) {
 	require.JSONEq(t, `{"error":{"code":"UNAUTHORIZED","message":"token verification failed"}}`, res.Body.String())
 }
 
+func TestListTasksWithSessionCookie(t *testing.T) {
+	app := &fakeApplication{}
+	server := newTestServer(app)
+	cookie := sessionCookie(t, "owner-1", false)
+	res := getWithSession(t, server, "/v1/tasks", cookie)
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, app.calls, 1)
+	require.Equal(t, auth.PrincipalTypeHuman, app.calls[0].principal.Type)
+}
+
+func TestListTasksWithBearerTokenStillWorks(t *testing.T) {
+	app := &fakeApplication{}
+	server := newTestServer(app)
+	res := get(t, server, "/v1/tasks", "token-publisher")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, app.calls, 1)
+	require.Equal(t, "publisher", app.calls[0].principal.AgentID)
+}
+
+func TestCreateReviewRequiresSession(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+	body := `{"capabilities":["go"]}`
+
+	res := postJSON(t, server, "/v1/submissions/sub-1/reviews", body, "token-publisher", "Idempotency-Key", "req-r")
+	require.Equal(t, http.StatusUnauthorized, res.Code)
+	require.Contains(t, res.Body.String(), "missing or invalid session")
+	require.Empty(t, review.calls)
+
+	res = postJSONWithSession(t, server, "/v1/submissions/sub-1/reviews", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "req-r")
+	require.Equal(t, http.StatusCreated, res.Code)
+	require.Len(t, review.calls, 1)
+}
+
+func TestPublishTaskStillRequiresBearer(t *testing.T) {
+	app := &fakeApplication{}
+	server := newTestServer(app)
+	body := `{"type":"code","title":"Fix parser","problem":"It races","deadline":"2026-07-02T11:00:00Z"}`
+	res := postJSONWithSession(t, server, "/v1/tasks", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "req-1")
+	require.Equal(t, http.StatusUnauthorized, res.Code)
+	require.JSONEq(t, `{"error":{"code":"UNAUTHORIZED","message":"missing or invalid authorization"}}`, res.Body.String())
+	require.Empty(t, app.calls)
+}
+
 func TestPublishRequiresIdempotencyKeyHeader(t *testing.T) {
 	server := newTestServer(&fakeApplication{})
 	body := `{"type":"code","title":"Fix parser","problem":"It races","deadline":"2026-07-02T11:00:00Z"}`
