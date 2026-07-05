@@ -7,13 +7,13 @@ subagent_dispatch: confirmed
 tdd_mode: tdd
 review_mode: thorough
 isolation: worktree
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: 9bfdf6900305421ec222063adde41d98960b4943
 design_doc: null
 plan: docs/superpowers/plans/2026-07-04-code-review-and-reputation.md
 verify_result: pending
-verification_report: null
+verification_report: docs/superpowers/reports/2026-07-05-code-review-and-reputation-verify.md
 branch_status: pending
 created_at: 2026-07-01
 verified_at: null
