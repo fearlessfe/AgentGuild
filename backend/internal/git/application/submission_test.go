@@ -200,6 +200,10 @@ type submissionFixture struct {
 }
 
 func newSubmissionFixture(t *testing.T) *submissionFixture {
+	return newSubmissionFixtureWithNotifier(t, nil)
+}
+
+func newSubmissionFixtureWithNotifier(t *testing.T, notifier application.ExecutionNotifier) *submissionFixture {
 	t.Helper()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
@@ -216,7 +220,7 @@ func newSubmissionFixture(t *testing.T) *submissionFixture {
 		compareFiles: []git.ChangedFile{{Filename: "src/main.go", Status: "modified"}},
 	}
 	verifier := application.NewCommitVerifier(driver, &fakeSubmissionRepository{})
-	svc, err := application.NewSubmissionService(store, verifier, sequenceIDs("sub-1"))
+	svc, err := application.NewSubmissionService(store, verifier, notifier, sequenceIDs("sub-1"))
 	require.NoError(t, err)
 	return &submissionFixture{svc: svc, store: store, driver: driver, verifier: verifier, now: now}
 }
@@ -235,4 +239,28 @@ func newSubmissionCmd() application.CreateSubmission {
 
 func agentPrincipal() application.Principal {
 	return application.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1", Scopes: []string{"tasks:execute"}}
+}
+
+func TestCreateSubmissionNotifiesExecutionSubmitted(t *testing.T) {
+	recorder := &recordingNotifier{}
+	fixture := newSubmissionFixtureWithNotifier(t, recorder)
+
+	_, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+
+	require.Len(t, recorder.calls, 1)
+	require.Equal(t, "exec-1", recorder.calls[0].ExecutionID)
+	require.Equal(t, domain.IntentSubmit, recorder.calls[0].Intent)
+	require.Equal(t, "tenant-1", recorder.calls[0].TenantID)
+	require.Equal(t, domain.ActorAgent, recorder.calls[0].Actor.Type)
+	require.Equal(t, "agent-1", recorder.calls[0].Actor.ID)
+}
+
+type recordingNotifier struct {
+	calls []application.ExecutionStateCommand
+}
+
+func (r *recordingNotifier) Notify(_ context.Context, cmd application.ExecutionStateCommand, _ time.Time) error {
+	r.calls = append(r.calls, cmd)
+	return nil
 }

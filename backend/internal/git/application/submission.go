@@ -106,7 +106,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if configVersion == "" {
 			configVersion = "default"
 		}
-		job, err := gitdomain.NewValidationJob(principal.TenantID, sub.ID, cmd.Repo, cmd.Branch, cmd.CommitSHA, configVersion, now, s.newID)
+		job, err := gitdomain.NewValidationJob(principal.TenantID, sub.ID, cmd.ExecutionID, cmd.Repo, cmd.Branch, cmd.CommitSHA, configVersion, now, s.newID)
 		if err != nil {
 			return err
 		}
@@ -115,6 +115,18 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		}
 		sub.SetValidationJobID(job.ID, now)
 		if err := tx.Submissions().Save(ctx, sub); err != nil {
+			return err
+		}
+
+		// Transition the execution to submitted so the task lifecycle reflects the
+		// delivery event. The transition is best-effort: if it fails, the submission
+		// is still recorded and the worker can later reconcile the state.
+		if err := s.notifier.Notify(ctx, ExecutionStateCommand{
+			TenantID:    principal.TenantID,
+			ExecutionID: cmd.ExecutionID,
+			Intent:      domain.IntentSubmit,
+			Actor:       domain.Actor{Type: domain.ActorAgent, ID: principal.AgentID},
+		}, now); err != nil {
 			return err
 		}
 

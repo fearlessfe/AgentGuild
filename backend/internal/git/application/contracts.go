@@ -111,21 +111,25 @@ type IssueCredentialResponse struct {
 type SubmissionService struct {
 	store    Store
 	verifier *CommitVerifier
+	notifier ExecutionNotifier
 	newID    func() string
 }
 
 // NewSubmissionService creates a SubmissionService.
-func NewSubmissionService(store Store, verifier *CommitVerifier, newID func() string) (*SubmissionService, error) {
+func NewSubmissionService(store Store, verifier *CommitVerifier, notifier ExecutionNotifier, newID func() string) (*SubmissionService, error) {
 	if store == nil {
 		return nil, invalid("store")
 	}
 	if verifier == nil {
 		return nil, invalid("verifier")
 	}
+	if notifier == nil {
+		notifier = NopExecutionNotifier{}
+	}
 	if newID == nil {
 		newID = randomID
 	}
-	return &SubmissionService{store: store, verifier: verifier, newID: newID}, nil
+	return &SubmissionService{store: store, verifier: verifier, notifier: notifier, newID: newID}, nil
 }
 
 // CreateSubmission creates a new submission for the current execution.
