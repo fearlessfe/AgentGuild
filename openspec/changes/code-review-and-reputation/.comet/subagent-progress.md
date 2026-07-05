@@ -3,10 +3,11 @@
 ## Current Task
 
 - Plan task: Task 11: React 声望页面
-- Stage: quality-review
+- Stage: final-fix
 - Review mode: thorough
 - Implementer: agent-39 (DONE, commit 9063944)
-- Reviewer: agent-40 (task_id: agent-d7ytry5v, running)
+- Reviewer: agent-40 (FAIL: 1 IMPORTANT)
+- Fixer: agent-41 (task_id: agent-luyhstt2, running)
 - Base commit: 2e713bc
 
 ## Previous Tasks
@@ -18,6 +19,5 @@
 
 ## Next
 
-- Wait for agent-40 review result.
-- If PASS: check off Task 11, then proceed to Task 12.
-- If FAIL with CRITICAL/IMPORTANT findings: dispatch fix subagent.
+- Wait for agent-41 fix result.
+- After fix, regenerate review package and re-dispatch final reviewer.
