@@ -138,7 +138,10 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
 
   const response = await fetch(base + path, { ...init, headers, body });
   if (response.status === 401) {
-    window.location.href = "/login";
+    const pathname = window.location.pathname;
+    if (!pathname.startsWith("/login") && !pathname.startsWith("/oauth/oidc/login")) {
+      window.location.href = "/login";
+    }
     throw new Error("未登录");
   }
   if (!response.ok) {

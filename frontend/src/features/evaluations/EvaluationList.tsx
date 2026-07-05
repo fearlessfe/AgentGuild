@@ -30,7 +30,8 @@ export function BenchmarkSetForm({ onCreated }: { onCreated?: () => void }) {
     onError: (err: Error) => setError(err.message),
   });
 
-  const canSubmit = name.trim().length > 0 && parseTaskRefs(tasks).length > 0;
+  const parsedTasks = parseTaskRefs(tasks);
+  const canSubmit = name.trim().length > 0 && parsedTasks.length > 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +39,7 @@ export function BenchmarkSetForm({ onCreated }: { onCreated?: () => void }) {
     mutation.mutate({
       name: name.trim(),
       description: description.trim() || undefined,
-      task_refs: parseTaskRefs(tasks),
+      task_refs: parsedTasks,
       is_active: isActive,
     });
   };
@@ -85,7 +86,7 @@ export function BenchmarkSetForm({ onCreated }: { onCreated?: () => void }) {
           设为默认基准集
         </label>
         {error ? <p className="error">{error}</p> : null}
-        <div className="agent-form-actions">
+        <div className="agent-form-actions field-span-2">
           <button type="submit" className="primary-action" disabled={!canSubmit || mutation.isPending}>
             {mutation.isPending ? "创建中…" : "创建基准集"}
           </button>

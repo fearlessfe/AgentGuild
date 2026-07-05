@@ -45,8 +45,8 @@ export type EvaluationRunView = {
   status: EvaluationRunStatus;
   environment_digest: string;
   scoring_rule_version: string;
-  threshold_results: ThresholdResultView[];
-  summary: EvaluationSummaryView;
+  threshold_results?: ThresholdResultView[];
+  summary?: EvaluationSummaryView;
   started_at: string;
   completed_at?: string;
 };

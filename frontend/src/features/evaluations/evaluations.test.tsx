@@ -96,14 +96,10 @@ describe("EvaluationDetail", () => {
   });
 
   it("renders run with missing summary and threshold results without crashing", async () => {
-    const incompleteRun = {
-      ...mockRun,
-      summary: undefined as unknown as EvaluationRunView["summary"],
-      threshold_results: undefined as unknown as EvaluationRunView["threshold_results"],
-    };
+    const incompleteRun = { ...mockRun, summary: undefined, threshold_results: undefined };
     vi.mocked(evaluationsApi.getEvaluationRun).mockResolvedValue(incompleteRun);
     renderWithProviders(<EvaluationDetail runId="run1" />);
     expect(await screen.findByText(/评测 run1/)).toBeInTheDocument();
-    expect(screen.queryByText("security")).not.toBeInTheDocument();
+    expect(screen.queryByText(/security/)).not.toBeInTheDocument();
   });
 });

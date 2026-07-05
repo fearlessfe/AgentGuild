@@ -18,6 +18,7 @@ describe("LoginPage", () => {
       writable: true,
       value: originalLocation,
     });
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
