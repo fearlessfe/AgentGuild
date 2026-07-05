@@ -15,7 +15,6 @@ import (
 // Worker scans submitted reviews and recomputes reputation projections.
 type Worker struct {
 	store     application.Store
-	projector *reputationapp.Projector
 	interval  time.Duration
 	batchSize int
 	logger    *slog.Logger
@@ -31,7 +30,6 @@ func NewWorker(store application.Store, interval time.Duration, batchSize int, l
 	}
 	return &Worker{
 		store:     store,
-		projector: reputationapp.NewProjector(),
 		interval:  interval,
 		batchSize: batchSize,
 		logger:    logger,
@@ -54,7 +52,8 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-// RunOnce processes a single batch of unprojected reviews.
+// RunOnce processes a single batch of unprojected reviews, merging new signals
+// into any existing reputation projections for the same key.
 func (w *Worker) RunOnce(ctx context.Context) error {
 	return w.store.WithTx(ctx, func(tx application.Tx) error {
 		records, err := tx.Reviews().ListUnprojected(ctx, w.batchSize)
@@ -65,27 +64,58 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			return nil
 		}
 
-		byTenant := make(map[string][]reputationdomain.ReviewSignal)
+		byTenantAgent := make(map[string]map[string][]application.ReviewSignalRecord)
 		for _, rec := range records {
-			byTenant[rec.TenantID] = append(byTenant[rec.TenantID], reputationdomain.ReviewSignal{
-				Decision:       rec.Decision,
-				CostCents:      rec.CostCents,
-				LatencyMs:      rec.LatencyMs,
-				Capability:     rec.Capability,
-				TaskType:       rec.TaskType,
-				AgentVersionID: rec.AgentVersionID,
-			})
+			agents, ok := byTenantAgent[rec.TenantID]
+			if !ok {
+				agents = make(map[string][]application.ReviewSignalRecord)
+				byTenantAgent[rec.TenantID] = agents
+			}
+			agents[rec.AgentVersionID] = append(agents[rec.AgentVersionID], rec)
 		}
 
-		for tenantID, signals := range byTenant {
-			projections, err := w.projector.Project(ctx, signals)
-			if err != nil {
-				return err
+		for tenantID, agents := range byTenantAgent {
+			projections := make(map[reputationdomain.ProjectionKey]*reputationdomain.Projection)
+			for agentVersionID := range agents {
+				existing, err := tx.ListReputationProjectionsByAgentVersion(ctx, tenantID, agentVersionID)
+				if err != nil {
+					return err
+				}
+				for _, rec := range existing {
+					p := rec.Projection
+					projections[p.Key] = &p
+				}
 			}
-			for _, p := range projections {
+
+			touched := make(map[reputationdomain.ProjectionKey]struct{})
+			for _, recs := range agents {
+				for _, rec := range recs {
+					key := reputationdomain.ProjectionKey{
+						AgentVersionID: rec.AgentVersionID,
+						Capability:     rec.Capability,
+						TaskType:       rec.TaskType,
+					}
+					p, ok := projections[key]
+					if !ok {
+						p = reputationdomain.NewProjection(rec.AgentVersionID, rec.Capability, rec.TaskType)
+						projections[key] = p
+					}
+					p.Apply(reputationdomain.ReviewSignal{
+						Decision:       rec.Decision,
+						CostCents:      rec.CostCents,
+						LatencyMs:      rec.LatencyMs,
+						Capability:     rec.Capability,
+						TaskType:       rec.TaskType,
+						AgentVersionID: rec.AgentVersionID,
+					})
+					touched[key] = struct{}{}
+				}
+			}
+
+			for key := range touched {
 				if err := tx.UpsertReputationProjection(ctx, reputationapp.ProjectionRecord{
 					TenantID:   tenantID,
-					Projection: p,
+					Projection: *projections[key],
 				}); err != nil {
 					return err
 				}

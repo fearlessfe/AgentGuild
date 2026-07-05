@@ -67,6 +67,9 @@ func Load(get LookupEnv) (Config, error) {
 	if cfg.ReputationWorkerInterval, err = duration(get, "REPUTATION_WORKER_INTERVAL", 30*time.Second); err != nil {
 		return Config{}, err
 	}
+	if cfg.ShutdownTimeout, err = duration(get, "SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
+		return Config{}, err
+	}
 	for _, required := range [][2]string{{"DATABASE_URL", cfg.DatabaseURL}, {"CURSOR_SECRET", cfg.CursorSecret}} {
 		if required[1] == "" {
 			return Config{}, fmt.Errorf("%s is required", required[0])

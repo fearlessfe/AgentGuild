@@ -18,6 +18,8 @@ type ProjectionRecord struct {
 type ProjectionRepository interface {
 	GetByKey(ctx context.Context, tenantID string, key reputationdomain.ProjectionKey) (*reputationdomain.Projection, error)
 	Save(ctx context.Context, record ProjectionRecord) error
+	Upsert(ctx context.Context, record ProjectionRecord) error
+	ListByAgentVersion(ctx context.Context, tenantID, agentVersionID string) ([]ProjectionRecord, error)
 }
 
 // SignalSource produces review signals for projection.

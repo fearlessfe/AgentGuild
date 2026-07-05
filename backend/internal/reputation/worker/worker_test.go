@@ -2,6 +2,7 @@ package worker_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -110,6 +111,37 @@ func TestWorkerRunRespectsContextCancellation(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("worker did not stop after context cancellation")
+	}
+}
+
+func TestWorkerAccumulatesProjectionsAcrossBatches(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+
+	const totalReviews = 5
+	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
+	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
+	for i := 0; i < totalReviews; i++ {
+		taskID := fmt.Sprintf("task-%d", i)
+		executionID := fmt.Sprintf("exe-%d", i)
+		reviewID := fmt.Sprintf("review-%d", i)
+		seedReviewableExecution(t, db, "tenant-1", taskID, executionID, "agent-v1", "code")
+		submitReview(t, db, "tenant-1", reviewID, executionID, reviewerID, rubricID, reviewdomain.DecisionAccepted)
+	}
+
+	w := reputationworker.NewWorker(postgres.NewStore(db), 10*time.Millisecond, 2, slog.Default())
+	for i := 0; i < 3; i++ {
+		require.NoError(t, w.RunOnce(ctx))
+	}
+
+	var total int
+	require.NoError(t, db.QueryRow(ctx, `
+		SELECT total_reviews FROM reputation_projections
+		WHERE tenant_id='tenant-1' AND agent_version_id='agent-v1' AND capability='go' AND task_type='code'`).Scan(&total))
+	require.Equal(t, totalReviews, total)
+
+	for i := 0; i < totalReviews; i++ {
+		requireReviewMarkedProjected(t, db, "tenant-1", fmt.Sprintf("review-%d", i))
 	}
 }
 

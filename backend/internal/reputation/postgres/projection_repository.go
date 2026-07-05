@@ -24,18 +24,26 @@ type queryer interface {
 }
 
 type projectionRepository struct {
-	q queryer
+	q   queryer
+	now func(context.Context) (time.Time, error)
 }
 
 // NewProjectionRepository creates a projection repository backed by a pool.
 func NewProjectionRepository(pool *pgxpool.Pool) reputationapp.ProjectionRepository {
-	return &projectionRepository{q: pool}
+	return &projectionRepository{
+		q: pool,
+		now: func(ctx context.Context) (time.Time, error) {
+			var t time.Time
+			err := pool.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&t)
+			return t, err
+		},
+	}
 }
 
 // NewProjectionRepositoryFromTx creates a projection repository bound to an
-// existing pgx transaction.
-func NewProjectionRepositoryFromTx(tx pgx.Tx) reputationapp.ProjectionRepository {
-	return &projectionRepository{q: tx}
+// existing pgx transaction. The supplied now function provides transaction-time.
+func NewProjectionRepositoryFromTx(tx pgx.Tx, now func(context.Context) (time.Time, error)) reputationapp.ProjectionRepository {
+	return &projectionRepository{q: tx, now: now}
 }
 
 // GetByKey returns the projection for a single tenant/key combination.
@@ -61,8 +69,11 @@ func (r *projectionRepository) GetByKey(ctx context.Context, tenantID string, ke
 // Save inserts a new projection. It returns an error if a projection already
 // exists for the same tenant/key.
 func (r *projectionRepository) Save(ctx context.Context, record reputationapp.ProjectionRecord) error {
-	now := time.Now()
-	_, err := r.q.Exec(ctx, `
+	t, err := r.now(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.Exec(ctx, `
 		INSERT INTO reputation_projections (
 			tenant_id, id, agent_version_id, capability, task_type,
 			total_reviews, accepted_count, rejected_count, revision_requested_count,
@@ -72,9 +83,19 @@ func (r *projectionRepository) Save(ctx context.Context, record reputationapp.Pr
 		record.TenantID, projectionID(record), record.Projection.Key.AgentVersionID, record.Projection.Key.Capability, record.Projection.Key.TaskType,
 		record.Projection.TotalReviews, record.Projection.AcceptedCount, record.Projection.RejectedCount, record.Projection.RevisionRequestedCount,
 		record.Projection.PassRate, record.Projection.ReworkRate, nullableCents(record.Projection.AvgReviewCostCents),
-		nullableMs(record.Projection.AvgReviewLatencyMs), record.Projection.SampleSizeHint, record.Projection.AlgorithmVersion, now,
+		nullableMs(record.Projection.AvgReviewLatencyMs), record.Projection.SampleSizeHint, record.Projection.AlgorithmVersion, t,
 	)
 	return err
+}
+
+// Upsert inserts or updates a projection.
+func (r *projectionRepository) Upsert(ctx context.Context, record reputationapp.ProjectionRecord) error {
+	return UpsertProjection(ctx, r.q, r.now, record)
+}
+
+// ListByAgentVersion returns all projections for an agent version scoped to a tenant.
+func (r *projectionRepository) ListByAgentVersion(ctx context.Context, tenantID, agentVersionID string) ([]reputationapp.ProjectionRecord, error) {
+	return ListProjectionsByAgentVersion(ctx, r.q, tenantID, agentVersionID)
 }
 
 // UpsertProjection inserts or updates a reputation projection within the
