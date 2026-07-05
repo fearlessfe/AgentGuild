@@ -8,6 +8,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	"agentguild.dev/agentguild/backend/internal/ratelimit"
 )
 
@@ -73,4 +74,45 @@ func (s *Service) requireLiveAgent(ctx context.Context, tx Tx, principal auth.Pr
 		return nil
 	}
 	return tx.RequireLiveAgent(ctx, principal)
+}
+
+// WithTx runs the given function inside a transaction backed by the core store.
+// It allows the core service to act as the store for cross-module notifiers.
+func (s *Service) WithTx(ctx context.Context, fn func(Tx) error) error {
+	return s.store.WithTx(ctx, fn)
+}
+
+// CoreExecutionNotifier implements git/application.ExecutionNotifier by
+// loading the execution from the core store and applying the requested intent.
+type CoreExecutionNotifier struct {
+	store Store
+}
+
+// NewCoreExecutionNotifier creates a notifier backed by the core store.
+func NewCoreExecutionNotifier(store Store) *CoreExecutionNotifier {
+	return &CoreExecutionNotifier{store: store}
+}
+
+// Notify applies the state intent to the execution in a single transaction.
+func (n *CoreExecutionNotifier) Notify(ctx context.Context, cmd gitapp.ExecutionStateCommand, now time.Time) error {
+	if cmd.TenantID == "" || cmd.ExecutionID == "" {
+		return domain.ErrForbidden
+	}
+	return n.store.WithTx(ctx, func(tx Tx) error {
+		execution, version, err := tx.GetExecution(ctx, cmd.TenantID, cmd.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if err := execution.Apply(cmd.Intent, cmd.Actor, now); err != nil {
+			return err
+		}
+		updated, err := tx.UpdateExecution(ctx, execution, version)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return domain.ErrStateConflict
+		}
+		return nil
+	})
 }
