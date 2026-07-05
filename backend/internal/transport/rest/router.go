@@ -37,6 +37,12 @@ type submissionService interface {
 	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 }
 
+type credentialService interface {
+	IssueCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.IssueCredential) (gitapp.Envelope[gitapp.IssueCredentialResponse], error)
+	GetCredential(ctx context.Context, principal gitapp.Principal, query gitapp.GetCredential) (gitapp.Envelope[gitapp.CredentialView], error)
+	RevokeCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.RevokeCredential) (gitapp.Envelope[gitapp.CredentialView], error)
+}
+
 type identityService interface {
 	RegisterAgent(context.Context, identityapp.Principal, identityapp.RegisterAgent) (identityapp.Envelope[identityapp.RegisterAgentResponse], error)
 	ListAgents(context.Context, identityapp.Principal, identityapp.ListAgents) (identityapp.Envelope[identityapp.AgentPage], error)
@@ -61,6 +67,7 @@ type socketRemoteAddrContextKey struct{}
 type Server struct {
 	svc           applicationService
 	submissions   submissionService
+	credentials   credentialService
 	identity      identityService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
@@ -85,6 +92,11 @@ func WithIdentityService(identity identityService) Option {
 // WithSubmissionService 挂载 Submission 创建与查询接口。
 func WithSubmissionService(submissions submissionService) Option {
 	return func(s *Server) { s.submissions = submissions }
+}
+
+// WithCredentialService 挂载 Git 凭证签发/查询/撤销接口。
+func WithCredentialService(credentials credentialService) Option {
+	return func(s *Server) { s.credentials = credentials }
 }
 
 // WithSession 配置人类管理端的签名 session cookie。
@@ -157,6 +169,12 @@ func (s *Server) Router() http.Handler {
 		if s.submissions != nil {
 			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/submissions", s.createSubmission)
 			r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}", s.getSubmission)
+		}
+
+		if s.credentials != nil {
+			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/credentials", s.issueCredential)
+			r.With(s.authenticate, s.rateLimit).Get("/executions/{id}/credentials", s.getCredential)
+			r.With(s.authenticate, s.rateLimit).Delete("/executions/{id}/credentials", s.revokeCredential)
 		}
 	})
 	return r
