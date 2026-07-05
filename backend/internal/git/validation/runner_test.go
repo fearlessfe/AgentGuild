@@ -159,9 +159,9 @@ func TestTempWorkspaceFactoryIsolatesJobs(t *testing.T) {
 	factory := &validation.TempWorkspaceFactory{}
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 
-	job1, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-1" })
+	job1, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-1" })
 	require.NoError(t, err)
-	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-2" })
+	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-2" })
 	require.NoError(t, err)
 
 	dir1, cleanup1, err := factory.Prepare(ctx, job1)
@@ -180,7 +180,7 @@ func TestTempWorkspaceFactoryIsolatesJobs(t *testing.T) {
 }
 
 func newJob(now time.Time) *gitdomain.ValidationJob {
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "default", now, func() string { return "job-1" })
 	if err != nil {
 		panic(err)
 	}
