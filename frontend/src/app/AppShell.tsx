@@ -5,12 +5,17 @@ import { AgentList } from "../features/agents/AgentList";
 import { AgentRegister } from "../features/agents/AgentRegister";
 import { AgentTokenReveal } from "../features/agents/AgentTokenReveal";
 import type { RegisterAgentResponse } from "../features/agents/agents.types";
+import { ReviewPage } from "../features/reviews/ReviewPage";
 import { TaskDetail } from "../features/tasks/TaskDetail";
 import { TaskList } from "../features/tasks/TaskList";
 
 export function AppShell() {
   const location = useLocation();
-  const isAgentsRoute = location.pathname.startsWith("/agents");
+  const workspace = location.pathname.startsWith("/agents")
+    ? "Agents"
+    : location.pathname.startsWith("/reviews")
+      ? "审核"
+      : "任务";
 
   return (
     <div className="app-shell">
@@ -22,6 +27,9 @@ export function AppShell() {
           ▣
         </NavLink>
         <span>⌁</span>
+        <NavLink to="/reviews" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="审核">
+          ✓
+        </NavLink>
         <span>♢</span>
         <NavLink to="/agents" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="Agents">
           ◉
@@ -35,7 +43,7 @@ export function AppShell() {
         <header className="topbar">
           <strong>AgentGuild</strong>
           <button>▣　Billing Platform　⌄</button>
-          <span>{isAgentsRoute ? "Agents" : "任务"}</span>
+          <span>{workspace}</span>
           <label>⌘ K　 搜索或执行命令…　⌕</label>
           <span className="avatar">👨🏻</span>
           <b>周昊然　⌄</b>
@@ -44,8 +52,8 @@ export function AppShell() {
           <span>⌂　仓库　<b>billing-service</b></span>
           <span>GitLab MR　<b>!284 ↗</b></span>
           <span>Commit　<b>a1b2c3d</b></span>
-          <span>Agent　<b>{isAgentsRoute ? "◉ identity workspace" : "▣ Atlas v12"}</b></span>
-          <span>状态　<b className={isAgentsRoute ? "success" : "warning"}>● {isAgentsRoute ? "healthy" : "waiting review"}</b></span>
+          <span>Agent　<b>{workspace === "Agents" ? "◉ identity workspace" : workspace === "审核" ? "✓ Review Bot" : "▣ Atlas v12"}</b></span>
+          <span>状态　<b className={workspace === "Agents" ? "success" : "warning"}>● {workspace === "Agents" ? "healthy" : "waiting review"}</b></span>
           <span>耗时　<b>2h37m</b></span>
           <span>成本　<b>$0.142</b></span>
         </div>
@@ -53,6 +61,8 @@ export function AppShell() {
           <Routes>
             <Route path="/tasks" element={<Workbench />} />
             <Route path="/tasks/:taskId" element={<Workbench />} />
+            <Route path="/reviews" element={<ReviewWorkspace />} />
+            <Route path="/reviews/:reviewId" element={<ReviewWorkspace />} />
             <Route path="/agents" element={<AgentsWorkspace />} />
             <Route path="/agents/new" element={<AgentRegistrationWorkspace />} />
             <Route path="/agents/:agentId" element={<AgentDetailWorkspace />} />
@@ -153,6 +163,23 @@ function AgentDetailWorkspace() {
       <PageHeader title="Agent 详情" subtitle="查看单个 Agent 的状态、权限与生命周期操作" action={<NavLink className="secondary-action" to="/agents">返回列表</NavLink>} />
       <div className="agent-page-body">
         <AgentDetail agentId={agentId} />
+      </div>
+    </div>
+  );
+}
+
+function ReviewWorkspace() {
+  const { reviewId } = useParams();
+
+  return (
+    <div className="observer">
+      <PageHeader title="审核" subtitle="查看提交 Diff、评分并给出审核结论" />
+      <div className="review-page-body">
+        {reviewId ? <ReviewPage /> : (
+          <aside className="review-detail empty">
+            <p>选择一次审核查看详情</p>
+          </aside>
+        )}
       </div>
     </div>
   );
