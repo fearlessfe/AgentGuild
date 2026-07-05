@@ -13,6 +13,6 @@
 
 ## 3. 评测与管理界面
 
-- [ ] 3.1 实现版本化 BenchmarkSet、EvaluationRun、硬门槛和评分规则
+- [x] 3.1 实现版本化 BenchmarkSet、EvaluationRun、硬门槛和评分规则
 - [ ] 3.2 实现 React 版本谱系、候选经验、评测、晋级和回滚界面
 - [ ] 3.3 完成经验污染、跨 tenant、基准失败和回滚验收测试

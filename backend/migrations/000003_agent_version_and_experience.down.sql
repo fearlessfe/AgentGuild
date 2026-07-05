@@ -1,3 +1,8 @@
+DROP TABLE IF EXISTS evaluation_run_results;
+DROP TABLE IF EXISTS evaluation_runs;
+DROP TABLE IF EXISTS benchmark_set_tasks;
+DROP TABLE IF EXISTS benchmark_sets;
+
 ALTER TABLE agent_versions
     DROP CONSTRAINT IF EXISTS agent_versions_parent_fk;
 
