@@ -9,6 +9,12 @@ import { ReputationPage } from "../features/reputation/ReputationPage";
 import { ReviewPage } from "../features/reviews/ReviewPage";
 import { TaskDetail } from "../features/tasks/TaskDetail";
 import { TaskList } from "../features/tasks/TaskList";
+import { ExperienceList } from "../features/experiences/ExperienceList";
+import { ExperienceReview } from "../features/experiences/ExperienceReview";
+import { EvaluationList } from "../features/evaluations/EvaluationList";
+import { VersionActions } from "../features/versions/VersionActions";
+import { VersionDetail, VersionTree } from "../features/versions/VersionTree";
+import type { VersionView } from "../features/versions/versions.types";
 
 export function AppShell() {
   const location = useLocation();
@@ -160,6 +166,7 @@ function AgentRegistrationWorkspace() {
 
 function AgentDetailWorkspace() {
   const { agentId } = useParams();
+  const [selectedVersion, setSelectedVersion] = useState<VersionView | null>(null);
 
   if (!agentId) {
     return <Navigate to="/agents" replace />;
@@ -167,9 +174,21 @@ function AgentDetailWorkspace() {
 
   return (
     <div className="observer">
-      <PageHeader title="Agent 详情" subtitle="查看单个 Agent 的状态、权限与生命周期操作" action={<NavLink className="secondary-action" to="/agents">返回列表</NavLink>} />
+      <PageHeader title="Agent 详情" subtitle="查看单个 Agent 的状态、版本谱系、经验候选与评测" action={<NavLink className="secondary-action" to="/agents">返回列表</NavLink>} />
       <div className="agent-page-body">
         <AgentDetail agentId={agentId} />
+        <div className="agent-versioning-sections">
+          <div className="versioning-pane">
+            <VersionTree agentId={agentId} onSelect={setSelectedVersion} />
+            {selectedVersion ? <VersionActions agentId={agentId} version={selectedVersion} /> : null}
+          </div>
+          <div className="versioning-pane">
+            {selectedVersion ? <VersionDetail agentId={agentId} versionId={selectedVersion.id} /> : null}
+            <ExperienceList agentId={agentId} />
+            <ExperienceReview agentId={agentId} />
+            <EvaluationList />
+          </div>
+        </div>
       </div>
     </div>
   );

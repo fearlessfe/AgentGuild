@@ -1,0 +1,40 @@
+package application
+
+import (
+	"context"
+
+	"agentguild.dev/agentguild/backend/internal/agentexperience/domain"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
+)
+
+// Policy enforces ownership and admin access for experience management.
+type Policy struct {
+	ownerProvider AgentOwnerProvider
+}
+
+// NewPolicy creates a Policy that reads agent ownership from ownerProvider.
+func NewPolicy(ownerProvider AgentOwnerProvider) *Policy {
+	return &Policy{ownerProvider: ownerProvider}
+}
+
+// RequireOwnerOrAdmin verifies that principal is either an admin or the owner
+// of the agent identified by tenantID and agentID.
+func (p *Policy) RequireOwnerOrAdmin(ctx context.Context, principal identityapp.Principal, tenantID, agentID string) error {
+	if principal.TenantID == "" {
+		return domain.ErrForbidden
+	}
+	if principal.TenantID != tenantID {
+		return domain.ErrForbidden
+	}
+	if principal.IsAdmin {
+		return nil
+	}
+	ownerID, err := p.ownerProvider.GetAgentOwner(ctx, tenantID, agentID)
+	if err != nil {
+		return domain.ErrForbidden
+	}
+	if principal.OwnerID != "" && principal.OwnerID == ownerID {
+		return nil
+	}
+	return domain.ErrForbidden
+}

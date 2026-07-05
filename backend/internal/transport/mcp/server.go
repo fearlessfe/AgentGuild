@@ -6,14 +6,18 @@ import (
 	"strconv"
 	"strings"
 
+	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
+	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// applicationService 是 MCP 层消费的应用服务边界；*application.Service 天然满足此接口。
+// applicationService 是 MCP 层消费的任务应用服务边界；*application.Service 天然满足此接口。
 type applicationService interface {
 	PublishTask(ctx context.Context, principal auth.Principal, command application.PublishTask) (application.Envelope[application.TaskView], error)
 	ListTasks(ctx context.Context, principal auth.Principal, query application.ListTasks) (application.Envelope[application.TaskPage], error)
@@ -31,6 +35,27 @@ type submissionService interface {
 	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 }
 
+// versionService 是 MCP 层消费的版本应用服务边界。
+type versionService interface {
+	ListVersions(ctx context.Context, tenantID, agentID string) ([]agentversionapp.VersionSummary, error)
+	GetVersion(ctx context.Context, tenantID, agentID, versionID string) (*agentversionapp.VersionDetail, error)
+	CreateDraft(ctx context.Context, cmd agentversionapp.CreateDraft) (*agentversionapp.CreateDraftResponse, error)
+	Promote(ctx context.Context, cmd agentversionapp.Promote) error
+	Rollback(ctx context.Context, cmd agentversionapp.Rollback) error
+}
+
+// evaluationService 是 MCP 层消费的评测应用服务边界。
+type evaluationService interface {
+	StartEvaluationRun(ctx context.Context, cmd evaluationapp.StartEvaluationRun) (*evaluationapp.StartEvaluationRunResponse, error)
+	GetEvaluationRunSummary(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*evaluationapp.EvaluationRunSummary, error)
+}
+
+// experienceService 是 MCP 层消费的经验应用服务边界。
+type experienceService interface {
+	ListCandidates(ctx context.Context, tenantID, agentID, status string) ([]agentexperienceapp.CandidateSummary, error)
+	ReviewCandidate(ctx context.Context, cmd agentexperienceapp.ReviewCandidate) error
+}
+
 // RateLimiter 决定请求是否被限流；若不允许，返回建议等待秒数。
 type RateLimiter interface {
 	Allow(ctx context.Context, key string) (allowed bool, retryAfter int)
@@ -40,12 +65,15 @@ type noopRateLimiter struct{}
 
 func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true, 0 }
 
-// Server 暴露任务生命周期、Submission 与代码评审的 MCP 工具。
+// Server 暴露任务生命周期、Submission、代码评审、版本管理与经验治理的 MCP 工具。
 type Server struct {
 	svc           applicationService
 	submissions   submissionService
 	reviewSvc     reviewService
 	reputationSvc ReputationService
+	versions      versionService
+	evaluations   evaluationService
+	experiences   experienceService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
 }
@@ -71,6 +99,21 @@ func WithReviewService(svc reviewService) Option {
 // WithReputationService 挂载声望投影 MCP 工具。
 func WithReputationService(svc ReputationService) Option {
 	return func(s *Server) { s.reputationSvc = svc }
+}
+
+// WithVersionService 注入版本管理工具所需的版本应用服务。
+func WithVersionService(svc versionService) Option {
+	return func(s *Server) { s.versions = svc }
+}
+
+// WithEvaluationService 注入评测工具所需的评测应用服务。
+func WithEvaluationService(svc evaluationService) Option {
+	return func(s *Server) { s.evaluations = svc }
+}
+
+// WithExperienceService 注入经验治理工具所需的经验应用服务。
+func WithExperienceService(svc experienceService) Option {
+	return func(s *Server) { s.experiences = svc }
 }
 
 // NewServer 创建 MCP server；svc 通常是 *application.Service。
@@ -116,6 +159,15 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 	)
 	principal, _ := auth.PrincipalFrom(r.Context())
 	registerTools(server, s.svc, s.submissions, s.reviewSvc, s.reputationSvc, principal)
+	if s.versions != nil {
+		registerAgentVersionTools(server, s.versions, principal)
+	}
+	if s.evaluations != nil {
+		registerEvaluationTools(server, s.evaluations, principal)
+	}
+	if s.experiences != nil {
+		registerExperienceTools(server, s.experiences, principal)
+	}
 	return server
 }
 

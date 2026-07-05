@@ -8,8 +8,11 @@ import (
 	"strconv"
 	"time"
 
+	agentversiondomain "agentguild.dev/agentguild/backend/internal/agentversion/domain"
+	agentexperiencedomain "agentguild.dev/agentguild/backend/internal/agentexperience/domain"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	evaluationdomain "agentguild.dev/agentguild/backend/internal/evaluation/domain"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 )
@@ -82,13 +85,10 @@ func writeFieldError(w http.ResponseWriter, status int, code, message, field str
 // mapDomainError 把领域错误映射为 HTTP 状态与响应体。
 // 对非管理员，forbidden 与 not_found 返回一致的安全响应，避免资源探测。
 func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) {
-	code := domain.CodeOf(err)
-	if code == "" {
-		code = identitydomain.CodeOf(err)
-	}
+	code := errorCodeOf(err)
 	switch code {
 	case "invalid_argument":
-		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), domain.FieldOf(err))
+		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), errorFieldOf(err))
 	case "forbidden":
 		if isAdministrator(principal) {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
@@ -114,7 +114,7 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 	case "token_revoked":
 		writeError(w, http.StatusUnauthorized, "TOKEN_REVOKED", err.Error())
 	case "rate_limited":
-		writeRateLimited(w, err.Error(), retryAfterSeconds(domain.RetryAfterOf(err)))
+		writeRateLimited(w, err.Error(), retryAfterSeconds(errorRetryAfterOf(err)))
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			writeError(w, http.StatusServiceUnavailable, "TEMPORARILY_UNAVAILABLE", "request timed out")
@@ -122,6 +122,66 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		}
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 	}
+}
+
+// errorCodeOf 尝试从所有领域包中提取稳定错误码。
+func errorCodeOf(err error) string {
+	if code := domain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := identitydomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := agentversiondomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := evaluationdomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := agentexperiencedomain.CodeOf(err); code != "" {
+		return code
+	}
+	return ""
+}
+
+// errorFieldOf 尝试从所有领域包中提取错误字段。
+func errorFieldOf(err error) string {
+	if field := domain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := identitydomain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := agentversiondomain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := evaluationdomain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := agentexperiencedomain.FieldOf(err); field != "" {
+		return field
+	}
+	return ""
+}
+
+// errorRetryAfterOf 尝试从所有领域包中提取重试等待时间。
+func errorRetryAfterOf(err error) time.Duration {
+	if d := domain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := identitydomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := agentversiondomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := evaluationdomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	if d := agentexperiencedomain.RetryAfterOf(err); d > 0 {
+		return d
+	}
+	return 0
 }
 
 func mapIdentityError(w http.ResponseWriter, err error, principal identityapp.Principal) {
