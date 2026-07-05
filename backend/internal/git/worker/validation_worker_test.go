@@ -16,7 +16,7 @@ func TestValidationWorkerClaimsPendingJob(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
 		return tx.ValidationJobs().Insert(ctx, job)
@@ -47,7 +47,7 @@ func TestValidationWorkerRespectsActiveLease(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
@@ -64,7 +64,7 @@ func TestValidationWorkerSkipsNoRunner(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
 		return tx.ValidationJobs().Insert(ctx, job)
@@ -86,7 +86,7 @@ func TestValidationWorkerRecordFailureAfterMaxAttempts(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	job.Attempt = 3
 	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
@@ -106,6 +106,74 @@ func TestValidationWorkerRecordFailureAfterMaxAttempts(t *testing.T) {
 	got, err := store.getJob("job-1")
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
+}
+
+func TestValidationWorkerRecordsFailureWhenRunnerFails(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
+	require.NoError(t, err)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		return tx.ValidationJobs().Insert(ctx, job)
+	}))
+
+	runner := &fakeRunner{failStep: gitdomain.ValidationStepBuild}
+	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, runner)
+	_, err = w.RunOnce(ctx, "tenant-1")
+	require.NoError(t, err)
+
+	got, err := store.getJob("job-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
+	require.Equal(t, gitdomain.ValidationStepStatusFailed, got.Steps[0].Status)
+}
+
+func TestValidationWorkerSucceedsWhenRunnerPassesAllSteps(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
+	require.NoError(t, err)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		return tx.ValidationJobs().Insert(ctx, job)
+	}))
+
+	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, &fakeRunner{})
+	processed, err := w.RunOnce(ctx, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+
+	got, err := store.getJob("job-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.ValidationStatusSucceeded, got.Status)
+	for _, step := range got.Steps {
+		require.Equal(t, gitdomain.ValidationStepStatusSucceeded, step.Status)
+	}
+}
+
+type fakeRunner struct {
+	failStep gitdomain.ValidationStep
+}
+
+func (r *fakeRunner) RunStep(_ context.Context, _ *gitdomain.ValidationJob, step gitdomain.ValidationStep) (gitdomain.Step, error) {
+	now := time.Now()
+	if step == r.failStep {
+		return gitdomain.Step{
+			Step:       step,
+			Status:     gitdomain.ValidationStepStatusFailed,
+			LogSummary: "step failed",
+			StartedAt:  &now,
+			FinishedAt: &now,
+		}, nil
+	}
+	return gitdomain.Step{
+		Step:       step,
+		Status:     gitdomain.ValidationStepStatusSucceeded,
+		LogSummary: "ok",
+		StartedAt:  &now,
+		FinishedAt: &now,
+	}, nil
 }
 
 type memoryStore struct {

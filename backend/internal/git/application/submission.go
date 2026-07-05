@@ -105,7 +105,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if configVersion == "" {
 			configVersion = "default"
 		}
-		job, err := gitdomain.NewValidationJob(principal.TenantID, sub.ID, configVersion, now, s.newID)
+		job, err := gitdomain.NewValidationJob(principal.TenantID, sub.ID, cmd.Repo, cmd.Branch, cmd.CommitSHA, configVersion, now, s.newID)
 		if err != nil {
 			return err
 		}

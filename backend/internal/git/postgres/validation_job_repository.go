@@ -35,10 +35,10 @@ func (r *validationJobRepository) Insert(ctx context.Context, job *gitdomain.Val
 	}
 	_, err = r.q.Exec(ctx, `
 		INSERT INTO validation_jobs (
-			id, tenant_id, submission_id, status, attempt,
+			id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
 			claimed_until, claimed_by, config_version, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		job.ID, job.TenantID, job.SubmissionID, string(job.Status), job.Attempt,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		job.ID, job.TenantID, job.SubmissionID, job.Repo, job.Branch, job.CommitSHA, string(job.Status), job.Attempt,
 		job.ClaimedUntil, job.ClaimedBy, job.ConfigVersion, job.CreatedAt, job.UpdatedAt,
 	)
 	if err != nil {
@@ -55,7 +55,7 @@ func (r *validationJobRepository) Insert(ctx context.Context, job *gitdomain.Val
 
 func (r *validationJobRepository) GetByID(ctx context.Context, tenantID, id string) (*gitdomain.ValidationJob, error) {
 	job, err := r.scanJob(r.q.QueryRow(ctx, `
-		SELECT id, tenant_id, submission_id, status, attempt,
+		SELECT id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
 		       claimed_until, claimed_by, config_version, created_at, updated_at
 		FROM validation_jobs
 		WHERE tenant_id=$1 AND id=$2`,
@@ -77,7 +77,7 @@ func (r *validationJobRepository) GetByID(ctx context.Context, tenantID, id stri
 
 func (r *validationJobRepository) GetBySubmissionID(ctx context.Context, tenantID, submissionID string) (*gitdomain.ValidationJob, error) {
 	job, err := r.scanJob(r.q.QueryRow(ctx, `
-		SELECT id, tenant_id, submission_id, status, attempt,
+		SELECT id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
 		       claimed_until, claimed_by, config_version, created_at, updated_at
 		FROM validation_jobs
 		WHERE tenant_id=$1 AND submission_id=$2`,
@@ -114,7 +114,7 @@ func (r *validationJobRepository) ClaimNextPending(ctx context.Context, tenantID
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING id, tenant_id, submission_id, status, attempt,
+		RETURNING id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
 		          claimed_until, claimed_by, config_version, created_at, updated_at`,
 		tenantID, now, until, workerID,
 	))
@@ -208,7 +208,7 @@ func (r *validationJobRepository) scanJob(row scanner) (*gitdomain.ValidationJob
 	var job gitdomain.ValidationJob
 	var status string
 	err := row.Scan(
-		&job.ID, &job.TenantID, &job.SubmissionID, &status, &job.Attempt,
+		&job.ID, &job.TenantID, &job.SubmissionID, &job.Repo, &job.Branch, &job.CommitSHA, &status, &job.Attempt,
 		&job.ClaimedUntil, &job.ClaimedBy, &job.ConfigVersion, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {

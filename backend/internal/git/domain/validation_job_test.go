@@ -13,19 +13,28 @@ func TestNewValidationJobRequiresFields(t *testing.T) {
 	now := time.Now()
 	newID := func() string { return "job-1" }
 
-	_, err := gitdomain.NewValidationJob("", "sub-1", "v1", now, newID)
+	_, err := gitdomain.NewValidationJob("", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, newID)
 	require.Equal(t, "invalid_argument", domain.CodeOf(err))
 
-	_, err = gitdomain.NewValidationJob("tenant-1", "", "v1", now, newID)
+	_, err = gitdomain.NewValidationJob("tenant-1", "", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, newID)
 	require.Equal(t, "invalid_argument", domain.CodeOf(err))
 
-	_, err = gitdomain.NewValidationJob("tenant-1", "sub-1", "", now, newID)
+	_, err = gitdomain.NewValidationJob("tenant-1", "sub-1", "", "agentguild/exec-1", "head-sha", "v1", now, newID)
+	require.Equal(t, "invalid_argument", domain.CodeOf(err))
+
+	_, err = gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "", "head-sha", "v1", now, newID)
+	require.Equal(t, "invalid_argument", domain.CodeOf(err))
+
+	_, err = gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "", "v1", now, newID)
+	require.Equal(t, "invalid_argument", domain.CodeOf(err))
+
+	_, err = gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "", now, newID)
 	require.Equal(t, "invalid_argument", domain.CodeOf(err))
 }
 
 func TestNewValidationJobCreatesPendingJobWithDefaultSteps(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.Equal(t, "job-1", job.ID)
 	require.Equal(t, gitdomain.ValidationStatusPending, job.Status)
@@ -38,7 +47,7 @@ func TestNewValidationJobCreatesPendingJobWithDefaultSteps(t *testing.T) {
 
 func TestClaimTransitionsToRunning(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 
 	until := now.Add(5 * time.Minute)
@@ -52,7 +61,7 @@ func TestClaimTransitionsToRunning(t *testing.T) {
 
 func TestClaimRejectsActiveLease(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 
@@ -62,7 +71,7 @@ func TestClaimRejectsActiveLease(t *testing.T) {
 
 func TestClaimAllowsExpiredLease(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 
@@ -74,7 +83,7 @@ func TestClaimAllowsExpiredLease(t *testing.T) {
 
 func TestStartStepRequiresRunningState(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 
 	err = job.StartStep(gitdomain.ValidationStepBuild, now)
@@ -83,7 +92,7 @@ func TestStartStepRequiresRunningState(t *testing.T) {
 
 func TestFinishStepAdvancesState(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 	require.NoError(t, job.StartStep(gitdomain.ValidationStepBuild, now))
@@ -96,7 +105,7 @@ func TestFinishStepAdvancesState(t *testing.T) {
 
 func TestFinishStepFailsHardGate(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 	require.NoError(t, job.StartStep(gitdomain.ValidationStepBuild, now))
@@ -109,7 +118,7 @@ func TestFinishStepFailsHardGate(t *testing.T) {
 
 func TestFinishStepSucceedsWhenAllStepsDone(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 
@@ -124,7 +133,7 @@ func TestFinishStepSucceedsWhenAllStepsDone(t *testing.T) {
 
 func TestCancelPendingJob(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 
 	require.NoError(t, job.Cancel(now))
@@ -133,7 +142,7 @@ func TestCancelPendingJob(t *testing.T) {
 
 func TestCancelCompletedJobFails(t *testing.T) {
 	now := time.Now()
-	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "v1", now, func() string { return "job-1" })
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
 	require.NoError(t, err)
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 	for _, step := range gitdomain.DefaultValidationSteps {

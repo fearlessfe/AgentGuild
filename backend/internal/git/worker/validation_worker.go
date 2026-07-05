@@ -138,8 +138,8 @@ func (w *ValidationWorker) runStep(ctx context.Context, job *gitdomain.Validatio
 			return err
 		}
 
-		// Run the step outside the claim transaction so long-running work
-		// does not hold the row lock.
+		// Run the step. In a future version the runner will execute outside this
+		// transaction so long-running work does not hold the row lock.
 		if w.runner == nil {
 			result := gitdomain.Step{
 				Step:       step,
@@ -155,15 +155,15 @@ func (w *ValidationWorker) runStep(ctx context.Context, job *gitdomain.Validatio
 			return tx.ValidationJobs().Update(ctx, fresh)
 		}
 
-		// Start step outside transaction not possible with current interface;
-		// runner is called after the transaction commits in a full implementation.
-		// For Task 3.1 we mark steps as skipped to exercise the state machine.
-		result := gitdomain.Step{
-			Step:       step,
-			Status:     gitdomain.ValidationStepStatusSkipped,
-			LogSummary: "step runner not yet implemented",
+		result, err := w.runner.RunStep(ctx, fresh, step)
+		if err != nil {
+			return err
 		}
-		if err := fresh.FinishStep(step, gitdomain.ValidationStepStatusSkipped, result.LogSummary, nil, now); err != nil {
+		var usage []byte
+		if len(result.ResourceUsage) > 0 {
+			usage = result.ResourceUsage
+		}
+		if err := fresh.FinishStep(step, result.Status, result.LogSummary, usage, *result.FinishedAt); err != nil {
 			return err
 		}
 		if err := tx.ValidationJobs().UpdateStep(ctx, fresh.TenantID, fresh.ID, result); err != nil {

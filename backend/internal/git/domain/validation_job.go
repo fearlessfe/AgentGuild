@@ -68,6 +68,9 @@ type ValidationJob struct {
 	ID            string
 	TenantID      string
 	SubmissionID  string
+	Repo          string
+	Branch        string
+	CommitSHA     string
 	Status        ValidationStatus
 	Attempt       int
 	ClaimedUntil  *time.Time
@@ -90,12 +93,21 @@ type Step struct {
 }
 
 // NewValidationJob creates a pending validation job for the submission.
-func NewValidationJob(tenantID, submissionID, configVersion string, now time.Time, newID func() string) (*ValidationJob, error) {
+func NewValidationJob(tenantID, submissionID, repo, branch, commitSHA, configVersion string, now time.Time, newID func() string) (*ValidationJob, error) {
 	if tenantID == "" {
 		return nil, validationJobInvalidArgument("tenant_id")
 	}
 	if submissionID == "" {
 		return nil, validationJobInvalidArgument("submission_id")
+	}
+	if repo == "" {
+		return nil, validationJobInvalidArgument("repo")
+	}
+	if branch == "" {
+		return nil, validationJobInvalidArgument("branch")
+	}
+	if commitSHA == "" {
+		return nil, validationJobInvalidArgument("commit_sha")
 	}
 	if configVersion == "" {
 		return nil, validationJobInvalidArgument("config_version")
@@ -120,6 +132,9 @@ func NewValidationJob(tenantID, submissionID, configVersion string, now time.Tim
 		ID:            id,
 		TenantID:      tenantID,
 		SubmissionID:  submissionID,
+		Repo:          repo,
+		Branch:        branch,
+		CommitSHA:     commitSHA,
 		Status:        ValidationStatusPending,
 		Attempt:       0,
 		ConfigVersion: configVersion,
