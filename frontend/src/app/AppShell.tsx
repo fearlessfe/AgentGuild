@@ -5,6 +5,7 @@ import { AgentList } from "../features/agents/AgentList";
 import { AgentRegister } from "../features/agents/AgentRegister";
 import { AgentTokenReveal } from "../features/agents/AgentTokenReveal";
 import type { RegisterAgentResponse } from "../features/agents/agents.types";
+import { ReputationPage } from "../features/reputation/ReputationPage";
 import { ReviewPage } from "../features/reviews/ReviewPage";
 import { TaskDetail } from "../features/tasks/TaskDetail";
 import { TaskList } from "../features/tasks/TaskList";
@@ -13,6 +14,7 @@ export function AppShell() {
   const location = useLocation();
   const workspace = useMemo(() => {
     if (location.pathname.startsWith("/agents")) return "Agents";
+    if (location.pathname.startsWith("/reputation")) return "声望";
     if (location.pathname.startsWith("/reviews")) return "审核";
     return "任务";
   }, [location.pathname]);
@@ -29,6 +31,10 @@ export function AppShell() {
         <span>⌁</span>
         <NavLink to="/reviews" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="审核">
           ✓
+        </NavLink>
+        <span>★</span>
+        <NavLink to="/reputation" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="声望">
+          ♛
         </NavLink>
         <span>♢</span>
         <NavLink to="/agents" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="Agents">
@@ -63,6 +69,7 @@ export function AppShell() {
             <Route path="/tasks/:taskId" element={<Workbench />} />
             <Route path="/reviews" element={<ReviewWorkspace />} />
             <Route path="/reviews/:reviewId" element={<ReviewWorkspace />} />
+            <Route path="/reputation" element={<ReputationWorkspace />} />
             <Route path="/agents" element={<AgentsWorkspace />} />
             <Route path="/agents/new" element={<AgentRegistrationWorkspace />} />
             <Route path="/agents/:agentId" element={<AgentDetailWorkspace />} />
@@ -180,6 +187,17 @@ export function ReviewWorkspace() {
             <p>选择一次审核查看详情</p>
           </aside>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ReputationWorkspace() {
+  return (
+    <div className="observer">
+      <PageHeader title="声望" subtitle="按 Agent 版本、能力与任务类型查看评审声誉投影" />
+      <div className="reputation-page-body">
+        <ReputationPage />
       </div>
     </div>
   );

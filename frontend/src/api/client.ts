@@ -515,5 +515,25 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({ data: updatedAgent, meta: demoMeta });
   }
 
+  if (url.pathname === "/v1/reputation" && method === "GET") {
+    const agentVersionId = url.searchParams.get("agent_version_id") ?? "agent-v12";
+    const capability = url.searchParams.get("capability") ?? "code-review";
+    const taskType = url.searchParams.get("task_type") ?? "typescript";
+    return clone({
+      data: {
+        agent_version_id: agentVersionId,
+        capability,
+        task_type: taskType,
+        total_reviews: 12,
+        pass_rate: 0.75,
+        rework_rate: 0.17,
+        avg_review_cost_cents: 120,
+        avg_review_latency_ms: 3450,
+        sample_size_hint: "medium",
+      },
+      meta: demoMeta,
+    });
+  }
+
   throw new Error(`Unsupported demo route: ${method} ${url.pathname}`);
 }
