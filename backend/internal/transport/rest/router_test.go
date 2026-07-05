@@ -191,6 +191,7 @@ func (v *tokenVerifier) Verify(ctx context.Context, rawToken string) (auth.Princ
 }
 
 func newTestServer(app *fakeApplication, opts ...rest.Option) http.Handler {
+	opts = append([]rest.Option{rest.WithSession(testSessionSecret, false)}, opts...)
 	return rest.NewServer(app, &tokenVerifier{}, opts...).Router()
 }
 
@@ -482,7 +483,7 @@ func TestGetReview(t *testing.T) {
 func TestCreateReview(t *testing.T) {
 	review := &fakeReviewService{}
 	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
-	res := postJSON(t, server, "/v1/submissions/sub-1/reviews", `{"capabilities":["go"]}`, "token-publisher", "Idempotency-Key", "req-r")
+	res := postJSONWithSession(t, server, "/v1/submissions/sub-1/reviews", `{"capabilities":["go"]}`, sessionCookie(t, "owner-1", false), "Idempotency-Key", "req-r")
 	require.Equal(t, http.StatusCreated, res.Code)
 	require.Len(t, review.calls, 1)
 	cmd := review.calls[0].payload.(reviewapp.CreateReview)
@@ -494,7 +495,7 @@ func TestCreateReview(t *testing.T) {
 func TestCreateReviewRequiresIdempotencyKey(t *testing.T) {
 	review := &fakeReviewService{}
 	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
-	res := postJSON(t, server, "/v1/submissions/sub-1/reviews", `{}`, "token-publisher")
+	res := postJSONWithSession(t, server, "/v1/submissions/sub-1/reviews", `{}`, sessionCookie(t, "owner-1", false))
 	require.Equal(t, http.StatusBadRequest, res.Code)
 	require.Contains(t, res.Body.String(), "idempotency_key")
 }
