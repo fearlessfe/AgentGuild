@@ -21,6 +21,8 @@ type Config struct {
 	MCPEnabled, WebEnabled, LangfuseEnabled                bool
 	SessionCookieSecure                                    bool
 	ReaperInterval, OutboxInterval, ShutdownTimeout        time.Duration
+	ValidationWorkerInterval, ValidationLease              time.Duration
+	ValidationMaxAttempts                                  int
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
@@ -79,6 +81,21 @@ func Load(get LookupEnv) (Config, error) {
 	}
 	if cfg.ShutdownTimeout, err = duration(get, "SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
 		return Config{}, err
+	}
+	if cfg.ValidationWorkerInterval, err = duration(get, "VALIDATION_WORKER_INTERVAL", 10*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.ValidationLease, err = duration(get, "VALIDATION_LEASE", 5*time.Minute); err != nil {
+		return Config{}, err
+	}
+	var maxAttempts int64
+	if maxAttempts, err = integer(get, "VALIDATION_MAX_ATTEMPTS"); err != nil {
+		return Config{}, err
+	}
+	if maxAttempts == 0 {
+		cfg.ValidationMaxAttempts = 3
+	} else {
+		cfg.ValidationMaxAttempts = int(maxAttempts)
 	}
 	for _, required := range [][2]string{{"DATABASE_URL", cfg.DatabaseURL}, {"CURSOR_SECRET", cfg.CursorSecret}} {
 		if required[1] == "" {
