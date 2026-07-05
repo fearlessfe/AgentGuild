@@ -31,6 +31,13 @@ type submissionService interface {
 	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 }
 
+// credentialService 是 MCP 层消费的 Git 凭证应用服务边界。
+type credentialService interface {
+	IssueCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.IssueCredential) (gitapp.Envelope[gitapp.IssueCredentialResponse], error)
+	GetCredential(ctx context.Context, principal gitapp.Principal, query gitapp.GetCredential) (gitapp.Envelope[gitapp.CredentialView], error)
+	RevokeCredential(ctx context.Context, principal gitapp.Principal, cmd gitapp.RevokeCredential) (gitapp.Envelope[gitapp.CredentialView], error)
+}
+
 // RateLimiter 决定请求是否被限流；若不允许，返回建议等待秒数。
 type RateLimiter interface {
 	Allow(ctx context.Context, key string) (allowed bool, retryAfter int)
@@ -44,6 +51,7 @@ func (noopRateLimiter) Allow(context.Context, string) (bool, int) { return true,
 type Server struct {
 	svc         applicationService
 	submissions submissionService
+	credentials credentialService
 	verifier    auth.TokenVerifier
 	limiter     RateLimiter
 }
@@ -59,6 +67,11 @@ func WithRateLimiter(l RateLimiter) Option {
 // WithSubmissionService 挂载 Submission 创建与查询工具。
 func WithSubmissionService(submissions submissionService) Option {
 	return func(s *Server) { s.submissions = submissions }
+}
+
+// WithCredentialService 挂载 Git 凭证 MCP 工具。
+func WithCredentialService(credentials credentialService) Option {
+	return func(s *Server) { s.credentials = credentials }
 }
 
 // NewServer 创建 MCP server；svc 通常是 *application.Service。
@@ -103,7 +116,7 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 		nil,
 	)
 	principal, _ := auth.PrincipalFrom(r.Context())
-	registerTools(server, s.svc, s.submissions, principal)
+	registerTools(server, s.svc, s.submissions, s.credentials, principal)
 	return server
 }
 

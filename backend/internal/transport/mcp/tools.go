@@ -93,9 +93,27 @@ type GetSubmissionInput struct {
 	SubmissionID string `json:"submission_id" jsonschema:"submission identifier"`
 }
 
-// registerTools 注册任务生命周期与 Submission 工具。
+// IssueCredentialInput 是 credential_issue 工具的输入。
+type IssueCredentialInput struct {
+	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
+	Repo        string `json:"repo" jsonschema:"repository in owner/name format"`
+	Branch      string `json:"branch,omitempty" jsonschema:"optional restricted branch"`
+	BaseCommit  string `json:"base_commit" jsonschema:"base commit sha"`
+}
+
+// GetCredentialInput 是 credential_get 工具的输入。
+type GetCredentialInput struct {
+	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
+}
+
+// RevokeCredentialInput 是 credential_revoke 工具的输入。
+type RevokeCredentialInput struct {
+	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
+}
+
+// registerTools 注册任务生命周期、Submission 与 Credential 工具。
 // Principal 已按请求注入，每个 handler 只调用共享 applicationService。
-func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, principal auth.Principal) {
+func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, credentials credentialService, principal auth.Principal) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_publish",
 		Description: "发布新任务",
@@ -262,6 +280,46 @@ func registerTools(server *mcp.Server, svc applicationService, submissions submi
 				return mapDomainError(err, principal), nil, nil
 			}
 			_, err = svc.GetExecution(ctx, principal, application.GetExecution{ExecutionID: result.Data.ExecutionID})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			return successResult(result), nil, nil
+		})
+	}
+
+	if credentials != nil {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "credential_issue",
+			Description: "为执行签发短期 Git 凭证",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input IssueCredentialInput) (*mcp.CallToolResult, any, error) {
+			result, err := credentials.IssueCredential(ctx, gitPrincipal(principal), gitapp.IssueCredential{
+				ExecutionID: input.ExecutionID,
+				Repo:        input.Repo,
+				Branch:      input.Branch,
+				BaseCommit:  input.BaseCommit,
+			})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			return successResult(result), nil, nil
+		})
+
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "credential_get",
+			Description: "查询执行关联的凭证元数据",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input GetCredentialInput) (*mcp.CallToolResult, any, error) {
+			result, err := credentials.GetCredential(ctx, gitPrincipal(principal), gitapp.GetCredential{ExecutionID: input.ExecutionID})
+			if err != nil {
+				return mapDomainError(err, principal), nil, nil
+			}
+			return successResult(result), nil, nil
+		})
+
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "credential_revoke",
+			Description: "撤销执行关联的凭证",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input RevokeCredentialInput) (*mcp.CallToolResult, any, error) {
+			result, err := credentials.RevokeCredential(ctx, gitPrincipal(principal), gitapp.RevokeCredential{ExecutionID: input.ExecutionID})
 			if err != nil {
 				return mapDomainError(err, principal), nil, nil
 			}
