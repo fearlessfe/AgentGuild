@@ -2,6 +2,8 @@
 comet_change: agent-version-and-experience
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-05-agent-version-and-experience
+status: final
 ---
 
 # Agent Version and Experience 技术设计

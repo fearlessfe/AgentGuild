@@ -2,6 +2,7 @@
 change: agent-version-and-experience
 design-doc: docs/superpowers/specs/2026-07-04-agent-version-and-experience-design.md
 base-ref: 9bfdf6900305421ec222063adde41d98960b4943
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 # Agent Version and Experience Implementation Plan
@@ -93,6 +94,7 @@ frontend/
 openspec/changes/agent-version-and-experience/tasks.md  任务边界勾选更新
 ```
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Task 1: 建立 agentversion 领域模型与不可变版本
@@ -250,6 +252,7 @@ Run: `cd backend && go test ./internal/agentversion/application -count=1`
 
 File: `openspec/changes/agent-version-and-experience/tasks.md`
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Task 2: 建立 evaluation 模块与硬门槛评测
@@ -379,6 +382,7 @@ Run: `cd backend && go test ./internal/evaluation/application -count=1`
 
 - [x] **Step 8: 更新 tasks.md 勾选 Task 2 的 3.1**
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Task 3: 建立 agentexperience 模块与经验治理
@@ -504,6 +508,7 @@ Run: `cd backend && go test ./internal/agentexperience/application -count=1`
 
 - [x] **Step 9: 更新 tasks.md 勾选 Task 3 的 2.1–2.3**
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Task 4: REST、MCP Transport 与权限策略
@@ -579,6 +584,7 @@ Run: `cd backend && go test ./internal/transport/rest -run 'AgentVersion|Experie
 Update `backend/internal/transport/rest/openapi.yaml`:
 - 新增版本、经验、评测相关 paths 和 schemas。
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Task 5: React 管理界面
@@ -640,6 +646,7 @@ Expected: PASS。
 
 - [x] **Step 6: 更新 tasks.md 勾选 Task 3 的 3.2–3.3**
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Task 6: 端到端验证与任务收尾
@@ -696,6 +703,7 @@ File: `openspec/changes/agent-version-and-experience/tasks.md`
 
 All items should be `- [x]`.
 
+archived-with: 2026-07-05-agent-version-and-experience
 ---
 
 ## Implementation Order
