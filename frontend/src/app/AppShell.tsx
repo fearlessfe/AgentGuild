@@ -58,7 +58,7 @@ export function AppShell() {
           <span>⌂　仓库　<b>billing-service</b></span>
           <span>GitLab MR　<b>!284 ↗</b></span>
           <span>Commit　<b>a1b2c3d</b></span>
-          <span>Agent　<b>{workspace === "Agents" ? "◉ identity workspace" : workspace === "审核" ? "✓ Review Bot" : "▣ Atlas v12"}</b></span>
+          <span>Agent　<b>{workspace === "Agents" ? "◉ identity workspace" : workspace === "审核" ? "✓ Review Bot" : workspace === "声望" ? "♛ Reputation Lens" : "▣ Atlas v12"}</b></span>
           <span>状态　<b className={workspace === "Agents" ? "success" : "warning"}>● {workspace === "Agents" ? "healthy" : "waiting review"}</b></span>
           <span>耗时　<b>2h37m</b></span>
           <span>成本　<b>$0.142</b></span>

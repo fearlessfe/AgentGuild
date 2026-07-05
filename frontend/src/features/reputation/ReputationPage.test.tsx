@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { envelope } from "../../api/fixtures";
 import { ReputationPage } from "./ReputationPage";
@@ -37,12 +37,18 @@ function projectionFixture(overrides?: Partial<ProjectionView>): ProjectionView 
   };
 }
 
-function mockReputationResponse(projection: ProjectionView) {
+function LocationDisplay() {
+  const location = useLocation();
+  return <span data-testid="location-search">{location.search}</span>;
+}
+
+function mockReputationResponse(projection: ProjectionView | ((url: URL) => ProjectionView)) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
     const method = (init as RequestInit | undefined)?.method ?? "GET";
     if (url.pathname === "/api/v1/reputation" && method === "GET") {
-      return Promise.resolve(new Response(JSON.stringify(envelope(projection)), { status: 200 }));
+      const body = typeof projection === "function" ? projection(url) : projection;
+      return Promise.resolve(new Response(JSON.stringify(envelope(body)), { status: 200 }));
     }
     return Promise.resolve(new Response(JSON.stringify({ error: { message: "not found" } }), { status: 404 }));
   });
@@ -76,7 +82,10 @@ describe("ReputationPage", () => {
 
     renderWithProviders(
       <Routes>
-        <Route path="/reputation" element={<ReputationPage />} />
+        <Route path="/reputation" element={<>
+          <ReputationPage />
+          <LocationDisplay />
+        </>} />
       </Routes>,
     );
 
@@ -91,8 +100,56 @@ describe("ReputationPage", () => {
     expect(requestUrl.searchParams.get("agent_version_id")).toBe("agent-v2");
     expect(requestUrl.searchParams.get("capability")).toBe("code-review");
     expect(requestUrl.searchParams.get("task_type")).toBe("go");
+
+    expect(screen.getByTestId("location-search").textContent).toBe(
+      "?agent_version_id=agent-v2&capability=code-review&task_type=go",
+    );
   });
 
+  it("reflects URL changes when navigating back or externally", async () => {
+    function Navigation() {
+      const navigate = useNavigate();
+      return (
+        <button onClick={() => navigate("/reputation?agent_version_id=agent-v2&capability=code-review&task_type=go")}>
+          切换 URL
+        </button>
+      );
+    }
+
+    const fetchMock = mockReputationResponse((url) => {
+      const agentVersionId = url.searchParams.get("agent_version_id");
+      return projectionFixture({
+        agent_version_id: agentVersionId ?? "agent-v12",
+        total_reviews: agentVersionId === "agent-v2" ? 99 : 12,
+      });
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/reputation" element={<>
+          <ReputationPage />
+          <Navigation />
+          <LocationDisplay />
+        </>} />
+      </Routes>,
+      { initialEntries: ["/reputation?agent_version_id=agent-v12&capability=code-review&task_type=typescript"] },
+    );
+
+    expect(await screen.findByText("12")).toBeVisible();
+    expect(screen.getByTestId("location-search").textContent).toBe(
+      "?agent_version_id=agent-v12&capability=code-review&task_type=typescript",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /切换 URL/i }));
+
+    await waitFor(() => expect(screen.getByText("99")).toBeVisible());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requestUrl = new URL(String(fetchMock.mock.calls[1][0]), "http://localhost");
+    expect(requestUrl.searchParams.get("agent_version_id")).toBe("agent-v2");
+    expect(screen.getByTestId("location-search").textContent).toBe(
+      "?agent_version_id=agent-v2&capability=code-review&task_type=go",
+    );
+  });
   it("shows a placeholder when no filters are committed", async () => {
     renderWithProviders(
       <Routes>

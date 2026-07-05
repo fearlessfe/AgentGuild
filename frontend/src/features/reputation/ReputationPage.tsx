@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { getReputationProjection } from "./reputation.api";
 import type { ProjectionView } from "./reputation.types";
 
@@ -47,7 +47,14 @@ export function ReputationPage() {
     taskType: searchParams.get("task_type") ?? "",
   });
 
-  const [filters, setFilters] = useState(form);
+  const filters = useMemo(
+    () => ({
+      agentVersionId: searchParams.get("agent_version_id") ?? "",
+      capability: searchParams.get("capability") ?? "",
+      taskType: searchParams.get("task_type") ?? "",
+    }),
+    [searchParams],
+  );
 
   const query = useQuery({
     queryKey: ["reputation", filters],
@@ -58,7 +65,6 @@ export function ReputationPage() {
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setFilters(form);
 
     const next = new URLSearchParams();
     if (form.agentVersionId) next.set("agent_version_id", form.agentVersionId);

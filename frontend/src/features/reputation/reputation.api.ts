@@ -1,4 +1,4 @@
-import { apiRequest } from "../../api/client";
+import { apiRequest, type Envelope } from "../../api/client";
 import type { ProjectionView } from "./reputation.types";
 
 export type ReputationFilters = {
@@ -7,7 +7,7 @@ export type ReputationFilters = {
   taskType?: string;
 };
 
-export async function getReputationProjection(filters: ReputationFilters = {}) {
+export async function getReputationProjection(filters: ReputationFilters = {}): Promise<Envelope<ProjectionView>> {
   const params = new URLSearchParams();
   if (filters.agentVersionId) {
     params.set("agent_version_id", filters.agentVersionId);
