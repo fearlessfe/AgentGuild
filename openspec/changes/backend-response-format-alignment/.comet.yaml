@@ -13,8 +13,8 @@ base_ref: cf0c6c84ba02d2fbf9657249c746da9de281f270
 design_doc: docs/superpowers/specs/2026-07-05-backend-response-format-alignment-design.md
 plan: docs/superpowers/plans/2026-07-05-backend-response-format-alignment.md
 verify_result: pending
-verification_report: null
-branch_status: pending
+verification_report: docs/superpowers/reports/2026-07-05-backend-response-format-alignment-verify.md
+branch_status: handled
 created_at: 2026-07-05
 verified_at: null
 archived: false
