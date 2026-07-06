@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 context_compression: off
 build_mode: executing-plans
 build_pause: null
@@ -7,7 +7,7 @@ subagent_dispatch: null
 tdd_mode: tdd
 review_mode: standard
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: 735b57e936941e4cb49b98e0237c555863cf977b
 design_doc: docs/superpowers/specs/2026-07-06-github-app-integration-design.md
