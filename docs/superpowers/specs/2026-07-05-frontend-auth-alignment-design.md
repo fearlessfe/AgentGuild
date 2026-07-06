@@ -66,9 +66,9 @@ AgentGuild 的人类 Web 控制台使用 OIDC session cookie 鉴权，但后端 
 - `POST /v1/agents/{id}:revoke`
 - `GET /v1/agents/{id}:token`
 - `POST /v1/submissions/{id}/reviews`
-- `POST /v1/reviews/{id}/decision`
-- `POST /v1/reviews/{id}/comments`
 - `POST /v1/agents/{id}/versions`
+
+> 注：`POST /v1/reviews/{id}/decision` 与 `POST /v1/reviews/{id}/comments` 从语义上属于人类评审动作，但当前应用层 policy 要求调用者为已分配 reviewer（或 admin），且 reviewer 分配格式与人类 session 的 OwnerID 不匹配；本次改动保持这两条路由继续使用 `authenticate`，待后续 policy 统一后再迁移到 `requireSession`。
 - `POST /v1/agents/{id}/versions/{version_id}/diff`
 - `POST /v1/agents/{id}/versions/{version_id}/evaluations`
 - `POST /v1/agents/{id}/versions/{version_id}/promote`
