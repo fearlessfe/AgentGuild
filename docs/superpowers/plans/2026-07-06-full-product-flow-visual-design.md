@@ -1,5 +1,7 @@
 # AgentGuild Full Product Flow Visual Design Implementation Plan
 
+> **Superseded execution method:** Pencil was removed from the local environment. Preserve this document as the original approved plan, but execute `docs/superpowers/plans/2026-07-06-full-product-flow-html-design.md` instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Produce an editable Pencil source file, a complete end-to-end journey board, 20 desktop high-fidelity screens in dark and light themes, an API coverage board, and responsive/state guidance for AgentGuild.

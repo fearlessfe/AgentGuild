@@ -562,22 +562,26 @@ GitHub App 被卸载或权限收窄时：
 
 ## 12. 设计交付与命名
 
+### 12.1 执行载体
+
+Pencil 已从本地环境移除，最终交付改为代码原生设计画廊：
+
+- HTML/CSS/JavaScript 是可编辑设计源。
+- 所有页面复用同一套布局组件、语义 token 和脱敏数据。
+- 每个页面通过 `screen` 与 `theme` 参数独立渲染。
+- Playwright 以 1440px 视口、2x scale 导出 PNG。
+- 打印样式将流程、接口覆盖、组件状态、20 张页面和响应式规则导出为多页 PDF。
+- HTML 设计源只用于设计交付，不直接替换现有 React 前端。
+
 建议源文件结构：
 
 ```text
-AgentGuild Full Flow
-  00 Cover & Journey
-  01 Foundations
-  02 Components
-  03 Login
-  04 Onboarding
-  05 Git Integration
-  06 Repository & Sync
-  07 Task Center
-  08 Execution & Validation
-  09 Review
-  10 Outcome
-  11 Responsive Rules
+design/agentguild-full-flow/
+  index.html
+  styles.css
+  app.js
+  screens.js
+  render-mockups.mjs
 ```
 
 页面命名：
