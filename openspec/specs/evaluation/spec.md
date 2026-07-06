@@ -54,8 +54,16 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 - **WHEN** 调用者请求 `/v1/evaluations/{id}` 或通过 MCP `evaluation_run_get` 查询
 - **THEN** 响应包含 `id`、`agent_version_id`、`benchmark_set_id`、`status`、`environment_digest`、`scoring_rule_version`、`threshold_results`、`summary`（含 `pass_rate`、`avg_latency_ms`、`cost_cents`、`security_passed`）及时间戳
 
+### Requirement: 评测运行列表返回完整详情
+系统 SHALL 在 `/v1/evaluations` 返回包含 `threshold_results` 和 `summary` 的 EvaluationRun 详情列表，字段名为 snake_case，并包装在 `Envelope<EvaluationRunPage>` 中。
+
+#### Scenario: 查看评测运行列表
+- **WHEN** 调用者请求 `/v1/evaluations?agent_version_id={id}`
+- **THEN** 响应为 `{data: {items: [...]}, meta: {...}}`，其中 `items` 每项包含完整 `EvaluationRunView` 字段
+
 ### Requirement: 基准集与评测运行 REST/MCP 视图字段使用 snake_case
 系统 SHALL 保证基准集和评测运行接口返回的 JSON 字段名为 snake_case，以与人类控制台前端类型一致。
 
-**注意**：当前 list/summary 端点保持原有裸数组/对象返回风格；detail 端点与 MCP 工具返回完整 DTO。若未来统一为 `Envelope<T>`，应通过独立 change 处理。
+### Requirement: 基准集与评测运行 REST 响应使用 Envelope<T> 信封
+系统 SHALL 将基准集和评测运行的查询端点响应包装在 `{data, meta}` 信封中，与任务生命周期、Identity 模块保持一致。
 

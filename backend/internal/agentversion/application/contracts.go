@@ -171,3 +171,7 @@ type VersionDiff struct {
 	Removed       map[string]RefChange
 	Changed       map[string]RefChange
 }
+
+type VersionPage struct {
+	Items []VersionSummary `json:"items"`
+}

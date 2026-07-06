@@ -96,6 +96,8 @@ func TestListAgentVersionsReturnsSnakeCaseFields(t *testing.T) {
 	require.Equal(t, "agent-1", versions.listCalls[0].agentID)
 
 	body := res.Body.String()
+	require.Contains(t, body, `"data":`)
+	require.Contains(t, body, `"items":`)
 	require.Contains(t, body, `"version_number":`)
 	require.Contains(t, body, `"parent_version_id":`)
 	require.Contains(t, body, `"config_fingerprint":`)
@@ -105,6 +107,19 @@ func TestListAgentVersionsReturnsSnakeCaseFields(t *testing.T) {
 	require.NotContains(t, body, `"ParentVersionID"`)
 	require.NotContains(t, body, `"ConfigFingerprint"`)
 	require.NotContains(t, body, `"CreatedAt"`)
+
+	var envelope struct {
+		Data struct {
+			Items []agentversionapp.VersionSummary `json:"items"`
+		} `json:"data"`
+		Meta struct {
+			ServerTime time.Time `json:"server_time"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &envelope))
+	require.Len(t, envelope.Data.Items, 1)
+	require.Equal(t, "v1", envelope.Data.Items[0].ID)
+	require.NotZero(t, envelope.Meta.ServerTime)
 }
 
 func TestDiffAgentVersionReturnsStructuredView(t *testing.T) {
@@ -138,25 +153,31 @@ func TestDiffAgentVersionReturnsStructuredView(t *testing.T) {
 	require.Equal(t, "v2", versions.diffCalls[0].versionID)
 
 	var body struct {
-		BaseVersionID       string   `json:"base_version_id"`
-		TargetVersionID     string   `json:"target_version_id"`
-		AddedCapabilities   []string `json:"added_capabilities"`
-		RemovedCapabilities []string `json:"removed_capabilities"`
-		ChangedRefs         []struct {
-			Field string  `json:"field"`
-			From  *string `json:"from,omitempty"`
-			To    *string `json:"to,omitempty"`
-		} `json:"changed_refs"`
+		Data struct {
+			BaseVersionID       string   `json:"base_version_id"`
+			TargetVersionID     string   `json:"target_version_id"`
+			AddedCapabilities   []string `json:"added_capabilities"`
+			RemovedCapabilities []string `json:"removed_capabilities"`
+			ChangedRefs         []struct {
+				Field string  `json:"field"`
+				From  *string `json:"from,omitempty"`
+				To    *string `json:"to,omitempty"`
+			} `json:"changed_refs"`
+		} `json:"data"`
+		Meta struct {
+			ServerTime time.Time `json:"server_time"`
+		} `json:"meta"`
 	}
 	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
-	require.Equal(t, "base-v1", body.BaseVersionID)
-	require.Equal(t, "v2", body.TargetVersionID)
-	require.ElementsMatch(t, []string{"go", "lint", "github"}, body.AddedCapabilities)
-	require.Equal(t, []string{"python"}, body.RemovedCapabilities)
-	require.Len(t, body.ChangedRefs, 2)
+	require.Equal(t, "base-v1", body.Data.BaseVersionID)
+	require.Equal(t, "v2", body.Data.TargetVersionID)
+	require.ElementsMatch(t, []string{"go", "lint", "github"}, body.Data.AddedCapabilities)
+	require.Equal(t, []string{"python"}, body.Data.RemovedCapabilities)
+	require.Len(t, body.Data.ChangedRefs, 2)
+	require.NotZero(t, body.Meta.ServerTime)
 
 	changedByField := make(map[string]struct{ From, To *string })
-	for _, c := range body.ChangedRefs {
+	for _, c := range body.Data.ChangedRefs {
 		changedByField[c.Field] = struct{ From, To *string }{From: c.From, To: c.To}
 	}
 	require.Contains(t, changedByField, "runtime")

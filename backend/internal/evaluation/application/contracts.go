@@ -169,6 +169,14 @@ type EvaluationRunDetail struct {
 	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
 }
 
+type BenchmarkSetPage struct {
+	Items []BenchmarkSetSummary `json:"items"`
+}
+
+type EvaluationRunPage struct {
+	Items []EvaluationRunDetail `json:"items"`
+}
+
 // AgentOwnerProvider reads the owner of an agent.
 type AgentOwnerProvider interface {
 	GetAgentOwner(context.Context, string, string) (string, error)

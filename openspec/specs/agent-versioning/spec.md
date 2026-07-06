@@ -56,9 +56,12 @@ Agent Version SHALL 仅允许按 `draft → evaluating → eligible → active` 
 - **THEN** 被回滚版本仍保持 `active` 或 `retired`，其历史记录可查询
 
 ### Requirement: 版本 diff 接口返回前端友好的能力差异
-系统 SHALL 在 `/v1/agents/{id}/versions/{version_id}/diff` 返回包含能力列表与引用变更列表的结构化 diff，字段名为 snake_case。
+系统 SHALL 在 `/v1/agents/{id}/versions/{version_id}/diff` 返回包含能力列表与引用变更列表的结构化 diff，字段名为 snake_case，并包装在 `Envelope<VersionDiff>` 信封中。
 
 #### Scenario: 对比两个版本
 - **WHEN** owner 请求版本 diff
-- **THEN** 响应包含 `base_version_id`、`target_version_id`、`added_capabilities`、`removed_capabilities`、`changed_refs`，其中 `changed_refs` 每项含 `field`、`from`、`to`
+- **THEN** 响应为 `{data: {...}, meta: {...}}`，其中 `data` 包含 `base_version_id`、`target_version_id`、`added_capabilities`、`removed_capabilities`、`changed_refs`，`changed_refs` 每项含 `field`、`from`、`to`
+
+### Requirement: 版本列表与详情接口使用 Envelope<T> 信封
+系统 SHALL 将 `/v1/agents/{id}/versions` 与 `/v1/agents/{id}/versions/{version_id}` 的响应包装在 `{data, meta}` 信封中，`data` 分别为 `{items: [...]}` 页面对象和 `VersionView` 详情对象。
 

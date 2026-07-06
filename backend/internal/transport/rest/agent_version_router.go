@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
@@ -75,7 +76,7 @@ func (s *Server) listAgentVersions(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, agentversionapp.VersionPage{Items: result})
 }
 
 func (s *Server) createAgentVersion(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +122,7 @@ func (s *Server) createAgentVersion(w http.ResponseWriter, r *http.Request) {
 			"status":         result.Version.Status,
 		},
 		"meta": map[string]any{
-			"server_time": result.Version.CreatedAt,
+			"server_time": time.Now(),
 		},
 	})
 }
@@ -133,7 +134,7 @@ func (s *Server) getAgentVersion(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, *result)
 }
 
 func (s *Server) diffAgentVersion(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +152,7 @@ func (s *Server) diffAgentVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := toVersionDiffView(chi.URLParam(r, "version_id"), result)
-	writeJSON(w, http.StatusOK, view)
+	writeEnvelope(w, http.StatusOK, *view)
 }
 
 func (s *Server) startAgentVersionEvaluation(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +185,9 @@ func (s *Server) startAgentVersionEvaluation(w http.ResponseWriter, r *http.Requ
 			"evaluation_run_id": result.EvaluationRun.ID(),
 			"status":            result.EvaluationRun.Status(),
 		},
+		"meta": map[string]any{
+			"server_time": time.Now(),
+		},
 	})
 }
 
@@ -199,7 +203,7 @@ func (s *Server) promoteAgentVersion(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"promoted": true}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"promoted": true}, "meta": map[string]any{"server_time": time.Now()}})
 }
 
 func (s *Server) rollbackAgentVersion(w http.ResponseWriter, r *http.Request) {
@@ -214,5 +218,5 @@ func (s *Server) rollbackAgentVersion(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"rolled_back": true}})
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"rolled_back": true}, "meta": map[string]any{"server_time": time.Now()}})
 }

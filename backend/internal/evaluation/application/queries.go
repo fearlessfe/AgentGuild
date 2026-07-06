@@ -108,6 +108,19 @@ func (s *EvaluationService) GetEvaluationRunDetail(ctx context.Context, principa
 	return &detail, nil
 }
 
+// ListEvaluationRunDetails returns full details of all evaluation runs for an agent version.
+func (s *EvaluationService) ListEvaluationRunDetails(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]EvaluationRunDetail, error) {
+	runs, err := s.ListEvaluationRuns(ctx, principal, tenantID, agentVersionID)
+	if err != nil {
+		return nil, err
+	}
+	details := make([]EvaluationRunDetail, 0, len(runs))
+	for i := range runs {
+		details = append(details, toEvaluationRunDetail(&runs[i]))
+	}
+	return details, nil
+}
+
 // ListEvaluationRunSummaries returns summaries of all evaluation runs for an agent version.
 func (s *EvaluationService) ListEvaluationRunSummaries(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]EvaluationRunSummary, error) {
 	runs, err := s.ListEvaluationRuns(ctx, principal, tenantID, agentVersionID)

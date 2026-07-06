@@ -15,12 +15,15 @@
 - [x] 3.1 设计并实现 `VersionDiffView`（后端 REST DTO 或调整现有结构），使其与前端 `VersionDiff` 类型兼容
 - [x] 3.2 设计并实现 `EvaluationRunDetail`（后端聚合 DTO），使其与前端 `EvaluationRunView` 类型兼容
 - [x] 3.3 更新 `backend/internal/transport/rest/agent_version_router.go` 和 `evaluation_router.go` 返回新 DTO
+- [x] 3.4 新增 `VersionPage`、`BenchmarkSetPage`、`EvaluationRunPage`、`ExperienceCandidatePage` 页面对象
+- [x] 3.5 将 agentversion/evaluation/experience 查询端点响应统一包装为 `{data, meta}` 信封
 
 ## 4. 测试与验证
 
 - [x] 4.1 更新后端单元测试中断言 JSON 字段名的地方
-- [x] 4.2 运行 `go test -race ./internal/...`
-- [x] 4.3 运行前端单元测试 `npm test -- --run`
+- [x] 4.2 更新 REST 路由测试断言信封形状和页面结构
+- [x] 4.3 运行 `go test -race ./internal/...`
+- [x] 4.4 运行前端单元测试 `npm test -- --run`
 
 ## 5. 文档与收尾
 

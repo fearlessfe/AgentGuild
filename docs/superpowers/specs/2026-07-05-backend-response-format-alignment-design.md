@@ -32,11 +32,11 @@ canonical_spec: openspec
 - `backend/internal/identity/application/contracts.go`
   - `AgentView`、`AgentVersionView`、`AccessTokenView`、`RegisterAgentResponse`、`ActivationStatusView`、`AgentPage`、`Meta`
 - `backend/internal/agentversion/application/contracts.go`
-  - `VersionSummary`、`VersionDetail`、`VersionDiff`、`RefChange`、`CreateDraftResponse`
+  - `VersionSummary`、`VersionDetail`、`VersionDiff`、`RefChange`、`CreateDraftResponse`、`VersionPage`
 - `backend/internal/agentexperience/application/contracts.go`
-  - `CandidateSummary`、`ExtractCandidateResponse`
+  - `CandidateSummary`、`ExtractCandidateResponse`、`ExperienceCandidatePage`
 - `backend/internal/evaluation/application/contracts.go`
-  - `BenchmarkSetSummary`、`EvaluationRunSummary`、`CreateBenchmarkSetResponse`、`StartEvaluationRunResponse`
+  - `BenchmarkSetSummary`、`EvaluationRunSummary`、`EvaluationRunDetail`、`CreateBenchmarkSetResponse`、`StartEvaluationRunResponse`、`BenchmarkSetPage`、`EvaluationRunPage`
 
 注意：
 - `RegisterAgentResponse.Data.Agent` 已包含 `AgentView`，但内部还嵌套 `*domain.AgentVersion` 的 `CurrentVersion`。REST 层 `/v1/agents` 返回的是 `Envelope[AgentPage]`，序列化 `AgentView` 即可；嵌套 domain 结构体不会被前端直接使用，但仍需确认不破坏测试。
@@ -108,9 +108,11 @@ func (s *EvaluationService) GetEvaluationRunDetail(ctx, tenantID, id string) (*E
 
 ### 4. REST 层调整
 
-- `agent_version_router.go` 的 `diffAgentVersion` 返回 `versionDiffView`。
-- `evaluation_router.go` 的 `getEvaluation` 调用 `GetEvaluationRunDetail` 并返回新 DTO。
-- 其他路由（list、create）仅受益于 JSON tag 补充，handler 逻辑不变。
+- `agent_version_router.go` 的 `listAgentVersions` 返回 `Envelope[VersionPage]`，`getAgentVersion` 返回 `Envelope[VersionDetail]`，`diffAgentVersion` 返回 `Envelope[VersionDiffView]`。
+- `evaluation_router.go` 的 `listBenchmarks` 返回 `Envelope[BenchmarkSetPage]`，`getBenchmark` 返回 `Envelope[BenchmarkSetSummary]`，`listEvaluations` 调用 `ListEvaluationRunDetails` 返回 `Envelope[EvaluationRunPage]`（列表项使用完整详情，含 `summary` 与 `threshold_results`），`getEvaluation` 返回 `Envelope[EvaluationRunDetail]`。
+- `experience_router.go` 的 `listAgentExperiences` 返回 `Envelope[ExperienceCandidatePage]`。
+- 创建/提升/回滚/启动评测/经验提取/审核等命令端点同时返回 `{data, meta}` 信封结构。
+- 受影响的查询路由统一使用 `{data, meta}` 信封，与任务生命周期、Identity 模块保持一致。
 
 ### 5. 测试策略
 

@@ -48,5 +48,8 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 
 #### Scenario: 获取经验候选列表
 - **WHEN** 调用者通过人类控制台请求 `/v1/agents/{id}/experiences`
-- **THEN** 响应中的字段名为 `id`、`tenant_id`、`agent_id`、`source_task_id`、`evidence_ref`、`applicable_capabilities`、`sensitivity_class`、`policy_reason` 等 snake_case 形式
+- **THEN** 响应为 `{data: {items: [...]}, meta: {...}}`，其中 `items` 每项字段名为 `id`、`tenant_id`、`agent_id`、`source_task_id`、`evidence_ref`、`applicable_capabilities`、`sensitivity_class`、`policy_reason` 等 snake_case 形式
+
+### Requirement: 经验候选列表接口使用 Envelope<T> 信封
+系统 SHALL 将 `/v1/agents/{id}/experiences` 的响应包装在 `{data, meta}` 信封中，`data` 为 `{items: [...]}` 页面对象。
 

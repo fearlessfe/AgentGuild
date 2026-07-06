@@ -2,6 +2,7 @@ package rest_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -50,6 +51,8 @@ func TestListAgentExperiencesReturnsSnakeCaseFields(t *testing.T) {
 	require.Equal(t, "approved", experiences.listCalls[0].status)
 
 	body := res.Body.String()
+	require.Contains(t, body, `"data":`)
+	require.Contains(t, body, `"items":`)
 	require.Contains(t, body, `"source_task_id":`)
 	require.Contains(t, body, `"source_submission_id":`)
 	require.Contains(t, body, `"source_review_id":`)
@@ -74,6 +77,19 @@ func TestListAgentExperiencesReturnsSnakeCaseFields(t *testing.T) {
 	require.NotContains(t, body, `"ReviewedBy"`)
 	require.NotContains(t, body, `"ReviewedAt"`)
 	require.NotContains(t, body, `"CreatedAt"`)
+
+	var envelope struct {
+		Data struct {
+			Items []agentexperienceapp.CandidateSummary `json:"items"`
+		} `json:"data"`
+		Meta struct {
+			ServerTime time.Time `json:"server_time"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &envelope))
+	require.Len(t, envelope.Data.Items, 1)
+	require.Equal(t, "xp-1", envelope.Data.Items[0].ID)
+	require.NotZero(t, envelope.Meta.ServerTime)
 }
 
 type fakeExperienceService struct {

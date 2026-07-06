@@ -134,3 +134,7 @@ type CandidateSummary struct {
 	ReviewedAt             *time.Time `json:"reviewed_at,omitempty"`
 	CreatedAt              time.Time  `json:"created_at"`
 }
+
+type ExperienceCandidatePage struct {
+	Items []CandidateSummary `json:"items"`
+}

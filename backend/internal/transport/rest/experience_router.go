@@ -2,6 +2,7 @@ package rest
 
 import (
 	"net/http"
+	"time"
 
 	agentexperienceapp "agentguild.dev/agentguild/backend/internal/agentexperience/application"
 	"github.com/go-chi/chi/v5"
@@ -15,7 +16,7 @@ func (s *Server) listAgentExperiences(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, agentexperienceapp.ExperienceCandidatePage{Items: result})
 }
 
 func (s *Server) createAgentExperience(w http.ResponseWriter, r *http.Request) {
@@ -42,9 +43,12 @@ func (s *Server) createAgentExperience(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"data": map[string]any{
-			"experience_id":       result.Candidate.ID,
-			"status":              result.Candidate.Status,
-			"sensitivity_class":   result.Candidate.SensitivityClass,
+			"experience_id":     result.Candidate.ID,
+			"status":            result.Candidate.Status,
+			"sensitivity_class": result.Candidate.SensitivityClass,
+		},
+		"meta": map[string]any{
+			"server_time": time.Now(),
 		},
 	})
 }
@@ -62,7 +66,10 @@ func (s *Server) approveAgentExperience(w http.ResponseWriter, r *http.Request) 
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"approved": true}})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"approved": true},
+		"meta": map[string]any{"server_time": time.Now()},
+	})
 }
 
 func (s *Server) rejectAgentExperience(w http.ResponseWriter, r *http.Request) {
@@ -85,5 +92,8 @@ func (s *Server) rejectAgentExperience(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"rejected": true}})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": map[string]any{"rejected": true},
+		"meta": map[string]any{"server_time": time.Now()},
+	})
 }
