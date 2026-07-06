@@ -149,8 +149,14 @@ make db-down        # docker compose down
   - `SESSION_COOKIE_SECURE`：cookie secure 标志，默认 `false`
   - `AGENT_RSA_PRIVATE_KEY_PEM` 或 `AGENT_RSA_PRIVATE_KEY_PATH`：用于签发 Agent access token
 - GitHub App（可选；未配置则 git 交付与验证禁用）：
-  - `GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY`、`GITHUB_INSTALLATION_ID`
-  - `GITHUB_BASE_URL`，默认 `https://api.github.com`
+  - 全局默认：`GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY`、`GITHUB_INSTALLATION_ID`、`GITHUB_BASE_URL`（默认 `https://api.github.com`）
+  - 按租户配置：通过 `POST /v1/github-app` 为指定 tenant 设置 `app_id`、`installation_id`、`private_key`、`base_url`
+- 本地管理员登录（开发环境，仅在 `OIDC_TENANT_ID` 为空且 `LOCAL_ADMIN_PASSWORD` 设置时启用）：
+  - `LOCAL_ADMIN_PASSWORD`：≥12 字符，启用本地 fallback 登录
+  - `LOCAL_ADMIN_TENANT_ID`（默认 `local`）
+  - `LOCAL_ADMIN_OWNER_ID`（默认 `local-admin`）
+  - `LOCAL_ADMIN_OWNER_EMAIL`（默认 `admin@local`）
+  - 端点：`POST /oauth/local/login`（仅在启用时注册）
 - Langfuse（可选）：`LANGFUSE_ENABLED=true` 时需要：
   - `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`
   - `LANGFUSE_MODE`（默认 `cloud`）、`LANGFUSE_SUPPORTS_COST`（默认 `true`）
@@ -204,7 +210,7 @@ go test -race ./... -count=1
   - 否则尝试 `postgres://agentguild:agentguild@127.0.0.1:55432/agentguild?sslmode=disable`；
   - 再不可用则通过 Docker 启动临时 PostgreSQL 18.4 容器。
 - 每个测试会创建独立的 schema，测试结束后清理。
-- 迁移文件位于 `backend/migrations/`，当前包含 `000001` 到 `000008`，测试会按顺序应用全部 up 迁移。
+- 迁移文件位于 `backend/migrations/`，当前包含 `000001` 到 `000009`，测试会按顺序应用全部 up 迁移。
 - `internal/acceptance` 包含端到端验收测试，直接启动真实 PostgreSQL 与完整服务组合。
 
 ### 前端测试

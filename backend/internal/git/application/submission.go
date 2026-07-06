@@ -71,7 +71,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 			return err
 		}
 
-		files, err := s.verifier.ChangedFiles(ctx, cmd.Repo, cmd.BaseCommitSHA, cmd.CommitSHA)
+		files, err := s.verifier.ChangedFiles(ctx, principal.TenantID, cmd.Repo, cmd.BaseCommitSHA, cmd.CommitSHA)
 		if err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ func (s *SubmissionService) CheckSubmissionIntegrity(ctx context.Context, princi
 		if err != nil {
 			return err
 		}
-		reachable, err := s.verifier.IsCommitReachable(ctx, sub.Repo, sub.Branch, sub.CommitSHA)
+		reachable, err := s.verifier.IsCommitReachable(ctx, principal.TenantID, sub.Repo, sub.Branch, sub.CommitSHA)
 		if err != nil {
 			return err
 		}

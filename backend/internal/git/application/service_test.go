@@ -44,7 +44,7 @@ func TestIssueCredentialReturnsTokenAndPersistsMetadata(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "tok-exec-1-a", got.Data.Token)
+	require.Equal(t, "tok-agentguild/exec-1-a", got.Data.Token)
 	require.Equal(t, "tenant-1", got.Data.Credential.TenantID)
 	require.Equal(t, "exec-1", got.Data.Credential.ExecutionID)
 	require.Equal(t, "github", got.Data.Credential.Provider)
@@ -187,7 +187,7 @@ func TestIssueCredentialDoesNotIssueTokenForRevokedCredential(t *testing.T) {
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, fixture.issuer.counter)
+	require.Equal(t, 1, fixture.driver.counter)
 
 	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestIssueCredentialDoesNotIssueTokenForRevokedCredential(t *testing.T) {
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.ErrorIs(t, err, git.ErrCredentialRevoked)
-	require.Equal(t, 1, fixture.issuer.counter)
+	require.Equal(t, 1, fixture.driver.counter)
 }
 
 func ownerPrincipal() application.Principal {
@@ -205,7 +205,7 @@ func ownerPrincipal() application.Principal {
 
 func TestIssueCredentialRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
 	fixture := newCredentialFixture(t)
-	fixture.issuer.err = errors.New("issuer unavailable")
+	fixture.driver.err = errors.New("issuer unavailable")
 
 	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
@@ -254,43 +254,61 @@ func TestUpdateRepositoryReturnsRevokedErrorForRevokedRecord(t *testing.T) {
 }
 
 type credentialFixture struct {
-	svc    *application.CredentialService
-	store  *memoryStore
-	issuer *fakeIssuer
-	now    time.Time
+	svc       *application.CredentialService
+	store     *memoryStore
+	driver    *fakeCredentialDriver
+	now       time.Time
 }
 
 func newCredentialFixture(t *testing.T) *credentialFixture {
 	t.Helper()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
-	issuer := &fakeIssuer{}
-	svc, err := application.NewCredentialService(store, application.Options{
-		Issuer: issuer,
-		NewID:  sequenceIDs("cred-1"),
+	driver := &fakeCredentialDriver{}
+	svc, err := application.NewCredentialService(store, &fakeAppService{driver: driver}, application.Options{
+		NewID: sequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
-	return &credentialFixture{svc: svc, store: store, issuer: issuer, now: now}
+	return &credentialFixture{svc: svc, store: store, driver: driver, now: now}
 }
 
-type fakeIssuer struct {
+type fakeCredentialDriver struct {
 	counter int
 	err     error
 }
 
-func (f *fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branch, baseCommit string) (git.Credential, error) {
-	_ = tenantID
+func (f *fakeCredentialDriver) CreateCredential(_ context.Context, repo, branch, baseCommit string) (git.Credential, error) {
 	if f.err != nil {
 		return git.Credential{}, f.err
 	}
 	f.counter++
 	return git.Credential{
-		Token:      "tok-" + executionID + "-" + string(rune('a'+f.counter-1)),
+		Token:      "tok-" + branch + "-" + string(rune('a'+f.counter-1)),
 		RepoURL:    "https://github.com/" + repo + ".git",
 		Branch:     branch,
 		BaseCommit: baseCommit,
 		ExpiresAt:  time.Now().Add(15 * time.Minute),
 	}, nil
+}
+
+func (f *fakeCredentialDriver) GetCommit(context.Context, string, string) (git.Commit, error) {
+	return git.Commit{}, nil
+}
+
+func (f *fakeCredentialDriver) CompareCommits(context.Context, string, string, string) ([]git.ChangedFile, error) {
+	return nil, nil
+}
+
+func (f *fakeCredentialDriver) IsAncestor(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+type fakeAppService struct {
+	driver git.Driver
+}
+
+func (f *fakeAppService) Driver(context.Context, string) (git.Driver, error) {
+	return f.driver, nil
 }
 
 type memoryStore struct {
@@ -347,6 +365,8 @@ func (tx *memoryTx) Submissions() application.SubmissionRepository {
 func (tx *memoryTx) ValidationJobs() application.ValidationJobRepository {
 	return &memoryValidationJobRepository{store: tx.store}
 }
+
+func (tx *memoryTx) GitHubApps() application.GitHubAppRepository { return nil }
 
 func (tx *memoryTx) Now(context.Context) (time.Time, error) { return tx.now, nil }
 

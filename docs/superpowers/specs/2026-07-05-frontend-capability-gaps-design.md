@@ -2,6 +2,8 @@
 comet_change: frontend-capability-gaps
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-06-frontend-capability-gaps
+status: final
 ---
 
 # Frontend Capability Gaps — Design Doc

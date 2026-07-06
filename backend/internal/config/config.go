@@ -34,6 +34,13 @@ type Config struct {
 		InstallationID int64
 		BaseURL        string
 	}
+	LocalAdmin struct {
+		TenantID    string
+		OwnerID     string
+		OwnerEmail  string
+		Password    string
+		Enabled     bool
+	}
 }
 
 type LookupEnv func(string) string
@@ -51,6 +58,18 @@ func Load(get LookupEnv) (Config, error) {
 		LangfuseBaseURL: get("LANGFUSE_BASE_URL"), LangfusePublicKey: get("LANGFUSE_PUBLIC_KEY"), LangfuseSecretKey: get("LANGFUSE_SECRET_KEY"),
 		LangfuseMode: value(get, "LANGFUSE_MODE", "cloud"), LangfuseMetricsPath: get("LANGFUSE_METRICS_PATH"), LangfuseCompleteTag: get("LANGFUSE_COMPLETE_COVERAGE_TAG"),
 		ReviewSeedTenantID: get("REVIEW_SEED_TENANT_ID"),
+		LocalAdmin: struct {
+			TenantID   string
+			OwnerID    string
+			OwnerEmail string
+			Password   string
+			Enabled    bool
+		}{
+			TenantID:   value(get, "LOCAL_ADMIN_TENANT_ID", "local"),
+			OwnerID:    value(get, "LOCAL_ADMIN_OWNER_ID", "local-admin"),
+			OwnerEmail: value(get, "LOCAL_ADMIN_OWNER_EMAIL", "admin@local"),
+			Password:   get("LOCAL_ADMIN_PASSWORD"),
+		},
 	}
 	var err error
 	if cfg.MCPEnabled, err = boolean(get, "MCP_ENABLED", true); err != nil {
@@ -75,6 +94,11 @@ func Load(get LookupEnv) (Config, error) {
 	}
 	if cfg.GitHub.InstallationID, err = integer(get, "GITHUB_INSTALLATION_ID"); err != nil {
 		return Config{}, err
+	}
+	localPassword := get("LOCAL_ADMIN_PASSWORD")
+	cfg.LocalAdmin.Enabled = cfg.OIDCTenantID == "" && localPassword != ""
+	if cfg.LocalAdmin.Enabled && len(localPassword) < 12 {
+		return Config{}, fmt.Errorf("LOCAL_ADMIN_PASSWORD must be at least 12 characters")
 	}
 	if cfg.ReaperInterval, err = duration(get, "REAPER_INTERVAL", 5*time.Second); err != nil {
 		return Config{}, err
@@ -121,13 +145,6 @@ func Load(get LookupEnv) (Config, error) {
 	if cfg.WebEnabled {
 		for _, required := range [][2]string{
 			{"SESSION_COOKIE_SECRET", cfg.SessionCookieSecret},
-			{"OIDC_TENANT_ID", cfg.OIDCTenantID},
-			{"OIDC_ISSUER", cfg.OIDCIssuer},
-			{"OIDC_CLIENT_ID", cfg.OIDCClientID},
-			{"OIDC_REDIRECT_URI", cfg.OIDCRedirectURI},
-			{"OIDC_AUTH_URL", cfg.OIDCAuthURL},
-			{"OIDC_TOKEN_URL", cfg.OIDCTokenURL},
-			{"OIDC_JWKS_URL", cfg.OIDCJWKSURL},
 		} {
 			if required[1] == "" {
 				return Config{}, fmt.Errorf("%s is required when WEB_ENABLED=true", required[0])
@@ -138,6 +155,21 @@ func Load(get LookupEnv) (Config, error) {
 		}
 		if cfg.AgentRSAPrivateKeyPEM == "" && cfg.AgentRSAPrivateKeyPath == "" {
 			return Config{}, fmt.Errorf("AGENT_RSA_PRIVATE_KEY_PEM or AGENT_RSA_PRIVATE_KEY_PATH is required when WEB_ENABLED=true")
+		}
+		if cfg.OIDCTenantID == "" && !cfg.LocalAdmin.Enabled {
+			for _, required := range [][2]string{
+				{"OIDC_TENANT_ID", cfg.OIDCTenantID},
+				{"OIDC_ISSUER", cfg.OIDCIssuer},
+				{"OIDC_CLIENT_ID", cfg.OIDCClientID},
+				{"OIDC_REDIRECT_URI", cfg.OIDCRedirectURI},
+				{"OIDC_AUTH_URL", cfg.OIDCAuthURL},
+				{"OIDC_TOKEN_URL", cfg.OIDCTokenURL},
+				{"OIDC_JWKS_URL", cfg.OIDCJWKSURL},
+			} {
+				if required[1] == "" {
+					return Config{}, fmt.Errorf("%s is required when WEB_ENABLED=true and local admin fallback is not enabled", required[0])
+				}
+			}
 		}
 	}
 	if cfg.LangfuseEnabled {

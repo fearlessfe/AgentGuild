@@ -2,6 +2,7 @@
 change: backend-response-format-alignment
 design-doc: docs/superpowers/specs/2026-07-05-backend-response-format-alignment-design.md
 base-ref: 01bda2b81d2a26fa0b4dd1fe7902666ee6843241
+archived-with: 2026-07-06-backend-response-format-alignment
 ---
 
 # Backend Response Format Alignment — 实现计划

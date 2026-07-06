@@ -1,35 +1,48 @@
 package application
 
 import (
+	"context"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
 
+// GitHubAppService resolves per-tenant GitHub App configuration into drivers.
+type GitHubAppService interface {
+	Driver(ctx context.Context, tenantID string) (git.Driver, error)
+}
+
+// GitHubAppManager extends GitHubAppService with administrative operations.
+type GitHubAppManager interface {
+	GitHubAppService
+	Upsert(context.Context, UpsertGitHubApp) error
+	Get(context.Context, string) (GitHubAppView, error)
+	Delete(context.Context, string) error
+}
+
 // CredentialService issues and revokes short-lived, execution-scoped Git
 // credentials through a CredentialIssuer while persisting only metadata.
 type CredentialService struct {
-	store    Store
-	issuer   git.CredentialIssuer
-	provider string
-	newID    func() string
+	store       Store
+	appService  GitHubAppService
+	provider    string
+	newID       func() string
 }
 
 // Options configures a CredentialService.
 type Options struct {
-	Issuer   git.CredentialIssuer
-	Provider string
-	NewID    func() string
+	Provider     string
+	NewID        func() string
 }
 
 // NewCredentialService creates a CredentialService.
-func NewCredentialService(store Store, options Options) (*CredentialService, error) {
+func NewCredentialService(store Store, appService GitHubAppService, options Options) (*CredentialService, error) {
 	if store == nil {
 		return nil, invalid("store")
 	}
-	if options.Issuer == nil {
-		return nil, invalid("issuer")
+	if appService == nil {
+		return nil, invalid("github_app_service")
 	}
 	if options.NewID == nil {
 		options.NewID = randomID
@@ -39,10 +52,10 @@ func NewCredentialService(store Store, options Options) (*CredentialService, err
 		provider = "github"
 	}
 	return &CredentialService{
-		store:    store,
-		issuer:   options.Issuer,
-		provider: provider,
-		newID:    options.NewID,
+		store:      store,
+		appService: appService,
+		provider:   provider,
+		newID:      options.NewID,
 	}, nil
 }
 

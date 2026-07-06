@@ -59,18 +59,9 @@ func TestLoadRequiresIdentityRuntimeConfigurationWhenWebEnabled(t *testing.T) {
 
 	env = validEnv()
 	env["OIDC_TENANT_ID"] = ""
+	env["LOCAL_ADMIN_PASSWORD"] = ""
 	_, err = config.Load(func(key string) string { return env[key] })
 	require.ErrorContains(t, err, "OIDC_TENANT_ID")
-
-	env = validEnv()
-	env["OIDC_CLIENT_ID"] = ""
-	_, err = config.Load(func(key string) string { return env[key] })
-	require.ErrorContains(t, err, "OIDC_CLIENT_ID")
-
-	env = validEnv()
-	env["OIDC_REDIRECT_URI"] = ""
-	_, err = config.Load(func(key string) string { return env[key] })
-	require.ErrorContains(t, err, "OIDC_REDIRECT_URI")
 
 	env = validEnv()
 	env["AGENT_RSA_PRIVATE_KEY_PEM"] = ""

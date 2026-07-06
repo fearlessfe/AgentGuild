@@ -104,9 +104,8 @@ func TestCredentialServiceIssuesCredentialThroughPostgresStore(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
 
-	svc, err := application.NewCredentialService(postgres.NewStore(db), application.Options{
-		Issuer: &fakeIssuer{},
-		NewID:  sequenceIDs("cred-1"),
+	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &fakeDriver{}}, application.Options{
+		NewID: sequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
 
@@ -130,9 +129,8 @@ func TestCredentialServiceRevokeThroughPostgresStore(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
 
-	svc, err := application.NewCredentialService(postgres.NewStore(db), application.Options{
-		Issuer: &fakeIssuer{},
-		NewID:  sequenceIDs("cred-1"),
+	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &fakeDriver{}}, application.Options{
+		NewID: sequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
 	_, err = svc.IssueCredential(ctx, application.Principal{
@@ -191,9 +189,8 @@ func TestCredentialServiceRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
 
-	svc, err := application.NewCredentialService(postgres.NewStore(db), application.Options{
-		Issuer: &failingIssuer{err: errors.New("github unavailable")},
-		NewID:  sequenceIDs("cred-1"),
+	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &failingDriver{err: errors.New("github unavailable")}}, application.Options{
+		NewID: sequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
 
@@ -213,9 +210,8 @@ func TestCredentialServiceSetsStatusActiveAfterIssuance(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	ctx := context.Background()
 
-	svc, err := application.NewCredentialService(postgres.NewStore(db), application.Options{
-		Issuer: &fakeIssuer{},
-		NewID:  sequenceIDs("cred-1"),
+	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &fakeDriver{}}, application.Options{
+		NewID: sequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
 
@@ -232,12 +228,11 @@ func TestCredentialServiceSetsStatusActiveAfterIssuance(t *testing.T) {
 	require.Equal(t, gitdomain.CredentialStatusActive, record.Status)
 }
 
-type fakeIssuer struct{}
+type fakeDriver struct{}
 
-func (fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branch, baseCommit string) (git.Credential, error) {
-	_ = tenantID
+func (fakeDriver) CreateCredential(_ context.Context, repo, branch, baseCommit string) (git.Credential, error) {
 	return git.Credential{
-		Token:      "tok-" + executionID,
+		Token:      "tok-exec-1",
 		RepoURL:    "https://github.com/" + repo + ".git",
 		Branch:     branch,
 		BaseCommit: baseCommit,
@@ -245,12 +240,44 @@ func (fakeIssuer) Issue(_ context.Context, tenantID, executionID, repo, branch, 
 	}, nil
 }
 
-type failingIssuer struct {
+func (fakeDriver) GetCommit(context.Context, string, string) (git.Commit, error) {
+	return git.Commit{}, nil
+}
+
+func (fakeDriver) CompareCommits(context.Context, string, string, string) ([]git.ChangedFile, error) {
+	return nil, nil
+}
+
+func (fakeDriver) IsAncestor(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+type failingDriver struct {
 	err error
 }
 
-func (f *failingIssuer) Issue(context.Context, string, string, string, string, string) (git.Credential, error) {
+func (f *failingDriver) CreateCredential(context.Context, string, string, string) (git.Credential, error) {
 	return git.Credential{}, f.err
+}
+
+func (f *failingDriver) GetCommit(context.Context, string, string) (git.Commit, error) {
+	return git.Commit{}, nil
+}
+
+func (f *failingDriver) CompareCommits(context.Context, string, string, string) ([]git.ChangedFile, error) {
+	return nil, nil
+}
+
+func (f *failingDriver) IsAncestor(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+type fakeAppService struct {
+	driver git.Driver
+}
+
+func (f *fakeAppService) Driver(context.Context, string) (git.Driver, error) {
+	return f.driver, nil
 }
 
 func sequenceIDs(values ...string) func() string {

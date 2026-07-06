@@ -2,6 +2,8 @@
 comet_change: backend-response-format-alignment
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-06-backend-response-format-alignment
+status: final
 ---
 
 # Backend Response Format Alignment — Design Doc

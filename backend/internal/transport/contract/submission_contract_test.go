@@ -28,6 +28,10 @@ type fakeGitDriver struct {
 
 type ancestorKey struct{ base, head string }
 
+func (f *fakeGitDriver) Driver(_ context.Context, _ string) (git.Driver, error) {
+	return f, nil
+}
+
 func (f *fakeGitDriver) CreateCredential(_ context.Context, _, _, _ string) (git.Credential, error) {
 	return git.Credential{Token: "fake", ExpiresAt: time.Now().Add(time.Hour)}, nil
 }
@@ -68,11 +72,11 @@ func defaultGitDriver() *fakeGitDriver {
 	}
 }
 
-func newSubmissionService(t *testing.T, svc *application.Service, driver git.Driver) *gitapp.SubmissionService {
+func newSubmissionService(t *testing.T, svc *application.Service, appService gitapp.GitHubAppService) *gitapp.SubmissionService {
 	t.Helper()
 	db := testdb.StartPostgres(t)
 	store := gitpostgres.NewStore(db)
-	verifier := gitapp.NewCommitVerifier(driver, gitpostgres.NewSubmissionRepository(db))
+	verifier := gitapp.NewCommitVerifier(appService, gitpostgres.NewSubmissionRepository(db))
 	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil, nil)
 	require.NoError(t, err)
 	return subSvc

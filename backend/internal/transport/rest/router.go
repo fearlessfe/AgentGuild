@@ -15,6 +15,7 @@ import (
 	agentversionapp "agentguild.dev/agentguild/backend/internal/agentversion/application"
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	"agentguild.dev/agentguild/backend/internal/config"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
@@ -109,6 +110,18 @@ type Server struct {
 	sessionSecret string
 	sessionSecure bool
 	oidc          oidcProvider
+	localAdmin       *localAdmin
+	gitHubAppManager gitapp.GitHubAppManager
+}
+
+// WithLocalAdmin 挂载本地管理员 fallback 登录接口。
+func WithLocalAdmin(cfg config.Config) Option {
+	return func(s *Server) { s.localAdmin = newLocalAdmin(cfg) }
+}
+
+// WithGitHubAppManager 挂载 tenant 级 GitHub App 管理。
+func WithGitHubAppManager(m gitapp.GitHubAppManager) Option {
+	return func(s *Server) { s.gitHubAppManager = m }
 }
 
 // Option 配置 Server。
@@ -187,6 +200,9 @@ func (s *Server) Router() http.Handler {
 	if s.oidc != nil {
 		r.Get("/oauth/oidc/login", s.oidcLogin)
 		r.Get("/oauth/oidc/callback", s.oidcCallback)
+	}
+	if s.localAdmin != nil {
+		r.Post("/oauth/local/login", s.localAdmin.login)
 	}
 	r.Get("/.well-known/agentguild", s.getAgentWellKnown)
 
@@ -292,6 +308,13 @@ func (s *Server) Router() http.Handler {
 			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/credentials", s.issueCredential)
 			r.With(s.authenticate, s.rateLimit).Get("/executions/{id}/credentials", s.getCredential)
 			r.With(s.authenticate, s.rateLimit).Delete("/executions/{id}/credentials", s.revokeCredential)
+		}
+
+		// Tenant-level GitHub App configuration (human-only)
+		if s.gitHubAppManager != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/github-app", s.getGitHubApp)
+			r.With(s.requireSession, s.rateLimit).Post("/github-app", s.upsertGitHubApp)
+			r.With(s.requireSession, s.rateLimit).Delete("/github-app", s.deleteGitHubApp)
 		}
 	})
 	return r

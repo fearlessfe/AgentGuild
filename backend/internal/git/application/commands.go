@@ -107,7 +107,12 @@ func (s *CredentialService) IssueCredential(ctx context.Context, principal Princ
 		// Only call the external issuer after a placeholder record has been
 		// persisted. This prevents a live token from being created without any
 		// corresponding metadata row.
-		credential, err := s.issuer.Issue(ctx, principal.TenantID, cmd.ExecutionID, cmd.Repo, branch, cmd.BaseCommit)
+		driver, err := s.appService.Driver(ctx, principal.TenantID)
+		if err != nil {
+			return err
+		}
+		issuer := git.NewIssuer(driver)
+		credential, err := issuer.Issue(ctx, principal.TenantID, cmd.ExecutionID, cmd.Repo, branch, cmd.BaseCommit)
 		if err != nil {
 			return err
 		}

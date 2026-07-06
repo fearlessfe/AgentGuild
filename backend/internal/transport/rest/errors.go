@@ -101,6 +101,8 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 			return
 		}
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+	case "not_configured":
+		writeError(w, http.StatusNotFound, "NOT_CONFIGURED", err.Error())
 	case "state_conflict":
 		writeError(w, http.StatusConflict, "STATE_CONFLICT", err.Error())
 	case "hard_gates_failed":

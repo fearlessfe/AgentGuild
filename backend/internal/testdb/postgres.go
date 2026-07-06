@@ -130,11 +130,13 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	applyMigration(t, db, "000006_submissions_repo.up.sql")
 	applyMigration(t, db, "000007_code_review_and_reputation.up.sql")
 	applyMigration(t, db, "000008_agent_version_and_experience.up.sql")
+	applyMigration(t, db, "000009_github_apps.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000009_github_apps.down.sql")
 	applyMigration(t, db, "000008_agent_version_and_experience.down.sql")
 	applyMigration(t, db, "000007_code_review_and_reputation.down.sql")
 	applyMigration(t, db, "000006_submissions_repo.down.sql")
@@ -155,6 +157,7 @@ func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	applyMigration(t, db, "000006_submissions_repo.up.sql")
 	applyMigration(t, db, "000007_code_review_and_reputation.up.sql")
 	applyMigration(t, db, "000008_agent_version_and_experience.up.sql")
+	applyMigration(t, db, "000009_github_apps.up.sql")
 }
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
 	t.Helper()

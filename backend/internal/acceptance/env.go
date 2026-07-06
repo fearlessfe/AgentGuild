@@ -19,7 +19,6 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
-	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
@@ -82,16 +81,15 @@ func Start(t *testing.T) *Env {
 
 	gitStore := gitpostgres.NewStore(db)
 	gitDriver := newAcceptanceGitDriver("golang/example", "7c3f4e9a8b2d1c0f5e6a7b8c9d0e1f2a3b4c5d6e", "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", "", "hello/hello.go")
-	gitIssuer := git.NewIssuer(gitDriver)
-	credentialService, err := gitapp.NewCredentialService(gitStore, gitapp.Options{
-		Issuer:   gitIssuer,
+	gitAppService := &acceptanceGitAppService{driver: gitDriver}
+	credentialService, err := gitapp.NewCredentialService(gitStore, gitAppService, gitapp.Options{
 		Provider: "github",
 		NewID:    acceptanceSequenceIDs("cred-1"),
 	})
 	require.NoError(t, err)
 
 	verifierAdapter := &acceptanceSubmissionRepoAdapter{store: gitStore}
-	commitVerifier := gitapp.NewCommitVerifier(gitDriver, verifierAdapter)
+	commitVerifier := gitapp.NewCommitVerifier(gitAppService, verifierAdapter)
 	notifier := application.NewCoreExecutionNotifier(store)
 	submissionService, err := gitapp.NewSubmissionService(gitStore, commitVerifier, notifier, acceptanceSequenceIDs("sub-1"))
 	require.NoError(t, err)
