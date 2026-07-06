@@ -29,6 +29,16 @@ index.html?screen=<screen-id>&theme=<dark|light>
 
 这些 API 标注、规格说明和标尺只属于设计交付注释，不属于最终用户界面。
 
+## 导出
+
+运行以下命令，使用仓库内 `frontend/` 的 Playwright Chromium 在 1440×1024（2x）下重新生成全部 PNG 与多页 PDF：
+
+```bash
+node design/render-mockups.mjs
+```
+
+脚本会启动一个临时静态服务器（ES 模块导入需经 `http://`），逐个渲染 `screen`/`theme` 路由，并以 `?print=all` 打印生成 14 页 PDF。
+
 ## 导出清单
 
 - `00-full-flow-journey.png`
@@ -47,4 +57,4 @@ index.html?screen=<screen-id>&theme=<dark|light>
 - `12-responsive-rules.png`
 - `agentguild-full-flow.pdf`
 
-导出文件由后续任务生成；本目录 README 先固定命名和交付范围。
+共 20 张画面 PNG、4 张说明板 PNG、1 份 14 页 PDF。API 标注仅出现在说明板，不出现在用户界面画面中。
