@@ -152,12 +152,13 @@ export const apiCapabilities = Object.freeze([
 ]);
 
 export const sharedData = Object.freeze({
-  workspace: "平台工程工作区",
-  repository: "acme/checkout-service",
-  taskId: "TASK-2481",
-  executionId: "EXE-7D3A",
-  submissionId: "SUB-91C2",
-  reviewId: "REV-184",
-  commit: "8f4c2d1",
-  agentVersion: "release-bot · v3.4",
+  workspace: "Billing Platform",
+  repository: "billing-service",
+  branch: "agentguild/ag-192",
+  baseCommit: "a18d220",
+  commit: "a1b2c3d",
+  taskId: "AG-192",
+  agentVersion: "Atlas v12",
+  reviewScore: "89/100",
+  reputationDelta: "+12",
 });

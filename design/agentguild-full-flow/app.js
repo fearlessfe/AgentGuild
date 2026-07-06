@@ -4,17 +4,11 @@ import {
   apiStatus,
   screenRegistry,
 } from "./screens.js";
+import { escapeHtml } from "./components.js";
+import { flowScreens } from "./flow-screens.js";
+import { boardScreens } from "./boards.js";
 
 const THEMES = new Set(["dark", "light"]);
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
 
 function apiCoverageBoard() {
   const legend = Object.entries(apiStatus)
@@ -78,15 +72,8 @@ function apiCoverageBoard() {
     </article>`;
 }
 
-function placeholderScreen(screenId) {
-  const screen = screenRegistry[screenId];
-  return `
-    <article class="screen placeholder-screen" aria-labelledby="${escapeHtml(screenId)}-title">
-      <p class="eyebrow">AGENTGUILD · FULL FLOW</p>
-      <h1 id="${escapeHtml(screenId)}-title">${escapeHtml(screen.title)}</h1>
-      <p>此画布已登记，将在后续任务中补充高保真内容。</p>
-      <p class="route-label"><code>?screen=${escapeHtml(screenId)}&amp;theme=&lt;dark|light&gt;</code></p>
-    </article>`;
+function flowScreen(screenId) {
+  return `<article class="screen" aria-labelledby="${escapeHtml(screenId)}-title">${flowScreens[screenId]()}</article>`;
 }
 
 function galleryScreen(theme) {
@@ -136,13 +123,19 @@ export function renderScreen(screenId, theme = "dark") {
   if (!SCREEN_IDS.includes(screenId)) {
     return unknownScreen(screenId, safeTheme);
   }
-  if (screenId === "api-coverage") {
-    return apiCoverageBoard();
-  }
   if (screenId === "gallery") {
     return galleryScreen(safeTheme);
   }
-  return placeholderScreen(screenId);
+  if (screenId === "api-coverage") {
+    return apiCoverageBoard();
+  }
+  if (boardScreens[screenId]) {
+    return boardScreens[screenId]();
+  }
+  if (flowScreens[screenId]) {
+    return flowScreen(screenId);
+  }
+  return unknownScreen(screenId, safeTheme);
 }
 
 export function readRoute(search = window.location.search) {
@@ -152,7 +145,37 @@ export function readRoute(search = window.location.search) {
   return {
     screenId,
     theme: THEMES.has(requestedTheme) ? requestedTheme : "dark",
+    printAll: params.get("print") === "all",
   };
+}
+
+// Print order for the multi-page PDF export.
+const PRINT_ORDER = Object.freeze([
+  "journey",
+  "api-coverage",
+  "components-states",
+  "login",
+  "onboarding",
+  "git-integration",
+  "repository-sync-rule",
+  "sync-result",
+  "task-center",
+  "execution-detail",
+  "submission-validation",
+  "review-workspace",
+  "outcome",
+  "responsive-rules",
+]);
+
+function renderPrintAll(theme) {
+  const safeTheme = THEMES.has(theme) ? theme : "dark";
+  document.documentElement.dataset.theme = safeTheme;
+  return PRINT_ORDER.map((id) => {
+    if (id === "api-coverage") return apiCoverageBoard();
+    if (boardScreens[id]) return boardScreens[id]();
+    if (flowScreens[id]) return flowScreen(id);
+    return "";
+  }).join("");
 }
 
 function mount() {
@@ -161,9 +184,16 @@ function mount() {
     throw new Error("Missing #app mount point");
   }
   const route = readRoute();
+  if (route.printAll) {
+    app.innerHTML = renderPrintAll(route.theme);
+    document.title = "AgentGuild 全流程 · 打印";
+    return;
+  }
   app.innerHTML = renderScreen(route.screenId, route.theme);
   document.title = `${screenRegistry[route.screenId]?.title || "路由错误"} · AgentGuild`;
 }
 
-window.renderScreen = renderScreen;
-mount();
+if (typeof window !== "undefined") {
+  window.renderScreen = renderScreen;
+  mount();
+}
