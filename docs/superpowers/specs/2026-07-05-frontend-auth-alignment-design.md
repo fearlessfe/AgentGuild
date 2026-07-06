@@ -68,7 +68,6 @@ AgentGuild 的人类 Web 控制台使用 OIDC session cookie 鉴权，但后端 
 - `POST /v1/submissions/{id}/reviews`
 - `POST /v1/reviews/{id}/decision`
 - `POST /v1/reviews/{id}/comments`
-- `POST /v1/executions/{id}:submit_for_review`（人类评审触发动作）
 - `POST /v1/agents/{id}/versions`
 - `POST /v1/agents/{id}/versions/{version_id}/diff`
 - `POST /v1/agents/{id}/versions/{version_id}/evaluations`
@@ -90,6 +89,7 @@ AgentGuild 的人类 Web 控制台使用 OIDC session cookie 鉴权，但后端 
 - `POST /v1/tasks/{id}:cancel`
 - `POST /v1/executions/{id}:start`
 - `POST /v1/executions/{id}:heartbeat`
+- `POST /v1/executions/{id}:submit_for_review`
 - `POST /v1/executions/{id}/submissions`
 - `POST /v1/executions/{id}/credentials`
 - `GET /v1/executions/{id}/credentials`

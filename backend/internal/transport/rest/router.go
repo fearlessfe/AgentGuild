@@ -246,8 +246,8 @@ func (s *Server) Router() http.Handler {
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/reputation", s.getReputation)
 
-		// Human-only write routes (session only)
-		r.With(s.requireSession, s.rateLimit).Post("/executions/{id}:submit_for_review", s.submitForReview)
+		// Agent-only write routes (bearer token only)
+		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:submit_for_review", s.submitForReview)
 
 		if s.versions != nil {
 			// Shared read-only routes (session or bearer)

@@ -274,10 +274,10 @@ func (env *Env) GetExecutionStatus(tenantID, executionID string) domain.Executio
 	return domain.ExecutionStatus(status)
 }
 
-// CreateReviewViaREST 以发布者身份为指定 submission 创建 review。
+// CreateReviewViaREST 以管理员身份为指定 submission 创建 review。
 func (env *Env) CreateReviewViaREST(executionID string, capabilities []string, requestID string) reviewapp.ReviewView {
 	env.T.Helper()
-	res := env.REST.As("token-publisher").CreateReview(executionID, capabilities, requestID)
+	res := env.REST.WithSession(adminOwnerSession()).CreateReview(executionID, capabilities, requestID)
 	require.Empty(env.T, res.Code, "create review failed: %s", res.Code)
 	return res.Review
 }
@@ -1111,11 +1111,16 @@ type RESTClient struct {
 	handler  http.Handler
 	db       *pgxpool.Pool
 	token    string
+	cookie   *http.Cookie
 	lastMeta application.Meta
 }
 
 func (c *RESTClient) As(token string) *RESTClient {
-	return &RESTClient{t: c.t, handler: c.handler, db: c.db, token: token}
+	return &RESTClient{t: c.t, handler: c.handler, db: c.db, token: token, cookie: c.cookie}
+}
+
+func (c *RESTClient) WithSession(cookie *http.Cookie) *RESTClient {
+	return &RESTClient{t: c.t, handler: c.handler, db: c.db, token: c.token, cookie: cookie}
 }
 
 // LastMeta 返回最近一次成功调用的 envelope meta。
@@ -1303,7 +1308,11 @@ func (c *RESTClient) postReview(path, requestID string, body map[string]any) res
 
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.cookie != nil {
+		req.AddCookie(c.cookie)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Idempotency-Key", requestID)
 	rec := httptest.NewRecorder()
 	c.handler.ServeHTTP(rec, req)
@@ -1333,7 +1342,11 @@ func (c *RESTClient) postComment(path, requestID string, body map[string]any) re
 
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.cookie != nil {
+		req.AddCookie(c.cookie)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Idempotency-Key", requestID)
 	rec := httptest.NewRecorder()
 	c.handler.ServeHTTP(rec, req)
@@ -1746,6 +1759,20 @@ func tenantOwnerSession(tenantID, ownerID string) *http.Cookie {
 		OwnerID:    ownerID,
 		OwnerEmail: ownerID + "@example.com",
 		IsAdmin:    false,
+		ExpiresAt:  time.Now().Add(time.Hour),
+	}, "acceptance-session-secret-0123456789abcdef", false)
+	if err != nil {
+		panic(err)
+	}
+	return cookie
+}
+
+func adminOwnerSession() *http.Cookie {
+	cookie, err := auth.NewSessionCookie(auth.Session{
+		TenantID:   "tenant-1",
+		OwnerID:    "admin-1",
+		OwnerEmail: "admin-1@example.com",
+		IsAdmin:    true,
 		ExpiresAt:  time.Now().Add(time.Hour),
 	}, "acceptance-session-secret-0123456789abcdef", false)
 	if err != nil {
