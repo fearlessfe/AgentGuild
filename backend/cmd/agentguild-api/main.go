@@ -28,8 +28,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
-	gitgithub "agentguild.dev/agentguild/backend/internal/git/github"
-	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
+		gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
 	"agentguild.dev/agentguild/backend/internal/git/validation"
 	gitworker "agentguild.dev/agentguild/backend/internal/git/worker"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -84,17 +83,23 @@ func run() error {
 		return err
 	}
 
-	gitRuntime, err := buildGitRuntime(cfg, pool, service)
+	gitRuntime, gitAppManager, err := buildGitRuntime(cfg, pool, service)
 	if err != nil {
 		return err
 	}
 
-	restOptions := make([]resttransport.Option, 0, 8)
+	restOptions := make([]resttransport.Option, 0, 10)
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
 	}
 	if oidcProvider != nil {
 		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
+	}
+	if cfg.LocalAdmin.Enabled {
+		restOptions = append(restOptions, resttransport.WithLocalAdmin(cfg))
+	}
+	if gitAppManager != nil {
+		restOptions = append(restOptions, resttransport.WithGitHubAppManager(gitAppManager))
 	}
 	if versionService != nil {
 		restOptions = append(restOptions, resttransport.WithVersionService(versionService))
@@ -262,20 +267,23 @@ func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVeri
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	oidcProvider, err := auth.NewOIDCProvider(auth.OIDCConfig{
-		TenantID:     cfg.OIDCTenantID,
-		Issuer:       cfg.OIDCIssuer,
-		ClientID:     cfg.OIDCClientID,
-		ClientSecret: cfg.OIDCClientSecret,
-		RedirectURI:  cfg.OIDCRedirectURI,
-		AuthURL:      cfg.OIDCAuthURL,
-		TokenURL:     cfg.OIDCTokenURL,
-		JWKSURL:      cfg.OIDCJWKSURL,
-		AdminClaim:   cfg.OIDCAdminClaim,
-		AdminEmails:  append([]string(nil), cfg.OIDCAdminEmails...),
-	}, nil)
-	if err != nil {
-		return nil, nil, nil, err
+	var oidcProvider *auth.OIDCProvider
+	if cfg.OIDCTenantID != "" {
+		oidcProvider, err = auth.NewOIDCProvider(auth.OIDCConfig{
+			TenantID:     cfg.OIDCTenantID,
+			Issuer:       cfg.OIDCIssuer,
+			ClientID:     cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret,
+			RedirectURI:  cfg.OIDCRedirectURI,
+			AuthURL:      cfg.OIDCAuthURL,
+			TokenURL:     cfg.OIDCTokenURL,
+			JWKSURL:      cfg.OIDCJWKSURL,
+			AdminClaim:   cfg.OIDCAdminClaim,
+			AdminEmails:  append([]string(nil), cfg.OIDCAdminEmails...),
+		}, nil)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	localVerifier := auth.NewRS256Verifier(&privateKey.PublicKey, auth.TokenVerifierConfig{
 		Issuer:   cfg.OAuthIssuer,
@@ -440,38 +448,53 @@ type gitRuntime struct {
 	validationWorker  *gitworker.ValidationWorker
 }
 
-func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, error) {
-	if cfg.GitHub.AppID == 0 || cfg.GitHub.PrivateKey == "" || cfg.GitHub.InstallationID == 0 {
-		slog.Info("github app configuration missing; git delivery and validation disabled")
-		return nil, nil
-	}
-
-	driver, err := gitgithub.NewDriver(gitgithub.Config{
-		AppID:          cfg.GitHub.AppID,
-		PrivateKey:     cfg.GitHub.PrivateKey,
-		InstallationID: cfg.GitHub.InstallationID,
-		BaseURL:        cfg.GitHub.BaseURL,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build github driver: %w", err)
-	}
-
+func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, gitapp.GitHubAppManager, error) {
 	gitStore := gitpostgres.NewStore(pool)
-	issuer := git.NewIssuer(driver)
+	gitAppRepo := gitpostgres.NewGitHubAppRepository(pool)
+	gitAppManager, err := gitapp.NewGitHubAppManager(gitAppRepo)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build github app service: %w", err)
+	}
 
-	credentialService, err := gitapp.NewCredentialService(gitStore, gitapp.Options{
-		Issuer:   issuer,
+	ctx := context.Background()
+	if cfg.GitHub.AppID != 0 && cfg.GitHub.PrivateKey != "" && cfg.GitHub.InstallationID != 0 {
+		seedTenant := cfg.OIDCTenantID
+		if seedTenant == "" {
+			seedTenant = cfg.LocalAdmin.TenantID
+		}
+		if seedTenant != "" {
+			if _, err := gitAppRepo.GetByTenant(ctx, seedTenant); err != nil {
+				if errors.Is(err, git.ErrGitHubAppNotConfigured) {
+					if upsertErr := gitAppManager.Upsert(ctx, gitapp.UpsertGitHubApp{
+						TenantID:       seedTenant,
+						Provider:       "github",
+						AppID:          cfg.GitHub.AppID,
+						InstallationID: cfg.GitHub.InstallationID,
+						PrivateKey:     cfg.GitHub.PrivateKey,
+						BaseURL:        cfg.GitHub.BaseURL,
+					}); upsertErr != nil {
+						return nil, nil, fmt.Errorf("seed github app configuration: %w", upsertErr)
+					}
+					slog.Info("seeded github app configuration from environment", "tenant", seedTenant)
+				} else {
+					return nil, nil, fmt.Errorf("check existing github app configuration: %w", err)
+				}
+			}
+		}
+	}
+
+	credentialService, err := gitapp.NewCredentialService(gitStore, gitAppManager, gitapp.Options{
 		Provider: "github",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("build credential service: %w", err)
+		return nil, nil, fmt.Errorf("build credential service: %w", err)
 	}
 
-	verifier := gitapp.NewCommitVerifier(driver, &submissionRepoAdapter{store: gitStore})
+	verifier := gitapp.NewCommitVerifier(gitAppManager, &submissionRepoAdapter{store: gitStore})
 	notifier := application.NewCoreExecutionNotifier(service)
 	submissionService, err := gitapp.NewSubmissionService(gitStore, verifier, notifier, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build submission service: %w", err)
+		return nil, nil, fmt.Errorf("build submission service: %w", err)
 	}
 
 	runner := validation.NewRunner(validation.DefaultRegistry(), &validation.TempWorkspaceFactory{}, nil)
@@ -488,7 +511,7 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		credentialService: credentialService,
 		submissionService: submissionService,
 		validationWorker:  validationWorker,
-	}, nil
+	}, gitAppManager, nil
 }
 
 func runValidationWorker(ctx context.Context, w *gitworker.ValidationWorker, pool *pgxpool.Pool) error {

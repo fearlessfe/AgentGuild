@@ -397,6 +397,10 @@ type fakeDriver struct {
 	compareErr  error
 }
 
+func (f *fakeDriver) Driver(_ context.Context, _ string) (git.Driver, error) {
+	return f, nil
+}
+
 func (f *fakeDriver) CreateCredential(_ context.Context, _, _, _ string) (git.Credential, error) {
 	return git.Credential{Token: "fake", ExpiresAt: time.Now().Add(time.Hour)}, nil
 }

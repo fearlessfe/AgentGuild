@@ -2,6 +2,8 @@
 comet_change: frontend-auth-alignment
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-06-frontend-auth-alignment
+status: final
 ---
 
 # frontend-auth-alignment Design

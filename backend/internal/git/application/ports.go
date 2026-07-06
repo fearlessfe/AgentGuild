@@ -12,6 +12,13 @@ type Store interface {
 	WithTx(context.Context, func(Tx) error) error
 }
 
+// GitHubAppRepository persists tenant-level GitHub App configuration.
+type GitHubAppRepository interface {
+	Upsert(context.Context, *GitHubAppRecord) error
+	GetByTenant(context.Context, string) (*GitHubAppRecord, error)
+	Delete(context.Context, string) error
+}
+
 var _ ExecutionNotifier = (*NopExecutionNotifier)(nil)
 
 // Tx is the set of operations available inside one credential transaction.
@@ -19,6 +26,7 @@ type Tx interface {
 	Credentials() CredentialRepository
 	Submissions() SubmissionRepository
 	ValidationJobs() ValidationJobRepository
+	GitHubApps() GitHubAppRepository
 	Now(context.Context) (time.Time, error)
 }
 

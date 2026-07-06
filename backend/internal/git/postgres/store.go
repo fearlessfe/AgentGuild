@@ -74,5 +74,10 @@ func (tx *Tx) ValidationJobs() application.ValidationJobRepository {
 	return &validationJobRepository{q: tx.tx, now: tx.Now}
 }
 
+// GitHubApps returns the GitHub App repository for this transaction.
+func (tx *Tx) GitHubApps() application.GitHubAppRepository {
+	return &githubAppRepository{q: tx.tx}
+}
+
 var _ application.Store = (*Store)(nil)
 var _ application.Tx = (*Tx)(nil)

@@ -2,6 +2,7 @@
 change: frontend-auth-alignment
 design-doc: docs/superpowers/specs/2026-07-05-frontend-auth-alignment-design.md
 base-ref: 4de8c94285bb04d4963375f234438a30c599c46b
+archived-with: 2026-07-06-frontend-auth-alignment
 ---
 
 # frontend-auth-alignment 实施计划

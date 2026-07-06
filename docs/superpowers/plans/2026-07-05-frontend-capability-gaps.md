@@ -2,6 +2,7 @@
 change: frontend-capability-gaps
 design-doc: docs/superpowers/specs/2026-07-05-frontend-capability-gaps-design.md
 base-ref: 765e03681278108c392e04cbd1dc3175d33c72c4
+archived-with: 2026-07-06-frontend-capability-gaps
 ---
 
 # Frontend Capability Gaps — 实现计划

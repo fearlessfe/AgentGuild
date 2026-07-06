@@ -1,0 +1,13 @@
+{
+  "change": "github-app-integration",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "510f5c835a041f2138ebe41bb7915abbfb57fc03009dfe58593f067c9676df9b",
+  "files": [
+    { "path": "openspec/changes/github-app-integration/proposal.md", "sha256": "cf545e6b456926b1217307103a0de57c120324197ee7610593020eaa1c3ac22e" },
+    { "path": "openspec/changes/github-app-integration/design.md", "sha256": "9575ef2966ff1e7da5714262cfe31eb2ad33e9c231cdd3d07fc9d5d7efbfb1f4" },
+    { "path": "openspec/changes/github-app-integration/tasks.md", "sha256": "3675528ac6424e1a302371fe588a5793ca808e369b63ca7ceb7bb9238fa6a890" }
+  ]
+}

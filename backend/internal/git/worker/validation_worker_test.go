@@ -212,6 +212,7 @@ type memoryTx struct {
 
 func (tx *memoryTx) Credentials() application.CredentialRepository { return nil }
 func (tx *memoryTx) Submissions() application.SubmissionRepository { return nil }
+func (tx *memoryTx) GitHubApps() application.GitHubAppRepository    { return nil }
 func (tx *memoryTx) ValidationJobs() application.ValidationJobRepository {
 	return &memoryValidationJobRepository{store: tx.store}
 }
