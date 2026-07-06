@@ -656,3 +656,50 @@ AgentGuild Full Flow
 - 新的全局导航和上下文栏。
 
 这些新增能力必须在实施计划中拆分为独立、可验证的增量，不能把视觉稿中的未来能力误认为当前后端已支持。
+
+## 15. 接口适配矩阵
+
+高保真稿必须标注每个页面所依赖能力的接口状态。状态分为：
+
+- **可用**：当前 REST 路由和前端客户端均可直接支持。
+- **后端可用**：REST 路由存在，但前端客户端或页面尚未接入。
+- **部分可用**：核心资源存在，但页面所需字段、列表或操作不完整。
+- **待新增**：当前无对应领域能力或 REST 路由。
+- **需修正**：已有路由的认证方式或契约与人类 Web 流程不匹配。
+
+| 页面 | 当前接口 | 状态 | 设计约束 |
+|---|---|---|---|
+| 登录 | `GET /oauth/oidc/login`、`GET /oauth/oidc/callback`、`POST /oauth/local/login` | 可用 | 本地登录仅在服务端启用时显示；`/oauth/local/login` 需补入 OpenAPI。 |
+| 首次引导 | 无 onboarding 状态接口 | 待新增 | 设计稿将完成状态标记为规划能力，不假设前端本地状态等同于服务端事实。 |
+| Git 接入 | `GET/POST/DELETE /v1/github-app` | 后端可用 | 可设计查看、保存和删除；“检测连接”需要新增接口；三条路由需补入 OpenAPI。 |
+| 仓库目录 | 无安装仓库列表或仓库启用接口 | 待新增 | 仓库搜索、选择、默认分支和权限状态均标记为规划能力。 |
+| 同步规则 | 无规则 CRUD、预览、启停接口 | 待新增 | 不把保存、预览或启停按钮标为当前可用。 |
+| 同步运行 | 无 sync run、结果列表、冲突处理接口 | 待新增 | 新增/更新/忽略/冲突、重试和审计均为规划能力。 |
+| 任务中心 | `GET /v1/tasks`、`GET /v1/tasks/{id}` | 可用 | 当前可展示任务事实；来源、Issue 链接、同步状态和同步批次字段需扩展。 |
+| 执行详情 | `GET /v1/executions/{id}` | 部分可用 | 当前可展示 lease、状态、stage、progress 与成本；完整事件时间线和 revision 列表需新增查询。设计仍不把 progress 作为可靠完成率。 |
+| 提交摘要 | `GET /v1/submissions/{id}`、`GET /v1/submissions/{id}/diff` | 后端可用 | 前端已有 Diff 接入；Submission 详情页和客户端需补齐。 |
+| 验证详情 | Submission 仅返回 `validation_job_id`；无 validation job 查询路由 | 部分可用 | 检查步骤、attempt、lease 和日志详情需要新增只读接口，例如 `GET /v1/submissions/{id}/validation`。 |
+| 审核读取 | `GET /v1/reviews/{id}`、`GET /v1/rubrics/active` | 可用 | 可直接支撑审核详情与 Rubric。 |
+| 创建审核 | `POST /v1/submissions/{id}/reviews` | 后端可用 | session-only，符合人类创建审核语义；前端未提供显式入口。 |
+| 审核评论/结论 | `POST /v1/reviews/{id}/comments`、`POST /v1/reviews/{id}/decision` | 需修正 | 当前路由使用 bearer-only `authenticate`，与人类 Web 审核不匹配；应支持 session 人类身份，同时保留 tenant 与权限校验。 |
+| 结果闭环 | `GET /v1/reputation`，Agent 版本/经验/评测接口 | 部分可用 | 声望和经验可查询；Task outcome 聚合、Issue 回写状态和审计时间线需新增。 |
+| 主题偏好 | 无服务端接口 | 部分可用 | 首期可使用浏览器持久化；若要求跨设备同步再新增用户偏好接口。 |
+
+### 15.1 契约一致性要求
+
+- `backend/internal/transport/rest/openapi.yaml` 当前只覆盖到 Execution 路由，未完整描述 Submission、Review、GitHub App、Agent Version、Experience、Evaluation 和 Reputation 等已存在路由。
+- 在实现任何新增页面前，先补齐已存在 REST 路由的 OpenAPI 契约，并用契约测试防止再次漂移。
+- 设计稿中的字段名称优先使用真实响应字段；规划字段使用 `planned` 注释，不伪装成现有响应。
+- 人类页面的所有写操作必须使用 session 认证；Agent 的领取、执行、凭证和提交继续使用 bearer token。
+- 新增同步写接口必须支持 `Idempotency-Key`，并在错误态设计中使用现有 `domain.Error` 语义。
+
+### 15.2 高保真稿标注规则
+
+每张页面稿在开发说明区使用以下标记：
+
+- `API · available`：当前接口可直接支撑。
+- `API · partial`：当前接口只能支撑部分信息。
+- `API · planned`：需要新增后端能力。
+- `API · auth fix`：接口存在，但认证或授权需先修正。
+
+这些标记只出现在设计说明和交付标注层，不出现在最终用户界面。
