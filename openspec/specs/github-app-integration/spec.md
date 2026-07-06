@@ -12,17 +12,17 @@ The system SHALL persist per-tenant GitHub App configuration including provider,
 
 #### Scenario: Admin creates GitHub App config
 - **GIVEN** an admin principal for tenant `tenant-1`
-- **WHEN** calling `PUT /v1/github-apps` with `app_id`, `installation_id`, `private_key`
+- **WHEN** calling `POST /v1/github-app` with `app_id`, `installation_id`, `private_key`
 - **THEN** the configuration is persisted and a view without the private key is returned
 
 #### Scenario: Admin reads GitHub App config
 - **GIVEN** a tenant with an existing GitHub App config
-- **WHEN** calling `GET /v1/github-apps`
+- **WHEN** calling `GET /v1/github-app`
 - **THEN** the system returns the public view including `configured: true` and no private key
 
 #### Scenario: Admin deletes GitHub App config
 - **GIVEN** a tenant with an existing GitHub App config
-- **WHEN** calling `DELETE /v1/github-apps`
+- **WHEN** calling `DELETE /v1/github-app`
 - **THEN** the configuration is removed and the response indicates deletion
 
 ### ADDED Requirement: Per-tenant git driver resolution
@@ -50,6 +50,6 @@ The system SHALL return a `not_configured` error when a git operation requires a
 
 ## API
 
-- `GET /v1/github-apps` — return public GitHub App view
-- `PUT /v1/github-apps` — create or replace config (admin only)
-- `DELETE /v1/github-apps` — remove config (admin only)
+- `GET /v1/github-app` — return public GitHub App view
+- `POST /v1/github-app` — create or replace config (admin only)
+- `DELETE /v1/github-app` — remove config (admin only)
