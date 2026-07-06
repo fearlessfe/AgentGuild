@@ -60,12 +60,12 @@ type Submission struct {
 
 // Execution represents a task execution that produced evidence.
 type Execution struct {
-	ID            string
-	TenantID      string
-	AgentID       string
+	ID             string
+	TenantID       string
+	AgentID        string
 	AgentVersionID string
-	TaskID        string
-	Capabilities  []string
+	TaskID         string
+	Capabilities   []string
 }
 
 // AgentOwnerProvider reads the owner of an agent.
@@ -75,13 +75,13 @@ type AgentOwnerProvider interface {
 
 // CandidateService orchestrates experience candidate commands and queries.
 type CandidateService struct {
-	store        Store
-	candidates   ExperienceCandidateRepository
-	submissions  SubmissionStore
-	executions   ExecutionStore
-	policy       *Policy
-	classifier   domain.SensitivityPolicy
-	newID        func() string
+	store       Store
+	candidates  ExperienceCandidateRepository
+	submissions SubmissionStore
+	executions  ExecutionStore
+	policy      *Policy
+	classifier  domain.SensitivityPolicy
+	newID       func() string
 }
 
 // CandidateOptions configures the candidate service.
@@ -105,32 +105,36 @@ type ExtractCandidateResponse struct {
 }
 
 type ReviewCandidate struct {
-	TenantID     string
-	AgentID      string
-	CandidateID  string
-	Action       string // "approve" or "reject"
-	Reason       string
-	ReviewerID   string
-	IsAdmin      bool
+	TenantID    string
+	AgentID     string
+	CandidateID string
+	Action      string // "approve" or "reject"
+	Reason      string
+	ReviewerID  string
+	IsAdmin     bool
 }
 
 // Query DTOs
 
 type CandidateSummary struct {
-	ID                     string
-	TenantID               string
-	AgentID                string
-	SourceTaskID           string
-	SourceSubmissionID     string
-	SourceReviewID         string
-	EvidenceRef            string
-	ContentHash            string
-	ApplicableCapabilities []string
-	TenantScope            string
-	SensitivityClass       string
-	Status                 string
-	PolicyReason           string
-	ReviewedBy             string
-	ReviewedAt             *time.Time
-	CreatedAt              time.Time
+	ID                     string     `json:"id"`
+	TenantID               string     `json:"tenant_id"`
+	AgentID                string     `json:"agent_id"`
+	SourceTaskID           string     `json:"source_task_id,omitempty"`
+	SourceSubmissionID     string     `json:"source_submission_id,omitempty"`
+	SourceReviewID         string     `json:"source_review_id,omitempty"`
+	EvidenceRef            string     `json:"evidence_ref"`
+	ContentHash            string     `json:"content_hash"`
+	ApplicableCapabilities []string   `json:"applicable_capabilities,omitempty"`
+	TenantScope            string     `json:"tenant_scope"`
+	SensitivityClass       string     `json:"sensitivity_class"`
+	Status                 string     `json:"status"`
+	PolicyReason           string     `json:"policy_reason,omitempty"`
+	ReviewedBy             string     `json:"reviewed_by,omitempty"`
+	ReviewedAt             *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+}
+
+type ExperienceCandidatePage struct {
+	Items []CandidateSummary `json:"items"`
 }

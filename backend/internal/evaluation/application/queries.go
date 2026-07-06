@@ -97,6 +97,30 @@ func (s *EvaluationService) GetEvaluationRunSummary(ctx context.Context, princip
 	return &summary, nil
 }
 
+// GetEvaluationRunDetail returns the full detail of an evaluation run by ID,
+// including threshold results and summary metrics.
+func (s *EvaluationService) GetEvaluationRunDetail(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*EvaluationRunDetail, error) {
+	run, err := s.GetEvaluationRun(ctx, principal, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	detail := toEvaluationRunDetail(run)
+	return &detail, nil
+}
+
+// ListEvaluationRunDetails returns full details of all evaluation runs for an agent version.
+func (s *EvaluationService) ListEvaluationRunDetails(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]EvaluationRunDetail, error) {
+	runs, err := s.ListEvaluationRuns(ctx, principal, tenantID, agentVersionID)
+	if err != nil {
+		return nil, err
+	}
+	details := make([]EvaluationRunDetail, 0, len(runs))
+	for i := range runs {
+		details = append(details, toEvaluationRunDetail(&runs[i]))
+	}
+	return details, nil
+}
+
 // ListEvaluationRunSummaries returns summaries of all evaluation runs for an agent version.
 func (s *EvaluationService) ListEvaluationRunSummaries(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]EvaluationRunSummary, error) {
 	runs, err := s.ListEvaluationRuns(ctx, principal, tenantID, agentVersionID)
@@ -119,6 +143,22 @@ func toEvaluationRunSummary(run *domain.EvaluationRun) EvaluationRunSummary {
 		Status:             string(run.Status()),
 		EnvironmentDigest:  run.EnvironmentDigest(),
 		ScoringRuleVersion: run.ScoringRuleVersion(),
+		StartedAt:          run.StartedAt(),
+		CompletedAt:        run.CompletedAt(),
+	}
+}
+
+func toEvaluationRunDetail(run *domain.EvaluationRun) EvaluationRunDetail {
+	return EvaluationRunDetail{
+		ID:                 run.ID(),
+		TenantID:           run.TenantID(),
+		AgentVersionID:     run.AgentVersionID(),
+		BenchmarkSetID:     run.BenchmarkSetID(),
+		Status:             string(run.Status()),
+		EnvironmentDigest:  run.EnvironmentDigest(),
+		ScoringRuleVersion: run.ScoringRuleVersion(),
+		ThresholdResults:   run.ThresholdResults(),
+		Summary:            run.Summary(),
 		StartedAt:          run.StartedAt(),
 		CompletedAt:        run.CompletedAt(),
 	}

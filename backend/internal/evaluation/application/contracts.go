@@ -133,26 +133,48 @@ type EvaluationRunResult = domain.EvaluationRunResult
 // Query DTOs
 
 type BenchmarkSetSummary struct {
-	ID            string
-	TenantID      string
-	VersionNumber int
-	Name          string
-	Description   string
-	IsActive      bool
-	CreatedBy     string
-	CreatedAt     time.Time
+	ID            string    `json:"id"`
+	TenantID      string    `json:"tenant_id"`
+	VersionNumber int       `json:"version_number"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description,omitempty"`
+	IsActive      bool      `json:"is_active"`
+	CreatedBy     string    `json:"created_by"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type EvaluationRunSummary struct {
-	ID                 string
-	TenantID           string
-	AgentVersionID     string
-	BenchmarkSetID     string
-	Status             string
-	EnvironmentDigest  string
-	ScoringRuleVersion string
-	StartedAt          time.Time
-	CompletedAt        *time.Time
+	ID                 string     `json:"id"`
+	TenantID           string     `json:"tenant_id"`
+	AgentVersionID     string     `json:"agent_version_id"`
+	BenchmarkSetID     string     `json:"benchmark_set_id"`
+	Status             string     `json:"status"`
+	EnvironmentDigest  string     `json:"environment_digest"`
+	ScoringRuleVersion string     `json:"scoring_rule_version"`
+	StartedAt          time.Time  `json:"started_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+}
+
+type EvaluationRunDetail struct {
+	ID                 string                   `json:"id"`
+	TenantID           string                   `json:"tenant_id"`
+	AgentVersionID     string                   `json:"agent_version_id"`
+	BenchmarkSetID     string                   `json:"benchmark_set_id"`
+	Status             string                   `json:"status"`
+	EnvironmentDigest  string                   `json:"environment_digest"`
+	ScoringRuleVersion string                   `json:"scoring_rule_version"`
+	ThresholdResults   []domain.ThresholdResult `json:"threshold_results,omitempty"`
+	Summary            domain.EvaluationSummary `json:"summary"`
+	StartedAt          time.Time                `json:"started_at"`
+	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+}
+
+type BenchmarkSetPage struct {
+	Items []BenchmarkSetSummary `json:"items"`
+}
+
+type EvaluationRunPage struct {
+	Items []EvaluationRunDetail `json:"items"`
 }
 
 // AgentOwnerProvider reads the owner of an agent.

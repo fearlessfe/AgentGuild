@@ -2,6 +2,7 @@ package rest
 
 import (
 	"net/http"
+	"time"
 
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	evaldomain "agentguild.dev/agentguild/backend/internal/evaluation/domain"
@@ -15,7 +16,7 @@ func (s *Server) listBenchmarks(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, evaluationapp.BenchmarkSetPage{Items: result})
 }
 
 func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +54,9 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 			"benchmark_set_id": result.BenchmarkSet.ID(),
 			"version_number":   result.BenchmarkSet.VersionNumber(),
 		},
+		"meta": map[string]any{
+			"server_time": time.Now(),
+		},
 	})
 }
 
@@ -63,26 +67,26 @@ func (s *Server) getBenchmark(w http.ResponseWriter, r *http.Request) {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, *result)
 }
 
 func (s *Server) listEvaluations(w http.ResponseWriter, r *http.Request) {
 	principal := identityPrincipalFromAuth(mustPrincipal(r))
 	agentVersionID := r.URL.Query().Get("agent_version_id")
-	result, err := s.evaluations.ListEvaluationRunSummaries(r.Context(), principal, principal.TenantID, agentVersionID)
+	result, err := s.evaluations.ListEvaluationRunDetails(r.Context(), principal, principal.TenantID, agentVersionID)
 	if err != nil {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, evaluationapp.EvaluationRunPage{Items: result})
 }
 
 func (s *Server) getEvaluation(w http.ResponseWriter, r *http.Request) {
 	principal := identityPrincipalFromAuth(mustPrincipal(r))
-	result, err := s.evaluations.GetEvaluationRunSummary(r.Context(), principal, principal.TenantID, chi.URLParam(r, "id"))
+	result, err := s.evaluations.GetEvaluationRunDetail(r.Context(), principal, principal.TenantID, chi.URLParam(r, "id"))
 	if err != nil {
 		mapDomainError(w, err, mustPrincipal(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeEnvelope(w, http.StatusOK, *result)
 }

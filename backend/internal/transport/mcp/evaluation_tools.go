@@ -50,7 +50,7 @@ func registerEvaluationTools(server *mcp.Server, svc evaluationService, principa
 		Name:        "evaluation_run_get",
 		Description: "查询评测运行结果",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input EvaluationRunGetInput) (*mcp.CallToolResult, any, error) {
-		result, err := svc.GetEvaluationRunSummary(ctx, identityPrincipalFromAuth(principal), principal.TenantID, input.EvaluationRunID)
+		result, err := svc.GetEvaluationRunDetail(ctx, identityPrincipalFromAuth(principal), principal.TenantID, input.EvaluationRunID)
 		if err != nil {
 			return mapDomainError(err, principal), nil, nil
 		}

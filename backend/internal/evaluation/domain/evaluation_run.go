@@ -31,18 +31,18 @@ type EvaluationRun struct {
 
 // ThresholdResult is the outcome of one hard threshold.
 type ThresholdResult struct {
-	Name     string
-	Passed   bool
-	Evidence map[string]any
+	Name     string         `json:"name"`
+	Passed   bool           `json:"passed"`
+	Evidence map[string]any `json:"evidence,omitempty"`
 }
 
 // EvaluationSummary aggregates metrics produced by the scoring rule.
 type EvaluationSummary struct {
-	PassRate       float64
-	AvgLatencyMs   float64
-	CostCents      int64
-	SecurityPassed bool
-	Extra          map[string]any
+	PassRate       float64        `json:"pass_rate"`
+	AvgLatencyMs   float64        `json:"avg_latency_ms"`
+	CostCents      int64          `json:"cost_cents"`
+	SecurityPassed bool           `json:"security_passed"`
+	Extra          map[string]any `json:"extra,omitempty"`
 }
 
 // NewEvaluationRun creates a running evaluation run. It freezes the version and

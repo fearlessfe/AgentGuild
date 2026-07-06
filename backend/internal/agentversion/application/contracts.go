@@ -66,12 +66,12 @@ type EvaluationRunInfo struct {
 
 // VersionService orchestrates version lifecycle commands and queries.
 type VersionService struct {
-	store         Store
-	versions      VersionRepository
-	evalProvider  EvaluationRunProvider
-	xpProvider    ExperienceCandidateProvider
-	policy        *Policy
-	newID         func() string
+	store        Store
+	versions     VersionRepository
+	evalProvider EvaluationRunProvider
+	xpProvider   ExperienceCandidateProvider
+	policy       *Policy
+	newID        func() string
 }
 
 // VersionOptions configures the version service.
@@ -127,37 +127,37 @@ type StartEvaluation struct {
 // Query DTOs
 
 type VersionSummary struct {
-	ID                string
-	VersionNumber     int
-	Status            domain.VersionStatus
-	ParentVersionID   string
-	ConfigFingerprint string
-	CreatedAt         time.Time
-	PromotedAt        *time.Time
-	RetiredAt         *time.Time
+	ID                string               `json:"id"`
+	VersionNumber     int                  `json:"version_number"`
+	Status            domain.VersionStatus `json:"status"`
+	ParentVersionID   string               `json:"parent_version_id,omitempty"`
+	ConfigFingerprint string               `json:"config_fingerprint"`
+	CreatedAt         time.Time            `json:"created_at"`
+	PromotedAt        *time.Time           `json:"promoted_at,omitempty"`
+	RetiredAt         *time.Time           `json:"retired_at,omitempty"`
 }
 
 type VersionDetail struct {
-	ID                string
-	TenantID          string
-	AgentID           string
-	VersionNumber     int
-	ParentVersionID   string
-	Status            domain.VersionStatus
-	Runtime           string
-	Model             string
-	Capabilities      []string
-	ConfigFingerprint string
-	ContentHash       string
-	EnvironmentDigest string
-	PromptRef         string
-	SkillRefs         []string
-	MemoryRef         string
-	ToolRefs          []string
-	CreatedBy         string
-	CreatedAt         time.Time
-	PromotedAt        *time.Time
-	RetiredAt         *time.Time
+	ID                string               `json:"id"`
+	TenantID          string               `json:"tenant_id"`
+	AgentID           string               `json:"agent_id"`
+	VersionNumber     int                  `json:"version_number"`
+	ParentVersionID   string               `json:"parent_version_id,omitempty"`
+	Status            domain.VersionStatus `json:"status"`
+	Runtime           string               `json:"runtime"`
+	Model             string               `json:"model"`
+	Capabilities      []string             `json:"capabilities,omitempty"`
+	ConfigFingerprint string               `json:"config_fingerprint"`
+	ContentHash       string               `json:"content_hash"`
+	EnvironmentDigest string               `json:"environment_digest"`
+	PromptRef         string               `json:"prompt_ref,omitempty"`
+	SkillRefs         []string             `json:"skill_refs,omitempty"`
+	MemoryRef         string               `json:"memory_ref,omitempty"`
+	ToolRefs          []string             `json:"tool_refs,omitempty"`
+	CreatedBy         string               `json:"created_by"`
+	CreatedAt         time.Time            `json:"created_at"`
+	PromotedAt        *time.Time           `json:"promoted_at,omitempty"`
+	RetiredAt         *time.Time           `json:"retired_at,omitempty"`
 }
 
 type RefChange struct {
@@ -170,4 +170,8 @@ type VersionDiff struct {
 	Added         map[string]RefChange
 	Removed       map[string]RefChange
 	Changed       map[string]RefChange
+}
+
+type VersionPage struct {
+	Items []VersionSummary `json:"items"`
 }
