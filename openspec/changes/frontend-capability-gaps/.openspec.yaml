@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-07-05
+goal: Console supports benchmark creation and detail views without runtime errors

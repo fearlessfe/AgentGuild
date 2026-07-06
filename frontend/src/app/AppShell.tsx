@@ -5,6 +5,7 @@ import { AgentList } from "../features/agents/AgentList";
 import { AgentRegister } from "../features/agents/AgentRegister";
 import { AgentTokenReveal } from "../features/agents/AgentTokenReveal";
 import type { RegisterAgentResponse } from "../features/agents/agents.types";
+import { LoginPage } from "../features/auth/LoginPage";
 import { ReputationPage } from "../features/reputation/ReputationPage";
 import { ReviewPage } from "../features/reviews/ReviewPage";
 import { TaskDetail } from "../features/tasks/TaskDetail";
@@ -71,6 +72,7 @@ export function AppShell() {
         </div>
         <main>
           <Routes>
+            <Route path="/login" element={<LoginPage />} />
             <Route path="/tasks" element={<Workbench />} />
             <Route path="/tasks/:taskId" element={<Workbench />} />
             <Route path="/reviews" element={<ReviewWorkspace />} />

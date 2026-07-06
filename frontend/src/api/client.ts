@@ -137,6 +137,13 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
   }
 
   const response = await fetch(base + path, { ...init, headers, body });
+  if (response.status === 401) {
+    const pathname = window.location.pathname;
+    if (!pathname.startsWith("/login") && !pathname.startsWith("/oauth/oidc/login")) {
+      window.location.href = "/login";
+    }
+    throw new Error("未登录");
+  }
   if (!response.ok) {
     let message = `API request failed (${response.status})`;
     try {
@@ -218,6 +225,52 @@ const demoMeta = {
 
 let demoAgentCounter = 4;
 let demoAgents: DemoAgent[] = createDemoAgents();
+
+let demoBenchmarkSetCounter = 1;
+const demoBenchmarkSets = [
+  {
+    id: "bs-1",
+    tenant_id: "billing-platform",
+    version_number: 1,
+    name: "默认回归基准",
+    description: "包含核心回归任务",
+    is_active: true,
+    created_by: "owner-1",
+    created_at: "2026-07-01T10:00:00Z",
+  },
+];
+
+const demoEvaluationRuns = [
+  {
+    id: "run-1",
+    tenant_id: "billing-platform",
+    agent_version_id: "Atlas v12",
+    benchmark_set_id: "bs-1",
+    status: "passed",
+    environment_digest: "env-abc",
+    scoring_rule_version: "v1",
+    threshold_results: [{ name: "security", passed: true }],
+    summary: { pass_rate: 1.0, avg_latency_ms: 1200, cost_cents: 15, security_passed: true },
+    started_at: "2026-07-02T12:00:00Z",
+    completed_at: "2026-07-02T12:05:00Z",
+  },
+  {
+    id: "run-2",
+    tenant_id: "billing-platform",
+    agent_version_id: "Atlas v12",
+    benchmark_set_id: "bs-1",
+    status: "failed",
+    environment_digest: "env-def",
+    scoring_rule_version: "v1",
+    threshold_results: [
+      { name: "security", passed: true },
+      { name: "latency", passed: false },
+    ],
+    summary: { pass_rate: 0.5, avg_latency_ms: 3500, cost_cents: 22, security_passed: true },
+    started_at: "2026-07-02T13:00:00Z",
+    completed_at: "2026-07-02T13:06:00Z",
+  },
+];
 
 function createDemoAgents(): DemoAgent[] {
   return [
@@ -533,6 +586,57 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
       },
       meta: demoMeta,
     });
+  }
+
+  if (url.pathname === "/v1/benchmarks" && method === "GET") {
+    return clone({ data: { items: demoBenchmarkSets }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/benchmarks" && method === "POST") {
+    const body = parseDemoBody(init.body);
+    demoBenchmarkSetCounter += 1;
+    const benchmarkSet = {
+      id: `bs-${demoBenchmarkSetCounter}`,
+      tenant_id: "billing-platform",
+      version_number: demoBenchmarkSetCounter,
+      name: String(body.name ?? `Benchmark ${demoBenchmarkSetCounter}`),
+      description: typeof body.description === "string" ? body.description : "",
+      is_active: Boolean(body.is_active),
+      created_by: "owner-1",
+      created_at: "2026-07-02T14:00:00Z",
+    };
+    demoBenchmarkSets.push(benchmarkSet);
+    return clone({
+      data: { benchmark_set_id: benchmarkSet.id, version_number: benchmarkSet.version_number },
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname.startsWith("/v1/benchmarks/") && method === "GET") {
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+    const benchmarkSet = demoBenchmarkSets.find((item) => item.id === id);
+    if (!benchmarkSet) {
+      throw new Error(`Demo benchmark set not found: ${id}`);
+    }
+    return clone({ data: benchmarkSet, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/evaluations" && method === "GET") {
+    const agentVersionId = url.searchParams.get("agent_version_id");
+    let items = demoEvaluationRuns;
+    if (agentVersionId) {
+      items = items.filter((run) => run.agent_version_id === agentVersionId);
+    }
+    return clone({ data: { items }, meta: demoMeta });
+  }
+
+  if (url.pathname.startsWith("/v1/evaluations/") && method === "GET") {
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+    const run = demoEvaluationRuns.find((item) => item.id === id);
+    if (!run) {
+      throw new Error(`Demo evaluation run not found: ${id}`);
+    }
+    return clone({ data: run, meta: demoMeta });
   }
 
   throw new Error(`Unsupported demo route: ${method} ${url.pathname}`);
