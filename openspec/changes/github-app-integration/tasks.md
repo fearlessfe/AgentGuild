@@ -39,4 +39,4 @@
 - [x] 5.3 Write delta specs for `github-app-integration` and `local-login`
 - [x] 5.4 Update `AGENTS.md` with new environment variables and endpoints
 - [x] 5.5 Confirm `skill.md` does not need updating (Agent token auth unchanged)
-- [ ] 5.6 Run Comet open/build/verify/archive flow
+- [x] 5.6 Run Comet open/build/verify/archive flow
