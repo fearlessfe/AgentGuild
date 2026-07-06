@@ -50,14 +50,21 @@ describe("REST client authorization", () => {
 
   it("redirects to /login on 401 responses", async () => {
     const originalLocation = window.location;
-    delete (window as Window & { location?: Location }).location;
-    window.location = { ...originalLocation, href: "" } as Location;
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "未登录" } }), { status: 401 }));
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...originalLocation, href: "" },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: "未登录" } }), { status: 401 }),
+    );
 
     await expect(listTasks()).rejects.toThrow("未登录");
     expect(window.location.href).toBe("/login");
 
-    window.location = originalLocation;
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: originalLocation,
+    });
   });
 
   it("does not send Authorization header in demo mode", async () => {
