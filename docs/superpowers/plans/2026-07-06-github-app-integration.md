@@ -2,6 +2,7 @@
 change: github-app-integration
 design-doc: docs/superpowers/specs/2026-07-06-github-app-integration-design.md
 base-ref: cf0c6c84ba02d2fbf9657249c746da9de281f270
+archived-with: 2026-07-06-github-app-integration
 ---
 
 # github-app-integration 实施计划

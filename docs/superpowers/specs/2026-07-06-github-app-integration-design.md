@@ -2,6 +2,8 @@
 comet_change: github-app-integration
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-06-github-app-integration
+status: final
 ---
 
 # GitHub App Integration and Local Login Design

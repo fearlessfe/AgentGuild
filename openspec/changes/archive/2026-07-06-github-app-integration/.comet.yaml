@@ -17,6 +17,6 @@ verification_report: docs/superpowers/reports/2026-07-06-github-app-integration-
 branch_status: handled
 created_at: 2026-07-06
 verified_at: 2026-07-06
-archived: false
+archived: true
 handoff_context: openspec/changes/github-app-integration/.comet/handoff/design-context.json
 handoff_hash: 510f5c835a041f2138ebe41bb7915abbfb57fc03009dfe58593f067c9676df9b
