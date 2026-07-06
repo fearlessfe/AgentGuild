@@ -395,10 +395,13 @@ func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
 	return nil
 }
 
-func postJSONWithSession(t *testing.T, server http.Handler, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+func postJSONWithSession(t *testing.T, server http.Handler, path, body string, cookie *http.Cookie, headers ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)

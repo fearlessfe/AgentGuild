@@ -192,11 +192,13 @@ func (s *Server) Router() http.Handler {
 
 	r.Route("/v1", func(r chi.Router) {
 		if s.identity != nil {
+			// Agent self-service routes (bearer token only)
 			r.Post("/agents/me:activate", s.rateLimit(http.HandlerFunc(s.activateAgent)).ServeHTTP)
 			r.With(s.authenticate, s.rateLimit).Post("/agents/me:refresh", s.refreshAgentToken)
 			r.With(s.authenticate, s.rateLimit).Post("/agents/me:heartbeat", s.agentHeartbeat)
 			r.With(s.authenticate, s.rateLimit).Get("/agents/me", s.getSelfAgent)
 
+			// Human management routes (session only)
 			r.With(s.requireSession, s.rateLimit).Post("/agents", s.registerAgent)
 			r.With(s.requireSession, s.rateLimit).Get("/agents", s.listAgents)
 			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}", s.getAgent)
@@ -206,35 +208,58 @@ func (s *Server) Router() http.Handler {
 			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}:token", s.getAgentToken)
 		}
 
+		// Agent-only write routes (bearer token only)
 		r.With(s.authenticate, s.rateLimit).Post("/tasks", s.publishTask)
-		r.With(s.authenticate, s.rateLimit).Get("/tasks", s.listTasks)
-		r.With(s.authenticate, s.rateLimit).Get("/tasks/{id}", s.getTask)
 		r.With(s.authenticate, s.rateLimit).Post("/tasks/{id}:claim", s.claimTask)
 		r.With(s.authenticate, s.rateLimit).Post("/tasks/{id}:cancel", s.cancelTask)
 
-		r.With(s.authenticate, s.rateLimit).Get("/executions/{id}", s.getExecution)
+		// Shared read-only routes (session or bearer)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/tasks", s.listTasks)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/tasks/{id}", s.getTask)
+
+		// Agent-only write routes (bearer token only)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:start", s.startExecution)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:heartbeat", s.heartbeatExecution)
 
+		// Shared read-only routes (session or bearer)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/executions/{id}", s.getExecution)
+
 		if s.submissions != nil {
+			// Agent-only write routes (bearer token only)
 			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/submissions", s.createSubmission)
-			r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}", s.getSubmission)
+
+			// Shared read-only routes (session or bearer)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/submissions/{id}", s.getSubmission)
 		}
 
-		r.With(s.authenticate, s.rateLimit).Post("/submissions/{id}/reviews", s.createReview)
-		r.With(s.authenticate, s.rateLimit).Get("/submissions/{id}/diff", s.getSubmissionDiff)
+		// Human-only write routes (session only)
+		r.With(s.requireSession, s.rateLimit).Post("/submissions/{id}/reviews", s.createReview)
+
+		// Shared read-only routes (session or bearer)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/submissions/{id}/diff", s.getSubmissionDiff)
+
 		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/decision", s.submitDecision)
 		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/comments", s.addComment)
-		r.With(s.authenticate, s.rateLimit).Get("/reviews/{id}", s.getReview)
-		r.With(s.authenticate, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
-		r.With(s.authenticate, s.rateLimit).Get("/reputation", s.getReputation)
 
+		// Shared read-only routes (session or bearer)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/reviews/{id}", s.getReview)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/reputation", s.getReputation)
+
+		// Agent-only write routes (bearer token only)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:submit_for_review", s.submitForReview)
 
 		if s.versions != nil {
-			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}/versions", s.listAgentVersions)
+			// Shared read-only routes (session or bearer)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/agents/{id}/versions", s.listAgentVersions)
+
+			// Human-only write routes (session only)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions", s.createAgentVersion)
-			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}/versions/{version_id}", s.getAgentVersion)
+
+			// Shared read-only routes (session or bearer)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/agents/{id}/versions/{version_id}", s.getAgentVersion)
+
+			// Human-only write routes (session only)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/diff", s.diffAgentVersion)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/evaluations", s.startAgentVersionEvaluation)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/versions/{version_id}/promote", s.promoteAgentVersion)
@@ -242,20 +267,27 @@ func (s *Server) Router() http.Handler {
 		}
 
 		if s.experiences != nil {
-			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}/experiences", s.listAgentExperiences)
+			// Shared read-only routes (session or bearer)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/agents/{id}/experiences", s.listAgentExperiences)
+
+			// Human-only write routes (session only)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/experiences", s.createAgentExperience)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/experiences/{experience_id}/approve", s.approveAgentExperience)
 			r.With(s.requireSession, s.rateLimit).Post("/agents/{id}/experiences/{experience_id}/reject", s.rejectAgentExperience)
 		}
 
 		if s.evaluations != nil {
-			r.With(s.requireSession, s.rateLimit).Get("/benchmarks", s.listBenchmarks)
+			// Shared read-only routes (session or bearer)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/benchmarks", s.listBenchmarks)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/benchmarks/{id}", s.getBenchmark)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/evaluations", s.listEvaluations)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/evaluations/{id}", s.getEvaluation)
+
+			// Human-only write routes (session only)
 			r.With(s.requireSession, s.rateLimit).Post("/benchmarks", s.createBenchmark)
-			r.With(s.requireSession, s.rateLimit).Get("/benchmarks/{id}", s.getBenchmark)
-			r.With(s.requireSession, s.rateLimit).Get("/evaluations", s.listEvaluations)
-			r.With(s.requireSession, s.rateLimit).Get("/evaluations/{id}", s.getEvaluation)
 		}
 
+		// Agent-only write routes (bearer token only)
 		if s.credentials != nil {
 			r.With(s.authenticate, s.rateLimit).Post("/executions/{id}/credentials", s.issueCredential)
 			r.With(s.authenticate, s.rateLimit).Get("/executions/{id}/credentials", s.getCredential)

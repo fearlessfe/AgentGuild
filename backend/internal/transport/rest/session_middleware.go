@@ -30,6 +30,27 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) authenticateHumanOrAgent(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(auth.SessionCookieName)
+		if err == nil {
+			session, err := auth.ParseSessionCookie(cookie, s.sessionSecret)
+			if err == nil {
+				principal := auth.Principal{
+					TenantID:   session.TenantID,
+					Type:       auth.PrincipalTypeHuman,
+					OwnerID:    session.OwnerID,
+					OwnerEmail: session.OwnerEmail,
+					IsAdmin:    session.IsAdmin,
+				}
+				next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
+				return
+			}
+		}
+		s.authenticate(next).ServeHTTP(w, r)
+	})
+}
+
 func identityPrincipalFromAuth(principal auth.Principal) identityapp.Principal {
 	return identityapp.Principal{
 		TenantID:       principal.TenantID,
