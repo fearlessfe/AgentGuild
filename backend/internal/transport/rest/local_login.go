@@ -3,6 +3,7 @@ package rest
 import (
 	"crypto/subtle"
 	"net/http"
+	"time"
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/config"
@@ -37,6 +38,7 @@ func (a *localAdmin) login(w http.ResponseWriter, r *http.Request) {
 		OwnerID:    a.cfg.LocalAdmin.OwnerID,
 		OwnerEmail: a.cfg.LocalAdmin.OwnerEmail,
 		IsAdmin:    true,
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 	cookie, err := auth.NewSessionCookie(session, a.cfg.SessionCookieSecret, a.cfg.SessionCookieSecure)
 	if err != nil {
