@@ -1016,25 +1016,25 @@ git commit -m "feat(rest): github app manifest install flow and connection test"
   - `func (r Rule) Matches(issue git.Issue) bool` —— include 命中（若配置）且不命中任何 exclude 且 state 满足。这是 Task 5.2 引擎复用点。
   - 常量 `DedupeUpdate="update"`, `DedupeSkip="skip"`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `rule_test.go` 覆盖：合法 `NewRule` 成功；非法 repo（无斜杠）报错；非法 issue_state 报错；`Matches`：含标签命中、排除标签命中→false、include 为空视为不限制、closed 过滤。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/sync/domain/ -v`
 Expected: FAIL（包不存在）。
 
-- [ ] **Step 3: 实现 rule.go**
+- [x] **Step 3: 实现 rule.go**
 
 实现结构与校验、`Matches`（用 map 做 label 集合，O(n)）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/sync/domain/ -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild

@@ -1,30 +1,27 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 4b.3: REST —— manifest / callback / 安装回调 / 连接检测**
-Mapped OpenSpec task: **4b.2/4b.3/4b.4/4b.5/4b.6 manifest endpoint + callback 落库 + install callback + connection test + tests**
+Current plan task: **Task 4.1: sync_rules 领域模型与校验（TDD，纯逻辑）**
+Mapped OpenSpec task: **4.1 同步规则领域模型与校验（字段合法性、启停）**
 
 Stage: done
 Review mode: off
 TDD mode: tdd
-Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4b.3-brief.md
-Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4b.3-report.md
-Agent: a83cd77d4a70a259c (background implementer, completed task 4b.3)
+Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4.1-brief.md
+Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4.1-report.md
+Agent: 019f3d1e-b2f0-7372-ab86-a2155373ef2c (background implementer, completed task 4.1)
 
-Implementation commit: de1bafa
+Implementation commit: 9f9ab1c
 Changed files:
-- backend/internal/transport/rest/github_app_router_test.go
-- backend/internal/transport/rest/github_manifest_router.go
-- backend/internal/transport/rest/github_manifest_router_test.go
-- backend/internal/transport/rest/router.go
+- backend/internal/sync/domain/rule.go
+- backend/internal/sync/domain/rule_test.go
 RED evidence:
-- `cd backend && go test ./internal/transport/rest/ -run TestGitHubManifest -v` failed before route/handler registration (expected RED per brief).
+- `cd backend && go test ./internal/sync/domain/ -v` failed before implementation with undefined `NewRule`, `DedupeUpdate`, `ErrInvalidArgument`, `FieldOf`, and `Rule`.
 GREEN evidence:
-- `cd backend && go test ./internal/transport/rest/ -run 'TestGitHubManifest|TestGitHubApp' -v` PASS.
-- `cd backend && go test ./internal/transport/rest/ ./internal/git/... -count=1` PASS.
+- `cd backend && go test ./internal/sync/domain/ -v` PASS.
 Review/fix rounds: 0
 
 Notes:
 - Main session is coordinating only; implementation is delegated per Comet subagent-driven-development rules.
 - review_mode: off — accepted on RED/GREEN + worktree confirmation + targeted checkoff.
-- Pre-existing `fakeGitHubAppManager` IssueSource gap was fixed inside Task 4b.3 as required by the brief.
-- Previous completed task: Task 4b.2, implementation commit 312593d, progress commit 3cefa0a.
+- Business domain-local `Error`/`FieldOf` pattern matches existing modules such as agentversion/evaluation/identity.
+- Previous completed task: Task 4b.3, implementation commit de1bafa, progress commit f5e2156.
