@@ -112,6 +112,7 @@ type Server struct {
 	oidc          oidcProvider
 	localAdmin       *localAdmin
 	gitHubAppManager gitapp.GitHubAppManager
+	manifest         *gitapp.ManifestService
 }
 
 // WithLocalAdmin 挂载本地管理员 fallback 登录接口。
@@ -122,6 +123,11 @@ func WithLocalAdmin(cfg config.Config) Option {
 // WithGitHubAppManager 挂载 tenant 级 GitHub App 管理。
 func WithGitHubAppManager(m gitapp.GitHubAppManager) Option {
 	return func(s *Server) { s.gitHubAppManager = m }
+}
+
+// WithGitHubManifest 挂载 GitHub App manifest 安装流程（manifest/callback/installed）。
+func WithGitHubManifest(m *gitapp.ManifestService) Option {
+	return func(s *Server) { s.manifest = m }
 }
 
 // Option 配置 Server。
@@ -200,6 +206,11 @@ func (s *Server) Router() http.Handler {
 	if s.oidc != nil {
 		r.Get("/oauth/oidc/login", s.oidcLogin)
 		r.Get("/oauth/oidc/callback", s.oidcCallback)
+	}
+	if s.manifest != nil {
+		r.With(s.requireSession).Get("/oauth/github/app/manifest", s.githubManifest)
+		r.With(s.requireSession).Get("/oauth/github/app/callback", s.githubManifestCallback)
+		r.With(s.requireSession).Get("/oauth/github/app/installed", s.githubAppInstalled)
 	}
 	if s.localAdmin != nil {
 		r.Post("/oauth/local/login", s.localAdmin.login)
@@ -315,6 +326,7 @@ func (s *Server) Router() http.Handler {
 			r.With(s.requireSession, s.rateLimit).Get("/github-app", s.getGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Post("/github-app", s.upsertGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Delete("/github-app", s.deleteGitHubApp)
+			r.With(s.requireSession, s.rateLimit).Post("/github-app:test", s.testGitHubApp)
 		}
 	})
 	return r
