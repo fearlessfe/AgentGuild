@@ -1103,11 +1103,11 @@ git commit -m "feat(sync): rule repository and CRUD service with admin authz"
   - `POST /v1/sync-rules/{id}:run`（session, admin）：调 `SyncEngine.RunRule`，返回 `SyncResult` 摘要 `{created,updated,skipped,cancelled,failed}`。
   - `Server` 增字段 `syncRules *syncapp.RuleService`、`syncEngine SyncEngine`，Options `WithSyncRuleService`、`WithSyncEngine`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `sync_router_test.go`：admin session `POST /v1/sync-rules` → 201 + view；非 admin human → 403；agent bearer → 403/401；`GET /v1/repositories`（stub IssueSource 1 repo）→ items 长度 1；`POST /v1/sync-rules/{id}:run`（stub 引擎）→ 摘要字段齐全。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/transport/rest/ -run TestSync -v`
 Expected: FAIL。
@@ -1161,16 +1161,16 @@ git commit -m "feat(rest): repositories listing and sync-rule CRUD/run endpoints
 Run: `cd backend && go test ./internal/application/ -run TestSystemTask -v`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `domain/task.go` 加常量。`system_task.go` 实现三方法，复用 `task_commands.go` 中的 `TaskRecord` 构造、`appendEvents`（actor type=publisher、id=system id）、`UpdateTask(record, expectVersion, "")`。deadline 由调用方（引擎）传入（Task 5.2 用默认长期限）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/application/ -run TestSystemTask -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
