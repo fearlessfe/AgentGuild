@@ -131,6 +131,19 @@ func (s *gitHubAppService) Driver(ctx context.Context, tenantID string) (git.Dri
 	})
 }
 
+// IssueSource returns a git.IssueSource for the tenant's configured installation.
+func (s *gitHubAppService) IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error) {
+	driver, err := s.Driver(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	source, ok := driver.(git.IssueSource)
+	if !ok {
+		return nil, invalid("issue_source")
+	}
+	return source, nil
+}
+
 func toGitHubAppView(record *GitHubAppRecord) GitHubAppView {
 	if record == nil {
 		return GitHubAppView{Configured: false}

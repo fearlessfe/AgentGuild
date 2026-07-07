@@ -16,6 +16,7 @@ type GitHubAppService interface {
 // GitHubAppManager extends GitHubAppService with administrative operations.
 type GitHubAppManager interface {
 	GitHubAppService
+	IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)
 	Upsert(context.Context, UpsertGitHubApp) error
 	Get(context.Context, string) (GitHubAppView, error)
 	Delete(context.Context, string) error
