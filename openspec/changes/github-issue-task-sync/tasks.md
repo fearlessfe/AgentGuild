@@ -32,11 +32,11 @@
 ## 4b. GitHub 一键接入（Manifest）+ 连接检测
 
 - [x] 4b.1 迁移：`github_apps` 增可空列 `webhook_secret`/`client_id`/`client_secret`/`app_slug`（+down）
-- [ ] 4b.2 `GET /oauth/github/app/manifest`：生成 App Manifest（权限 + 回调 + state）并跳转 GitHub
-- [ ] 4b.3 `GET /oauth/github/app/callback`：校验 state → 用 code 调 conversions 换 app_id/私钥 → 落库
-- [ ] 4b.4 安装回调（setup URL）：捕获 `installation_id` 并持久化
-- [ ] 4b.5 `POST /v1/github-app:test`：用已存配置调一次轻量 GitHub API 验证，结构化返回（不回显私钥）
-- [ ] 4b.6 测试：state 不符拒绝、conversions 解析与落库（GitHub 交互 stub）、连接检测成功/失败
+- [x] 4b.2 `GET /oauth/github/app/manifest`：生成 App Manifest（权限 + 回调 + state）并跳转 GitHub
+- [x] 4b.3 `GET /oauth/github/app/callback`：校验 state → 用 code 调 conversions 换 app_id/私钥 → 落库
+- [x] 4b.4 安装回调（setup URL）：捕获 `installation_id` 并持久化
+- [x] 4b.5 `POST /v1/github-app:test`：用已存配置调一次轻量 GitHub API 验证，结构化返回（不回显私钥）
+- [x] 4b.6 测试：state 不符拒绝、conversions 解析与落库（GitHub 交互 stub）、连接检测成功/失败
 
 ## 5. Issue→Task 同步 worker
 

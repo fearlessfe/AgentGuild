@@ -956,19 +956,19 @@ git commit -m "feat(git): github app manifest orchestration service"
   - `POST /v1/github-app:test`（session）：调 `IssueSource.ListInstallationRepositories` 一次，返回 `{data:{ok:bool, repo_count:int, error?:string}}`，不回显私钥。
   - `Server` 增 `manifest *gitapp.ManifestService` 字段与 `WithGitHubManifest(*gitapp.ManifestService) Option`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `github_manifest_router_test.go` 覆盖：
 - `GET /oauth/github/app/manifest` 带 session → 200/302，响应含 GitHub apps/new 目标与 state。
 - `GET /oauth/github/app/callback` state 不符 → 400，且不落库（用假 manager 断言 Upsert 未被调用）。
 - `POST /v1/github-app:test` 成功（stub IssueSource 返回 1 repo）→ `ok:true, repo_count:1`；失败（stub Err）→ `ok:false` + error，HTTP 200（结构化结果）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/transport/rest/ -run TestGitHubManifest -v`
 Expected: FAIL（路由未注册）。
 
-- [ ] **Step 3: 实现 handler + 注册路由**
+- [x] **Step 3: 实现 handler + 注册路由**
 
 `github_manifest_router.go` 实现 4 个 handler；`:test` 用 `s.gitHubAppManager.IssueSource(ctx, principal.TenantID)`，`ListInstallationRepositories` 出错时把 `git.ErrGitHubAppNotConfigured` 映射为 `{ok:false, error:"github app not configured"}`。
 
@@ -986,12 +986,12 @@ r.With(s.requireSession, s.rateLimit).Post("/github-app:test", s.testGitHubApp)
 ```
 新增 `WithGitHubManifest` Option 与 `Server.manifest` 字段。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/transport/rest/ -run TestGitHubManifest -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
