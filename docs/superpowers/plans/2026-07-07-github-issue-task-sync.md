@@ -324,7 +324,7 @@ git commit -m "feat(git): add IssueSource abstraction and DTOs"
 - 列安装仓库：`GET /installation/repositories?per_page=100&page=N`，响应 `{ "repositories": [ { "full_name", "default_branch", "visibility"/"private" } ] }`，需按 `page` 分页直到返回空。
 - 列 Issue：`GET /repos/{owner}/{repo}/issues?state={state}&labels={csv}&since={RFC3339}&per_page=100&page=N`；过滤掉带 `pull_request` 字段的项（PR 也走 issues 端点）；label CSV 用逗号连接（GitHub 语义为 AND，含标签用它，排除标签在应用层过滤）；`state` 空时默认 "open"；`since` 零值时不带该参数。
 
-- [ ] **Step 1: 写失败测试（stub http.Client）**
+- [x] **Task 2.2 Step 1: 写失败测试（stub http.Client）**
 
 创建 `backend/internal/git/github/issues_test.go`：
 
@@ -412,12 +412,12 @@ func TestListInstallationRepositoriesPaginates(t *testing.T) {
 
 > 若同包已有测试私钥 helper（查看 `backend/internal/git/github/driver_test.go`），复用其名字替换 `testRSAKeyPEM`。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Task 2.2 Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/git/github/ -run 'TestListIssues|TestListInstallationRepositories' -v`
 Expected: FAIL（方法未定义）。
 
-- [ ] **Step 3: 写实现**
+- [x] **Task 2.2 Step 3: 写实现**
 
 创建 `backend/internal/git/github/issues.go`：
 
