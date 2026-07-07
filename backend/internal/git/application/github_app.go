@@ -16,6 +16,10 @@ type GitHubAppRecord struct {
 	InstallationID int64
 	PrivateKey     string
 	BaseURL        string
+	WebhookSecret  string
+	ClientID       string
+	ClientSecret   string
+	AppSlug        string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -28,6 +32,7 @@ type GitHubAppView struct {
 	AppID          int64     `json:"app_id"`
 	InstallationID int64     `json:"installation_id"`
 	BaseURL        string    `json:"base_url"`
+	AppSlug        string    `json:"app_slug,omitempty"`
 	Configured     bool      `json:"configured"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -41,6 +46,10 @@ type UpsertGitHubApp struct {
 	InstallationID int64
 	PrivateKey     string
 	BaseURL        string
+	WebhookSecret  string
+	ClientID       string
+	ClientSecret   string
+	AppSlug        string
 }
 
 // gitHubAppService is the concrete implementation of GitHubAppService.
@@ -90,6 +99,10 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 		InstallationID: cmd.InstallationID,
 		PrivateKey:     cmd.PrivateKey,
 		BaseURL:        baseURL,
+		WebhookSecret:  cmd.WebhookSecret,
+		ClientID:       cmd.ClientID,
+		ClientSecret:   cmd.ClientSecret,
+		AppSlug:        cmd.AppSlug,
 	})
 }
 
@@ -154,6 +167,7 @@ func toGitHubAppView(record *GitHubAppRecord) GitHubAppView {
 		AppID:          record.AppID,
 		InstallationID: record.InstallationID,
 		BaseURL:        record.BaseURL,
+		AppSlug:        record.AppSlug,
 		Configured:     true,
 		CreatedAt:      record.CreatedAt,
 		UpdatedAt:      record.UpdatedAt,
