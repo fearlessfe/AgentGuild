@@ -1207,7 +1207,7 @@ git commit -m "feat(core): system publisher task create/cancel/update"
    - 每次都刷新 `Mapping.LastSyncedAt`/`IssueState`，`Upsert`。
 3. 规则跑完 `TouchSynced(rule)` 更新水位（下次以 `LastSyncedAt` 作为 `since`）。
 
-- [ ] **Step 1: 写失败测试（全部用 StubIssueSource + fake repos + fake sink）**
+- [x] **Step 1: 写失败测试（全部用 StubIssueSource + fake repos + fake sink）**
 
 `engine_test.go` 覆盖 spec 场景：
 - 匹配 open issue → Created，sink 收到 system task（type/title 正确）。
@@ -1218,21 +1218,21 @@ git commit -m "feat(core): system publisher task create/cancel/update"
 - 单规则失败：stub `Err` 注入 → `RunAllEnabled` 该规则 Failed++ 且其它规则继续。
 - `since` 水位：`TouchSynced` 后下次调用 `ListIssues` 收到的 `since` 为上次时间（用 stub 记录入参断言）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/sync/application/ -run TestEngine -v`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 engine.go**
+- [x] **Step 3: 实现 engine.go**
 
 按上述逻辑实现；`Matches` 复用 `sync/domain.Rule.Matches`（排除标签在此额外判，因 GitHub `labels` 参数只做 include 的 AND）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/sync/application/ -run TestEngine -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
