@@ -182,7 +182,7 @@ git commit -m "fix(auth): scope policy branches by principal type for human read
 - Consumes: `application.NewService`、`auth.Principal{Type:PrincipalTypeHuman}`、`testdb.StartPostgres`（若已有 service 级测试基座则复用其构造方式）。
 - Produces: 回归证据 —— human `ListTasks` 放行；human `PublishTask`/`CancelTask` 因 `requireLiveAgent`/policy 语义不被本次改动放宽。
 
-- [ ] **Step 1: 写测试（human 读放行 + review requireScope 不误放行）**
+- [x] **Task 1.2 Step 1: 写测试（human 读放行 + review requireScope 不误放行）**
 
 追加到 `backend/internal/application/task_queries_test.go`（若无则新建，包 `application_test`，复用 `service_test.go` 中的 store 构造辅助；若 `service_test.go` 用内存 store helper `newTestService(t)`，直接复用；否则用 `testdb.StartPostgres` + `postgres.NewStore`）：
 
@@ -210,12 +210,12 @@ func TestReviewRequireScopeHumanStillNeedsScope(t *testing.T) {
 
 > 说明：`newTestService` 若不存在，改为读取 `service_test.go` 顶部的构造函数名并复用；不要新造 store。
 
-- [ ] **Step 2: 运行确认（应直接通过，因 review policy 未改）**
+- [x] **Task 1.2 Step 2: 运行确认（应直接通过，因 review policy 未改）**
 
 Run: `cd backend && go test -race ./internal/application/ ./internal/review/application/ -run 'TestListTasksAllowsHumanPrincipal|TestReviewRequireScope' -v`
 Expected: PASS。若 human ListTasks 仍失败，说明 Task 1.1 未生效，回到 1.1。
 
-- [ ] **Step 3: 路由级回归 —— 人类 `POST /v1/tasks` 仍 401**
+- [x] **Task 1.2 Step 3: 路由级回归 —— 人类 `POST /v1/tasks` 仍 401**
 
 在 `backend/internal/transport/rest/` 找到既有路由测试（如 `router_test.go`）；确认存在「session cookie 无法访问 agent-only 写路由」用例，若无则追加：human session（cookie）请求 `POST /v1/tasks` 走 `authenticate` 中间件（bearer-only），无 bearer → `401 UNAUTHORIZED`。
 
@@ -229,7 +229,7 @@ func TestPublishTaskRejectsSessionOnly(t *testing.T) {
 Run: `cd backend && go test -race ./internal/transport/rest/ -run TestPublishTaskRejectsSessionOnly -v`
 Expected: PASS。
 
-- [ ] **Step 4: 提交**
+- [x] **Task 1.2 Step 4: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild

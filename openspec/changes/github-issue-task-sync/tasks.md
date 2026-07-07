@@ -4,8 +4,8 @@
 
 - [x] 1.1 在 `backend/internal/auth/principal.go` 的 `ScopePolicy.Require` 增加 principal 类型分支：Agent 保持 `agent_id`/`agent_version_id`/`scopes` 校验；Human 仅要求 `tenant_id` 并放行共享只读
 - [x] 1.2 单元测试：人类（agent_id 空）通过 `tasks:read`；Agent（字段空）仍被拒；Agent 正常授权不变
-- [ ] 1.3 审阅 `review/application/policy.go` 复用点，确认人类分支不误放行评审写入
-- [ ] 1.4 回归测试固化「人类 session `POST /v1/tasks` 仍 401」
+- [x] 1.3 审阅 `review/application/policy.go` 复用点，确认人类分支不误放行评审写入
+- [x] 1.4 回归测试固化「人类 session `POST /v1/tasks` 仍 401」
 
 ## 2. GitHub 客户端能力扩展
 
