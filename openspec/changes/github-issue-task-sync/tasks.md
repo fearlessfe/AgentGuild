@@ -23,7 +23,7 @@
 ## 4. 同步规则领域/应用/存储 + REST
 
 - [x] 4.1 同步规则领域模型与校验（字段合法性、启停）
-- [ ] 4.2 规则存储（postgres）与应用服务（CRUD + 启停）
+- [x] 4.2 规则存储（postgres）与应用服务（CRUD + 启停）
 - [ ] 4.3 REST：`GET /v1/repositories`（实时列安装仓库）
 - [ ] 4.4 REST：`GET/POST/PUT/DELETE /v1/sync-rules`（人类 session，写操作要求 admin）
 - [ ] 4.5 REST：`POST /v1/sync-rules/{id}:run`（立即同步，返回结果摘要）

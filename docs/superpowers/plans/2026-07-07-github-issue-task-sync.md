@@ -1059,26 +1059,26 @@ git commit -m "feat(sync): rule domain model, validation and issue matcher"
   - `RuleService`：`Create/List/Get/Update/Delete/SetEnabled`，均接受 `auth.Principal`，**写操作要求 `principal.IsAdmin`**（返回 `domain.ErrForbidden` 否则），读操作要求 human + 同 tenant。视图 `RuleView`（JSON tags：`id, repo, include_labels, exclude_labels, issue_state, task_type, default_priority, dedupe_strategy, enabled, last_synced_at, created_at, updated_at`）。
 - Consumes: `sync/domain.Rule`、`auth.Principal`、`domain.Error`。
 
-- [ ] **Step 1: 写失败测试（仓储往返 + service admin 授权）**
+- [x] **Step 1: 写失败测试（仓储往返 + service admin 授权）**
 
 `rule_repository_test.go`（用 `testdb.StartPostgres`）：Create→Get→List→Update(enabled=false)→Delete 往返；`ListEnabledAllTenants` 只返回 enabled。
 service 单测（`service_test.go`，用内存 fake repo）：非 admin human `Create` → `ErrForbidden`；admin `Create` → 成功；agent principal `Create` → 拒绝（human-only）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/sync/... -v`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 store/repo/service**
+- [x] **Step 3: 实现 store/repo/service**
 
 postgres repo 用 pgx；`include_labels`/`exclude_labels` 以 JSONB 存取（`json.Marshal`→`[]byte`）。`RuleService` ID 生成用现有随机 ID 方式（参考 `application.randomID` 或 `uuid`——查看仓库既有 helper，复用之）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/sync/... -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
