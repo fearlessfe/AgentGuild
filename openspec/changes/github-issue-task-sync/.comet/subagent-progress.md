@@ -1,26 +1,24 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 2.2: github.Driver 实现 ListInstallationRepositories + ListIssues（TDD，stub http）**
-Mapped OpenSpec task: **2.1 在 `git/github` 驱动新增 `ListInstallationRepositories` 与 `ListIssues(repo, filter, since)`，复用 App 安装认证与 base URL 解析；2.3 单元测试：分页、标签/状态过滤、增量 `since` 水位**
+Current plan task: **Task 2.3: GitHubAppManager 暴露 IssueSource(tenant)**
+Mapped OpenSpec task: **2.2 定义 sync 应用层依赖的 Issue 源抽象接口**
 
 Stage: done
 Review mode: off
 TDD mode: tdd
-Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-2.2-brief.md
-Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-2.2-report.md
-Agent: 019f3c65-a9ad-75a3-ae38-5a5885d12bb4 (Dewey)
+Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-2.3-brief.md
+Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-2.3-report.md
+Agent: 019f3c6b-4644-7332-b132-fa7002a35c6d (Kepler)
 
-Implementation commit: 36812e8
+Implementation commit: 1be7032
 Changed files:
-- backend/internal/git/github/issues.go
-- backend/internal/git/github/issues_test.go
-RED evidence: `cd backend && go test ./internal/git/github/ -run 'TestListIssues|TestListInstallationRepositories' -v` failed before implementation with missing method compile errors.
-GREEN evidence:
-- `cd backend && go test ./internal/git/github/ -run 'TestListIssues|TestListInstallationRepositories' -v` passed.
-- `cd backend && go test ./internal/git/... -run 'TestListIssues|TestListInstallationRepositories' -v` passed.
+- backend/internal/git/application/contracts.go
+- backend/internal/git/application/github_app.go
+RED evidence: not applicable; small interface/adapter exposure with no meaningful behavior test in allowed scope.
+GREEN evidence: `cd backend && go build ./internal/git/...` passed; controller re-ran it successfully.
 Review/fix rounds: 0
 
 Notes:
 - Main session is coordinating only; implementation is delegated per Comet subagent-driven-development rules.
-- Previous completed task: Task 2.1, implementation commit f7a2cb3, progress commit 610b1fb.
-- Task 2.2 accepted with TDD RED/GREEN evidence verified by controller.
+- Previous completed task: Task 2.2, implementation commit 36812e8, progress commits 77280ff and dbea6d9.
+- Task 2.3 accepted. OpenSpec task 2.2 remains unchecked until Task 2.4 stub IssueSource is complete.

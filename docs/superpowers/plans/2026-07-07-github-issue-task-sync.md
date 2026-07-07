@@ -583,7 +583,7 @@ git commit -m "feat(github): list installation repositories and issues"
 **Interfaces:**
 - Produces: 在 `GitHubAppManager` 接口新增 `IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)`；`gitHubAppService.IssueSource` 复用 `Driver(ctx,tenant)` 返回的 `*github.Driver`（它已实现 `git.IssueSource`）。
 
-- [ ] **Step 1: 找到并扩展接口**
+- [x] **Task 2.3 Step 1: 找到并扩展接口**
 
 在 `github_app.go`（或其接口定义处）为 `GitHubAppManager` 接口增加方法，并实现：
 
@@ -604,12 +604,12 @@ func (s *gitHubAppService) IssueSource(ctx context.Context, tenantID string) (gi
 
 > `Driver` 已返回 `github.NewDriver(...)`，即 `*github.Driver`，实现 `git.IssueSource`，类型断言恒成立；断言失败分支仅为防御。
 
-- [ ] **Step 2: 编译**
+- [x] **Task 2.3 Step 2: 编译**
 
 Run: `cd backend && go build ./internal/git/...`
 Expected: PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Task 2.3 Step 3: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
