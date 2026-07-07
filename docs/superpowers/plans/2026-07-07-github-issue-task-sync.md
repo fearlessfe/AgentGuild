@@ -903,7 +903,7 @@ git commit -m "feat(git): persist github app manifest columns"
 
 Manifest JSON 权限字段（写死）：`"default_permissions": {"contents":"read","issues":"write","checks":"read","metadata":"read"}`，`"url"` 指向平台首页，`"redirect_url"` = `{PublicBaseURL}/oauth/github/app/callback`，`"setup_url"` = `{PublicBaseURL}/oauth/github/app/installed`，`"public": false`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 创建 `backend/internal/git/application/manifest_test.go`，覆盖：
 - `BuildManifest` 返回的 manifest JSON 含四项权限与两个回调 URL；state 非空。
@@ -916,23 +916,23 @@ func TestManifestBuildContainsPermissionsAndCallbacks(t *testing.T) { /* ... */ 
 func TestManifestExchangeCodePersistsCredentials(t *testing.T) { /* stub conversions, assert Upsert args */ }
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/git/application/ -run TestManifest -v`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 manifest.go**
+- [x] **Step 3: 实现 manifest.go**
 
 实现上述方法。state = `base64(payload).hmac`，payload 含 `{tenant, exp}`（复用类似 `task_queries.go` encodeCursor 的 HMAC 模式）。ExchangeCode 用 `opts.HTTPClient` POST conversions（`Accept: application/vnd.github+json`），解析后调 `apps.Upsert(ctx, UpsertGitHubApp{TenantID, AppID: id, InstallationID: 0, PrivateKey: pem, ClientID, ClientSecret, WebhookSecret, AppSlug: slug, BaseURL: derivedAPIBase})`。
 
 > `UpsertGitHubApp` 现要求 `InstallationID != 0`（`github_app.go:72`）。为支持"先建 App 后安装"，在 `Upsert` 校验中放宽：允许 `InstallationID == 0` 落库（后续安装回调补写）。修改 `github_app.go` 的 `Upsert`：移除 `if cmd.InstallationID == 0 { return invalid(...) }`，改为不校验（迁移列本身 NOT NULL，故落库时 InstallationID 用 0 占位是合法的 BIGINT）。同步更新既有 `github_app_test.go` 对该校验的断言（若存在）。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/git/application/ -run 'TestManifest|TestGitHubApp' -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
