@@ -59,7 +59,7 @@ base-ref: 380e213eba528594f5929c1ce638bfb6959a6264
 - Consumes: `auth.Principal`（既有字段）、`domain.Error`、`domain.ErrForbidden`。
 - Produces: `func (ScopePolicy) Require(principal Principal, scope string) error` —— 行为变更：human principal 只要求 `TenantID` 非空即放行；agent principal 保持原校验。签名不变，供 `application.Service.policy.Require` 与其它调用方复用。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Task 1.1 Step 1: 写失败测试**
 
 创建 `backend/internal/auth/principal_test.go`：
 
@@ -123,12 +123,12 @@ func domainErrorField(err error, out **domain.Error, field string) bool {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Task 1.1 Step 2: 运行测试确认失败**
 
 Run: `cd backend && go test ./internal/auth/ -run TestScopePolicy -v`
 Expected: FAIL —— human 分支测试因当前无条件要求 agent_id 而报 `agent_id is invalid`。
 
-- [ ] **Step 3: 写最小实现**
+- [x] **Task 1.1 Step 3: 写最小实现**
 
 替换 `backend/internal/auth/principal.go` 的 `Require`：
 
@@ -159,12 +159,12 @@ func (ScopePolicy) Require(principal Principal, scope string) error {
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Task 1.1 Step 4: 运行测试确认通过**
 
 Run: `cd backend && go test ./internal/auth/ -run TestScopePolicy -v`
 Expected: PASS（全部 5 个用例）。
 
-- [ ] **Step 5: 提交**
+- [x] **Task 1.1 Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
