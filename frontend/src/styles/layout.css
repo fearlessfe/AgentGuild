@@ -1,0 +1,149 @@
+/* Multi-column layout helpers and screen-specific composition used across
+   the flow screens. */
+
+.split-2 {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: var(--sp-5);
+  min-height: 0;
+}
+
+.split-2--wide { grid-template-columns: 1fr 340px; }
+
+.split-3 {
+  display: grid;
+  grid-template-columns: 240px 1fr 340px;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.col { min-height: 0; display: grid; grid-auto-rows: min-content; gap: var(--sp-4); }
+.col--fill { grid-template-rows: minmax(0, 1fr); }
+
+/* auth (login) ----------------------------------------------------------- */
+
+.auth-screen {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  min-height: 100vh;
+  padding: var(--sp-10);
+  background: var(--surface-sunken);
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.auth-title { font-size: 20px; font-weight: 800; }
+.auth-tagline { color: var(--text-muted); font-size: 13px; }
+.auth-card { width: 420px; display: grid; gap: var(--sp-3); }
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-error {
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--danger-quiet);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+/* fact grid (execution / submission) ------------------------------------ */
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-3) var(--sp-5);
+}
+
+.fact {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  font-size: 13px;
+}
+
+.fact .ctx-label { font-size: 10px; }
+
+/* rule grid (sync rule) -------------------------------------------------- */
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.rule-field { display: grid; gap: 5px; }
+
+/* detail panel blocks ---------------------------------------------------- */
+
+.detail-block { display: grid; gap: 4px; }
+.detail-block .ctx-label { font-size: 10px; }
+
+/* file rows + review bits ------------------------------------------------ */
+
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  width: 100%;
+  text-align: left;
+}
+
+.file-row[data-selected="true"] {
+  background: var(--action-quiet);
+  color: var(--action);
+}
+
+.review-progress { padding: 7px 10px; }
+
+/* task detail mobile drawer --------------------------------------------- */
+
+.task-detail-drawer {
+  width: min(420px, calc(100vw - 32px));
+  max-width: none;
+  max-height: 90vh;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  overflow: auto;
+}
+
+.task-detail-drawer::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.drawer-close {
+  float: right;
+  font-size: 20px;
+}

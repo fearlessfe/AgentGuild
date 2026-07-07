@@ -1,6 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { listTasks, pollInterval, type TaskStatus, type TaskView } from "../../api/client";
+import { StatusChip } from "../../ui";
 
 const statusLabel: Record<TaskStatus, string> = {
   draft: "草稿",
@@ -12,14 +13,16 @@ const statusLabel: Record<TaskStatus, string> = {
   expired: "已过期",
 };
 
-const statusDotLabel: Record<TaskStatus, string> = {
-  draft: "草稿",
-  open: "待领取",
-  claimed: "待审核",
-  in_progress: "运行中",
-  completed: "完成",
-  cancelled: "取消",
-  expired: "过期",
+type ChipTone = "action" | "success" | "warning" | "danger" | "info" | "neutral";
+
+const statusTone: Record<TaskStatus, ChipTone> = {
+  draft: "neutral",
+  open: "neutral",
+  claimed: "warning",
+  in_progress: "info",
+  completed: "success",
+  cancelled: "danger",
+  expired: "danger",
 };
 
 const tabs: { status?: TaskStatus; label: string }[] = [
@@ -81,39 +84,31 @@ export function TaskList() {
     });
   }
 
-  if (query.isPending) return <div className="loading">正在同步任务…</div>;
-  if (query.isError) return <div className="error">无法读取任务：{query.error.message}</div>;
-
-  const tasks = query.data.pages.flatMap((page) => page.data.items);
-  const groups = tabs.filter((t) => t.status).map((t) => ({
-    status: t.status!,
-    label: statusLabel[t.status!],
-    items: tasks.filter((task) => task.status === t.status),
-  }));
-
-  return (
-    <>
-      <nav className="tabs" role="tablist" aria-label="任务状态筛选">
+  const toolbar = (
+    <div className="stack-sm">
+      <div className="tabs" role="tablist" aria-label="任务状态筛选">
         {tabs.map((tab) => {
           const active = tab.status ? statusParam === tab.status : !statusParam;
           return (
             <button
               key={tab.status ?? "all"}
+              type="button"
               role="tab"
               aria-selected={active}
-              className={active ? "active" : undefined}
+              className="tab"
+              data-active={active}
               onClick={() => setStatusFilter(tab.status)}
             >
               {tab.label}
             </button>
           );
         })}
-      </nav>
-      <div className="filters">
-        <label htmlFor="type-filter">
-          类型
+      </div>
+      <div className="filter-bar">
+        <label className="filter">
+          类型：
           <select
-            id="type-filter"
+            aria-label="类型"
             value={type ?? ""}
             onChange={(e) => updateSearchParam("type", e.target.value || undefined)}
           >
@@ -124,64 +119,115 @@ export function TaskList() {
             ))}
           </select>
         </label>
-        <label htmlFor="publisher-filter">
-          发布 Agent
+        <label className="filter">
+          发布 Agent：
           <input
-            id="publisher-filter"
             type="text"
+            aria-label="发布 Agent"
             value={publisher ?? ""}
             placeholder="publisher_agent_version_id"
             onChange={(e) => updateSearchParam("publisher_agent_version_id", e.target.value || undefined)}
           />
         </label>
       </div>
-      <div className="task-table" aria-label="任务列表">
-        {groups.map((group) => (
-          <section className={`task-group group-${group.status}`} key={group.status}>
-            <header className="group-header">
-              <span>⌄</span>
-              <strong>{group.label} · {group.items.length}</strong>
-              <span className="group-meta">仓库　　　　　　类型　　　 截止时间</span>
-            </header>
-            {group.items.map((task) => (
-              <TaskRow task={task} key={task.id} />
-            ))}
-          </section>
-        ))}
-        {query.hasNextPage && (
-          <button
-            className="load-more"
-            onClick={() => query.fetchNextPage()}
-            disabled={query.isFetchingNextPage}
-          >
-            加载更多
-          </button>
-        )}
+    </div>
+  );
+
+  if (query.isPending) {
+    return (
+      <div className="stack">
+        {toolbar}
+        <div className="loading">正在同步任务…</div>
       </div>
+    );
+  }
+  if (query.isError) {
+    return (
+      <div className="stack">
+        {toolbar}
+        <div className="error">无法读取任务：{query.error.message}</div>
+      </div>
+    );
+  }
+
+  const tasks = query.data.pages.flatMap((page) => page.data.items);
+  const groups = tabs
+    .filter((t) => t.status)
+    .map((t) => ({
+      status: t.status!,
+      label: statusLabel[t.status!],
+      items: tasks.filter((task) => task.status === t.status),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  return (
+    <div className="stack">
+      {toolbar}
+      <section className="card" aria-label="任务列表">
+        <table className="dense-table">
+          <thead>
+            <tr>
+              <th scope="col">Task ID</th>
+              <th scope="col">标题</th>
+              <th scope="col">仓库</th>
+              <th scope="col">类型</th>
+              <th scope="col">状态</th>
+              <th scope="col">截止时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((group) => (
+              <TaskGroup key={group.status} label={group.label} count={group.items.length} items={group.items} />
+            ))}
+          </tbody>
+        </table>
+      </section>
+      {query.hasNextPage && (
+        <button
+          type="button"
+          className="btn"
+          onClick={() => query.fetchNextPage()}
+          disabled={query.isFetchingNextPage}
+        >
+          加载更多
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TaskGroup({ label, count, items }: { label: string; count: number; items: TaskView[] }) {
+  return (
+    <>
+      <tr className="group-row">
+        <td colSpan={6}>
+          {label} · {count}
+        </td>
+      </tr>
+      {items.map((task) => (
+        <TaskRow task={task} key={task.id} />
+      ))}
     </>
   );
 }
 
 function TaskRow({ task }: { task: TaskView }) {
   return (
-    <Link
-      className="task-row"
-      to={`/tasks/${task.id}`}
-      aria-label={`查看 ${task.id}`}
-    >
-      <span className="checkbox" aria-hidden="true" />
-      <span className="task-id">{task.id}</span>
-      <span
-        className={`status-dot ${task.status}`}
-        aria-label={statusDotLabel[task.status]}
-      />
-      <span className="task-title" title={task.title}>{task.title}</span>
-      <span className="repo" title={task.publisher_agent_version_id}>
-        {task.publisher_agent_version_id}
-      </span>
-      <span className="language" title={task.type}>{task.type}</span>
-      <span className="deadline">{formatDeadline(task.deadline)}</span>
-      <span className="more">•••</span>
-    </Link>
+    <tr>
+      <td>
+        <Link to={`/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
+          <code>{task.id}</code>
+        </Link>
+      </td>
+      <td className="task-title" title={task.title}>
+        {task.title}
+      </td>
+      <td>{task.publisher_agent_version_id}</td>
+      <td className="language">{task.type}</td>
+      <td>
+        <StatusChip tone={statusTone[task.status]}>{statusLabel[task.status]}</StatusChip>
+      </td>
+      <td>{formatDeadline(task.deadline)}</td>
+    </tr>
   );
 }

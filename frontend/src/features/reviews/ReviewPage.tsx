@@ -6,6 +6,7 @@ import { DiffViewer } from "./DiffViewer";
 import { FileTree } from "./FileTree";
 import { RevisionSelector } from "./RevisionSelector";
 import { RubricForm } from "./RubricForm";
+import { Card } from "../../ui";
 import type { Decision, FileDiff, LineComment, ReviewStatus, RubricScore } from "./reviews.types";
 
 function formatStatus(status: ReviewStatus) {
@@ -172,9 +173,9 @@ export function ReviewPage() {
   }
 
   return (
-    <div className="review-page">
-      <header className="review-header">
-        <h1>审核 {review.id}</h1>
+    <div className="review-page stack">
+      <header className="review-header card card-pad">
+        <h1 className="card-title">审核 {review.id}</h1>
         <div className="review-meta">
           <span>状态：<strong>{formatStatus(review.status)}</strong></span>
           {decisionLabel ? <span>结论：<strong>{decisionLabel}</strong></span> : null}
@@ -192,86 +193,21 @@ export function ReviewPage() {
       </header>
 
       {mutationError ? (
-        <div className="review-error" role="alert">
+        <div className="auth-error" role="alert">
           {mutationError.message}
         </div>
       ) : null}
 
-      <div className="review-decision-panel">
-        {rubricQuery.data ? (
-          <RubricForm
-            dimensions={rubricQuery.data.data.dimensions}
-            weights={rubricQuery.data.data.weights}
-            scores={scores}
-            onChange={setScores}
-            readOnly={isSubmitted}
-          />
-        ) : rubricQuery.isPending ? (
-          <div className="rubric-loading">正在加载评分表…</div>
-        ) : rubricQuery.isError ? (
-          <div className="rubric-error">无法加载评分表：{rubricQuery.error.message}</div>
-        ) : null}
-
-        <div className="review-summary-field">
-          <label htmlFor="review-summary">审核总结</label>
-          <textarea
-            id="review-summary"
-            rows={3}
-            value={summary}
-            disabled={isSubmitted}
-            onChange={(e) => setSummary(e.target.value)}
-            placeholder="输入审核总结…"
-          />
-        </div>
-
-        {!isSubmitted ? (
-          <div className="review-actions">
-            <button
-              type="button"
-              className="accept"
-              disabled={decisionMutation.isPending || rubricQuery.isPending}
-              onClick={() => decisionMutation.mutate("accepted")}
-            >
-              通过
-            </button>
-            <button
-              type="button"
-              className="revision"
-              disabled={decisionMutation.isPending || rubricQuery.isPending}
-              onClick={() => decisionMutation.mutate("revision_requested")}
-            >
-              退回修改
-            </button>
-            <button
-              type="button"
-              className="reject"
-              disabled={decisionMutation.isPending || rubricQuery.isPending}
-              onClick={() => decisionMutation.mutate("rejected")}
-            >
-              拒绝
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      {isSubmitted && review.rubric_scores.length > 0 ? (
-        <div className="review-rubric">
-          <h3>评分</h3>
-          <ul>
-            {review.rubric_scores.map((score) => (
-              <li key={score.dimension}>
-                {score.dimension}：<strong>{score.score}</strong>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      <div className="review-body">
-        <aside className="review-file-tree">
-          <FileTree files={files} selected={selectedPath ?? ""} onSelect={setSelectedPath} />
+      <div className="split-3">
+        <aside className="col scroll review-file-tree">
+          <Card title="文件" pad={false}>
+            <div className="card-pad">
+              <FileTree files={files} selected={selectedPath ?? ""} onSelect={setSelectedPath} />
+            </div>
+          </Card>
         </aside>
-        <main className="review-diff-pane">
+
+        <main className="col scroll review-diff-pane">
           {selectedFile ? (
             <DiffViewer
               diff={selectedFile}
@@ -279,9 +215,82 @@ export function ReviewPage() {
               onAddComment={handleAddComment}
             />
           ) : (
-            <div className="empty-diff">选择左侧文件查看 Diff</div>
+            <div className="empty-diff muted">选择左侧文件查看 Diff</div>
           )}
         </main>
+
+        <div className="col scroll">
+          <Card title="Rubric 评分">
+            <div className="review-decision-panel stack">
+              {rubricQuery.data ? (
+                <RubricForm
+                  dimensions={rubricQuery.data.data.dimensions}
+                  weights={rubricQuery.data.data.weights}
+                  scores={scores}
+                  onChange={setScores}
+                  readOnly={isSubmitted}
+                />
+              ) : rubricQuery.isPending ? (
+                <div className="rubric-loading muted">正在加载评分表…</div>
+              ) : rubricQuery.isError ? (
+                <div className="rubric-error error">无法加载评分表：{rubricQuery.error.message}</div>
+              ) : null}
+
+              <div className="review-summary-field field">
+                <label className="field-label" htmlFor="review-summary">审核总结</label>
+                <textarea
+                  id="review-summary"
+                  rows={3}
+                  value={summary}
+                  disabled={isSubmitted}
+                  onChange={(e) => setSummary(e.target.value)}
+                  placeholder="输入审核总结…"
+                />
+              </div>
+
+              {!isSubmitted ? (
+                <div className="review-actions row">
+                  <button
+                    type="button"
+                    className="btn btn--primary accept"
+                    disabled={decisionMutation.isPending || rubricQuery.isPending}
+                    onClick={() => decisionMutation.mutate("accepted")}
+                  >
+                    通过
+                  </button>
+                  <button
+                    type="button"
+                    className="btn revision"
+                    disabled={decisionMutation.isPending || rubricQuery.isPending}
+                    onClick={() => decisionMutation.mutate("revision_requested")}
+                  >
+                    退回修改
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--danger reject"
+                    disabled={decisionMutation.isPending || rubricQuery.isPending}
+                    onClick={() => decisionMutation.mutate("rejected")}
+                  >
+                    拒绝
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </Card>
+
+          {isSubmitted && review.rubric_scores.length > 0 ? (
+            <Card title="评分">
+              <ul className="perm-list">
+                {review.rubric_scores.map((score) => (
+                  <li key={score.dimension}>
+                    {score.dimension}：<strong>{score.score}</strong>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+        </div>
       </div>
     </div>
   );

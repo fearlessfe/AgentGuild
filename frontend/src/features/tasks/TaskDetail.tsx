@@ -2,6 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getExecution, getTask, pollInterval } from "../../api/client";
+import { Card, StatusChip } from "../../ui";
+
+type ChipTone = "action" | "success" | "warning" | "danger" | "info" | "neutral";
 
 const statusLabel: Record<string, string> = {
   draft: "草稿",
@@ -11,6 +14,16 @@ const statusLabel: Record<string, string> = {
   completed: "已完成",
   cancelled: "已取消",
   expired: "已过期",
+};
+
+const statusTone: Record<string, ChipTone> = {
+  draft: "neutral",
+  open: "neutral",
+  claimed: "warning",
+  in_progress: "info",
+  completed: "success",
+  cancelled: "danger",
+  expired: "danger",
 };
 
 const executionStatusLabel: Record<string, string> = {
@@ -58,7 +71,6 @@ function useMobile() {
 }
 
 export function TaskDetail({ taskId, onClose }: { taskId: string; onClose?: () => void }) {
-  const isMobile = useMobile();
   const task = useQuery({
     queryKey: ["task", taskId],
     queryFn: () => getTask(taskId),
@@ -72,41 +84,55 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose?: () =
     refetchInterval: (q) => pollInterval(q.state.data?.meta.poll_after_seconds),
   });
 
-  if (task.isPending) return <DetailShell onClose={onClose}><div className="loading">加载详情…</div></DetailShell>;
-  if (task.isError) return <DetailShell onClose={onClose}><div className="error">详情不可用</div></DetailShell>;
+  if (task.isPending)
+    return (
+      <DetailShell onClose={onClose}>
+        <div className="loading">加载详情…</div>
+      </DetailShell>
+    );
+  if (task.isError)
+    return (
+      <DetailShell onClose={onClose}>
+        <div className="error">详情不可用</div>
+      </DetailShell>
+    );
 
   return (
     <DetailShell onClose={onClose}>
-      <TaskDetailContent task={task.data.data} execution={execution.data?.data} serverTime={task.data.meta.server_time} />
+      <TaskDetailContent
+        task={task.data.data}
+        execution={execution.data?.data}
+        serverTime={task.data.meta.server_time}
+      />
     </DetailShell>
   );
 }
 
-function DetailShell({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose?: () => void;
-}) {
+TaskDetail.Empty = function TaskDetailEmpty() {
+  return (
+    <Card>
+      <div className="empty-state">
+        <span className="es-icon" aria-hidden="true">
+          ◱
+        </span>
+        <div className="es-title">选择左侧任务查看详情</div>
+      </div>
+    </Card>
+  );
+};
+
+function DetailShell({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   const isMobile = useMobile();
   return isMobile ? (
     <MobileDrawer onClose={onClose}>{children}</MobileDrawer>
   ) : (
-    <aside className="task-detail" aria-label="任务详情">
-      <button className="drawer-close" onClick={onClose} aria-label="关闭详情">×</button>
-      {children}
-    </aside>
+    <Card>
+      <div aria-label="任务详情">{children}</div>
+    </Card>
   );
 }
 
-function MobileDrawer({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose?: () => void;
-}) {
+function MobileDrawer({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -135,18 +161,21 @@ function MobileDrawer({
   }
 
   return createPortal(
-    <
-      dialog
+    <dialog
       ref={dialogRef}
-      className="task-detail mobile-drawer"
+      className="card task-detail-drawer"
       role="dialog"
       aria-modal="true"
       aria-label="任务详情"
       onCancel={handleCancel}
       onClick={handleBackdropClick}
     >
-      <button className="drawer-close" onClick={handleClose} aria-label="关闭详情">×</button>
-      {children}
+      <div className="card-pad">
+        <button className="icon-btn drawer-close" onClick={handleClose} aria-label="关闭详情">
+          ×
+        </button>
+        {children}
+      </div>
     </dialog>,
     document.body,
   );
@@ -161,104 +190,98 @@ function TaskDetailContent({
   execution?: import("../../api/client").ExecutionView;
   serverTime: string;
 }) {
-  const leaseActive =
-    execution && ["leased", "running"].includes(execution.status);
+  const leaseActive = execution && ["leased", "running"].includes(execution.status);
 
   return (
-    <>
-      <div className="detail-heading">
-        <span>{task.id}</span>
-        <span className={`detail-status ${task.status}`}>
-          ● {statusLabel[task.status] ?? task.status}
-        </span>
+    <div className="stack">
+      <div className="row-between">
+        <strong>{task.id}</strong>
+        <StatusChip tone={statusTone[task.status] ?? "neutral"}>
+          {statusLabel[task.status] ?? task.status}
+        </StatusChip>
       </div>
-      <h2>{task.title}</h2>
-      <section>
-        <h3>目标</h3>
-        <p>{task.problem}</p>
-      </section>
-      <section>
-        <h3>仓库</h3>
-        <p>{task.publisher_agent_version_id} ↗</p>
-      </section>
-      <section>
-        <h3>验收标准</h3>
-        <ol>
+
+      <div className="detail-block">
+        <span className="ctx-label">标题</span>
+        <div className="text-sm">{task.title}</div>
+      </div>
+      <div className="detail-block">
+        <span className="ctx-label">目标</span>
+        <div className="text-sm muted">{task.problem}</div>
+      </div>
+      <div className="detail-block">
+        <span className="ctx-label">仓库</span>
+        <div className="text-sm">{task.publisher_agent_version_id} ↗</div>
+      </div>
+      <div className="detail-block">
+        <span className="ctx-label">验收标准</span>
+        <ul className="perm-list">
           {task.requirements.map((requirement) => (
             <li key={requirement}>{requirement}</li>
           ))}
-        </ol>
-      </section>
-      <dl>
-        <div>
-          <dt>状态</dt>
-          <dd>{task.status}</dd>
-        </div>
-        <div>
-          <dt>类型</dt>
-          <dd>{task.type}</dd>
-        </div>
-        <div>
-          <dt>截止时间</dt>
-          <dd>{formatDateTime(task.deadline)}</dd>
-        </div>
-        <div>
-          <dt>发布 Agent</dt>
-          <dd>{task.publisher_agent_version_id}</dd>
-        </div>
-        {task.claimed_by && (
-          <div>
-            <dt>认领 Agent</dt>
-            <dd>{task.claimed_by}</dd>
-          </div>
-        )}
-        <div>
-          <dt>任务版本</dt>
-          <dd>v{task.state_version}</dd>
-        </div>
-      </dl>
+        </ul>
+      </div>
 
-      {execution && (
-        <section className="execution-card">
-          <h3>Execution</h3>
-          <div className="execution-line">
-            <b>{execution.agent_version_id}</b>
-            <span>{executionStatusLabel[execution.status] ?? execution.status}</span>
+      <div className="fact-grid">
+        <div className="fact">
+          <span className="ctx-label">状态</span>
+          <span>{task.status}</span>
+        </div>
+        <div className="fact">
+          <span className="ctx-label">类型</span>
+          <span>{task.type}</span>
+        </div>
+        <div className="fact">
+          <span className="ctx-label">截止时间</span>
+          <span>{formatDateTime(task.deadline)}</span>
+        </div>
+        <div className="fact">
+          <span className="ctx-label">发布 Agent</span>
+          <span>{task.publisher_agent_version_id}</span>
+        </div>
+        {task.claimed_by ? (
+          <div className="fact">
+            <span className="ctx-label">认领 Agent</span>
+            <span>{task.claimed_by}</span>
           </div>
-          {execution.stage && (
-            <>
-              <div className="detail-progress">
-                <i style={{ width: `${execution.progress ?? 0}%` }} />
-              </div>
-              <p>
-                <span>{execution.stage}</span>　
-                <span>{execution.progress ?? 0}%</span>
-              </p>
-            </>
-          )}
-          <p>{leaseActive ? formatLeaseDuration(serverTime, execution.lease_soft_expires_at) : "expired"}</p>
-          <small>
-            Soft {formatDateTime(execution.lease_soft_expires_at)} · Hard{" "}
-            {formatDateTime(execution.lease_hard_expires_at)}
-          </small>
-          {execution.cost && (
-            <div className="cost-block">
-              <p>Cost coverage: {execution.cost.coverage}</p>
-              <p>
-                Observed cost: ${execution.cost.observed_cost ?? "—"} · Self-reported: $
-                {execution.cost.self_reported_cost ?? "—"}
-              </p>
-              <p>Provider: {execution.cost.provider}</p>
-              {execution.cost.observed_at && (
-                <p>Observed at: {formatDateTime(execution.cost.observed_at)}</p>
-              )}
+        ) : null}
+        <div className="fact">
+          <span className="ctx-label">任务版本</span>
+          <span>v{task.state_version}</span>
+        </div>
+      </div>
+
+      {execution ? (
+        <Card title="Execution">
+          <div className="stack-sm">
+            <div className="row-between">
+              <b>{execution.agent_version_id}</b>
+              <span>{executionStatusLabel[execution.status] ?? execution.status}</span>
             </div>
-          )}
-          {execution.audit_summary && (
-            <p className="audit">审计　{execution.audit_summary}</p>
-          )}
-        </section>
-      )}
-    </>
+            {execution.stage ? (
+              <p className="text-sm muted">
+                <span>{execution.stage}</span>　<span>{execution.progress ?? 0}%</span>
+              </p>
+            ) : null}
+            <p className="text-sm">{leaseActive ? formatLeaseDuration(serverTime, execution.lease_soft_expires_at) : "expired"}</p>
+            <small className="faint">
+              Soft {formatDateTime(execution.lease_soft_expires_at)} · Hard {formatDateTime(execution.lease_hard_expires_at)}
+            </small>
+            {execution.cost ? (
+              <div className="text-sm muted">
+                <p>Cost coverage: {execution.cost.coverage}</p>
+                <p>
+                  Observed cost: ${execution.cost.observed_cost ?? "—"} · Self-reported: $
+                  {execution.cost.self_reported_cost ?? "—"}
+                </p>
+                <p>Provider: {execution.cost.provider}</p>
+                {execution.cost.observed_at ? <p>Observed at: {formatDateTime(execution.cost.observed_at)}</p> : null}
+              </div>
+            ) : null}
+            {execution.audit_summary ? <p className="text-sm faint">审计　{execution.audit_summary}</p> : null}
+          </div>
+        </Card>
+      ) : null}
+    </div>
   );
 }

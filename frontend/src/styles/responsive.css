@@ -1,0 +1,66 @@
+/* Responsive rules. Below 700px the rail collapses to a horizontal top bar
+   and multi-column splits stack. */
+
+@media (max-width: 900px) {
+  .split-3 {
+    grid-template-columns: 200px 1fr;
+  }
+  .split-3 > .col:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 700px) {
+  .app {
+    display: block;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .rail {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 8;
+  }
+
+  .rail-brand { margin: 0 var(--sp-2) 0 0; }
+  .rail-spacer { display: none; }
+
+  .app-body {
+    display: block;
+  }
+
+  .topbar {
+    height: 52px;
+  }
+
+  .topbar-module,
+  .topbar-search {
+    display: none;
+  }
+
+  .split-2,
+  .split-2--wide,
+  .split-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .fact-grid,
+  .rule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page {
+    padding: var(--sp-4);
+  }
+}

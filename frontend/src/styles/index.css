@@ -1,0 +1,11 @@
+/* Style entrypoint. Imports are ordered tokens → base → chrome → primitives
+   → layout → responsive so later rules can rely on the design tokens. */
+
+@import "./tokens.css";
+@import "./base.css";
+@import "./shell.css";
+@import "./components.css";
+@import "./review.css";
+@import "./legacy.css";
+@import "./layout.css";
+@import "./responsive.css";

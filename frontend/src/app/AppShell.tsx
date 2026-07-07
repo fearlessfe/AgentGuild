@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AgentDetail } from "../features/agents/AgentDetail";
 import { AgentList } from "../features/agents/AgentList";
 import { AgentRegister } from "../features/agents/AgentRegister";
@@ -16,101 +16,73 @@ import { EvaluationList } from "../features/evaluations/EvaluationList";
 import { VersionActions } from "../features/versions/VersionActions";
 import { VersionDetail, VersionTree } from "../features/versions/VersionTree";
 import type { VersionView } from "../features/versions/versions.types";
+import { OnboardingScreen } from "../features/onboarding/OnboardingScreen";
+import { GitIntegrationScreen } from "../features/git/GitIntegrationScreen";
+import { SyncRuleScreen } from "../features/sync/SyncRuleScreen";
+import { SyncResultScreen } from "../features/sync/SyncResultScreen";
+import { ExecutionDetailScreen } from "../features/executions/ExecutionDetailScreen";
+import { SubmissionValidationScreen } from "../features/submissions/SubmissionValidationScreen";
+import { OutcomeScreen } from "../features/outcome/OutcomeScreen";
+import { PageHeader, ButtonLink } from "../ui";
+import { Rail } from "./Rail";
+import { Topbar } from "./Topbar";
+
+/* Maps the current pathname to the module label shown in the topbar. Ordered
+   most-specific first. */
+const MODULE_MAP: readonly [string, string][] = [
+  ["/onboarding", "首次引导"],
+  ["/git-integration", "Git 接入"],
+  ["/sync-result", "同步结果"],
+  ["/sync", "仓库与规则"],
+  ["/executions", "执行详情"],
+  ["/submissions", "提交验证"],
+  ["/reviews", "审核工作台"],
+  ["/reputation", "声望"],
+  ["/outcome", "结果闭环"],
+  ["/agents", "Agents"],
+  ["/tasks", "任务中心"],
+];
+
+function moduleLabel(pathname: string): string {
+  const match = MODULE_MAP.find(([prefix]) => pathname.startsWith(prefix));
+  return match ? match[1] : "任务中心";
+}
 
 export function AppShell() {
   const location = useLocation();
-  const workspace = useMemo(() => {
-    if (location.pathname.startsWith("/agents")) return "Agents";
-    if (location.pathname.startsWith("/reputation")) return "声望";
-    if (location.pathname.startsWith("/reviews")) return "审核";
-    return "任务";
-  }, [location.pathname]);
+
+  // The login screen renders standalone, without the application chrome.
+  if (location.pathname === "/login") {
+    return <LoginPage />;
+  }
 
   return (
-    <div className="app-shell">
-      <nav className="rail" aria-label="主导航">
-        <b className="logo">AG</b>
-        <span>☷</span>
-        <span>⌂</span>
-        <NavLink to="/tasks" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="任务">
-          ▣
-        </NavLink>
-        <span>⌁</span>
-        <NavLink to="/reviews" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="审核">
-          ✓
-        </NavLink>
-        <span>★</span>
-        <NavLink to="/reputation" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="声望">
-          ♛
-        </NavLink>
-        <span>♢</span>
-        <NavLink to="/agents" className={({ isActive }) => (isActive ? "active" : undefined)} aria-label="Agents">
-          ◉
-        </NavLink>
-        <span>⚙</span>
-        <i />
-        <span>?</span>
-        <span>⌁</span>
-      </nav>
-      <div className="workspace">
-        <header className="topbar">
-          <strong>AgentGuild</strong>
-          <button>▣　Billing Platform　⌄</button>
-          <span>{workspace}</span>
-          <label>⌘ K　 搜索或执行命令…　⌕</label>
-          <span className="avatar">👨🏻</span>
-          <b>周昊然　⌄</b>
-        </header>
-        <div className="contextbar">
-          <span>⌂　仓库　<b>billing-service</b></span>
-          <span>GitLab MR　<b>!284 ↗</b></span>
-          <span>Commit　<b>a1b2c3d</b></span>
-          <span>Agent　<b>{workspace === "Agents" ? "◉ identity workspace" : workspace === "审核" ? "✓ Review Bot" : workspace === "声望" ? "♛ Reputation Lens" : "▣ Atlas v12"}</b></span>
-          <span>状态　<b className={workspace === "Agents" ? "success" : "warning"}>● {workspace === "Agents" ? "healthy" : "waiting review"}</b></span>
-          <span>耗时　<b>2h37m</b></span>
-          <span>成本　<b>$0.142</b></span>
-        </div>
-        <main>
+    <div className="app">
+      <Rail />
+      <div className="app-body">
+        <Topbar module={moduleLabel(location.pathname)} />
+        <main className="page scroll">
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/onboarding" element={<OnboardingScreen />} />
+            <Route path="/git-integration" element={<GitIntegrationScreen />} />
+            <Route path="/sync" element={<SyncRuleScreen />} />
+            <Route path="/sync-result" element={<SyncResultScreen />} />
             <Route path="/tasks" element={<Workbench />} />
             <Route path="/tasks/:taskId" element={<Workbench />} />
+            <Route path="/executions/:executionId" element={<ExecutionDetailScreen />} />
+            <Route path="/submissions/:submissionId" element={<SubmissionValidationScreen />} />
             <Route path="/reviews" element={<ReviewWorkspace />} />
             <Route path="/reviews/:reviewId" element={<ReviewWorkspace />} />
+            <Route path="/outcome" element={<OutcomeScreen />} />
             <Route path="/reputation" element={<ReputationWorkspace />} />
             <Route path="/agents" element={<AgentsWorkspace />} />
             <Route path="/agents/new" element={<AgentRegistrationWorkspace />} />
             <Route path="/agents/:agentId" element={<AgentDetailWorkspace />} />
-            <Route path="*" element={<Navigate to="/agents" replace />} />
+            <Route path="*" element={<Navigate to="/tasks" replace />} />
           </Routes>
         </main>
-        <footer>
-          <b>CI 与运行记录　⌄</b>
-          <span>✓　CI Workflow　　#918374　 <em>成功</em>　 14m 21s　 刚刚</span>
-          <span className="warning">▲　隐藏用例　18 / 20 未通过</span>
-          <a>查看详情 ↗</a>
-        </footer>
       </div>
-    </div>
-  );
-}
-
-function PageHeader({
-  title,
-  subtitle,
-  action,
-}: {
-  title: string;
-  subtitle: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="page-title">
-      <div>
-        <h1>{title}</h1>
-        <span>{subtitle}</span>
-      </div>
-      {action ?? <span className="readonly">只读观察模式</span>}
     </div>
   );
 }
@@ -119,19 +91,19 @@ function Workbench() {
   const { taskId } = useParams();
   const navigate = useNavigate();
   return (
-    <div className="observer">
-      <PageHeader title="任务" subtitle="发布、分配并追踪 Agent 的代码任务" />
-      <div className="split">
-        <div className="list-pane">
+    <div className="stack">
+      <PageHeader title="任务中心" sub="任务由同步规则生成；人工不领取、不提交，仅治理与审核。" />
+      <div className="split-2 split-2--wide">
+        <div className="col col--fill">
           <TaskList />
         </div>
-        {taskId ? (
-          <TaskDetail key={taskId} taskId={taskId} onClose={() => navigate("/tasks")} />
-        ) : (
-          <aside className="task-detail empty">
-            <p>选择左侧任务查看详情</p>
-          </aside>
-        )}
+        <div className="col">
+          {taskId ? (
+            <TaskDetail key={taskId} taskId={taskId} onClose={() => navigate("/tasks")} />
+          ) : (
+            <TaskDetail.Empty />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -139,13 +111,17 @@ function Workbench() {
 
 function AgentsWorkspace() {
   return (
-    <div className="observer">
-      <PageHeader title="Agents" subtitle="注册、启用并管理执行 Agent 的身份与状态" action={<NavLink className="primary-action" to="/agents/new">新增 Agent</NavLink>} />
-      <div className="agent-page-body">
-        <div className="list-pane">
-          <AgentList />
-        </div>
-      </div>
+    <div className="stack">
+      <PageHeader
+        title="Agents"
+        sub="注册、启用并管理执行 Agent 的身份与状态"
+        actions={
+          <ButtonLink to="/agents/new" variant="primary">
+            新增 Agent
+          </ButtonLink>
+        }
+      />
+      <AgentList />
     </div>
   );
 }
@@ -154,12 +130,18 @@ function AgentRegistrationWorkspace() {
   const [tokenView, setTokenView] = useState<RegisterAgentResponse | null>(null);
 
   return (
-    <div className="observer">
-      <PageHeader title="注册 Agent" subtitle="创建新 Agent，并在注册完成后一次性领取 activation token" action={<NavLink className="secondary-action" to="/agents">返回列表</NavLink>} />
-      <div className="agent-page-body">
-        <div className="agent-register-layout">
-          {tokenView ? <AgentTokenReveal tokenView={tokenView} onDismiss={() => setTokenView(null)} /> : null}
+    <div className="stack">
+      <PageHeader
+        title="注册 Agent"
+        sub="创建新 Agent，并在注册完成后一次性领取 activation token"
+        actions={<ButtonLink to="/agents">返回列表</ButtonLink>}
+      />
+      <div className="split-2">
+        <div className="col">
           <AgentRegister onRegistered={setTokenView} />
+        </div>
+        <div className="col">
+          {tokenView ? <AgentTokenReveal tokenView={tokenView} onDismiss={() => setTokenView(null)} /> : null}
         </div>
       </div>
     </div>
@@ -175,21 +157,23 @@ function AgentDetailWorkspace() {
   }
 
   return (
-    <div className="observer">
-      <PageHeader title="Agent 详情" subtitle="查看单个 Agent 的状态、版本谱系、经验候选与评测" action={<NavLink className="secondary-action" to="/agents">返回列表</NavLink>} />
-      <div className="agent-page-body">
-        <AgentDetail agentId={agentId} />
-        <div className="agent-versioning-sections">
-          <div className="versioning-pane">
-            <VersionTree agentId={agentId} onSelect={setSelectedVersion} />
-            {selectedVersion ? <VersionActions agentId={agentId} version={selectedVersion} /> : null}
-          </div>
-          <div className="versioning-pane">
-            {selectedVersion ? <VersionDetail agentId={agentId} versionId={selectedVersion.id} /> : null}
-            <ExperienceList agentId={agentId} />
-            <ExperienceReview agentId={agentId} />
-            <EvaluationList />
-          </div>
+    <div className="stack">
+      <PageHeader
+        title="Agent 详情"
+        sub="查看单个 Agent 的状态、版本谱系、经验候选与评测"
+        actions={<ButtonLink to="/agents">返回列表</ButtonLink>}
+      />
+      <AgentDetail agentId={agentId} />
+      <div className="split-2">
+        <div className="col">
+          <VersionTree agentId={agentId} onSelect={setSelectedVersion} />
+          {selectedVersion ? <VersionActions agentId={agentId} version={selectedVersion} /> : null}
+        </div>
+        <div className="col">
+          {selectedVersion ? <VersionDetail agentId={agentId} versionId={selectedVersion.id} /> : null}
+          <ExperienceList agentId={agentId} />
+          <ExperienceReview agentId={agentId} />
+          <EvaluationList />
         </div>
       </div>
     </div>
@@ -200,26 +184,29 @@ export function ReviewWorkspace() {
   const { reviewId } = useParams();
 
   return (
-    <div className="observer">
-      <PageHeader title="审核" subtitle="查看提交 Diff、评分并给出审核结论" />
-      <div className="review-page-body">
-        {reviewId ? <ReviewPage key={reviewId} /> : (
-          <aside className="review-detail empty">
-            <p>选择一次审核查看详情</p>
-          </aside>
-        )}
-      </div>
+    <div className="stack">
+      <PageHeader title="审核工作台" sub="查看提交 Diff、评分并给出审核结论" />
+      {reviewId ? (
+        <ReviewPage key={reviewId} />
+      ) : (
+        <div className="card">
+          <div className="empty-state">
+            <span className="es-icon" aria-hidden="true">
+              ❖
+            </span>
+            <div className="es-title">选择一次审核查看详情</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ReputationWorkspace() {
   return (
-    <div className="observer">
-      <PageHeader title="声望" subtitle="按 Agent 版本、能力与任务类型查看评审声誉投影" />
-      <div className="reputation-page-body">
-        <ReputationPage />
-      </div>
+    <div className="stack">
+      <PageHeader title="声望" sub="按 Agent 版本、能力与任务类型查看评审声誉投影" />
+      <ReputationPage />
     </div>
   );
 }
