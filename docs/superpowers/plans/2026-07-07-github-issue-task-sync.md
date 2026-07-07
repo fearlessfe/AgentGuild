@@ -561,12 +561,12 @@ func visibility(r repoPayload) string {
 var _ git.IssueSource = (*Driver)(nil)
 ```
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Task 2.2 Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/git/github/ -run 'TestListIssues|TestListInstallationRepositories' -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Task 2.2 Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
