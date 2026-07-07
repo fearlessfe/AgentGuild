@@ -254,7 +254,7 @@ git commit -m "test(auth): regression for human read allow and write still 401"
   - `type IssueSource interface { ListInstallationRepositories(ctx context.Context) ([]Repository, error); ListIssues(ctx context.Context, repo string, filter IssueFilter, since time.Time) ([]Issue, error) }`
   - 后续 driver（Task 2.2）与 stub（Task 2.4）都实现此接口；`GitHubAppManager` 需能返回 `IssueSource`（Task 2.3）。
 
-- [ ] **Step 1: 写接口与 DTO（无逻辑，先让包编译）**
+- [x] **Task 2.1 Step 1: 写接口与 DTO（无逻辑，先让包编译）**
 
 创建 `backend/internal/git/issuesource.go`：
 
@@ -297,12 +297,12 @@ type IssueSource interface {
 }
 ```
 
-- [ ] **Step 2: 编译确认**
+- [x] **Task 2.1 Step 2: 编译确认**
 
 Run: `cd backend && go build ./internal/git/`
 Expected: PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Task 2.1 Step 3: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
