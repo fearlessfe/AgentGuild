@@ -694,7 +694,7 @@ git commit -m "test(git): add StubIssueSource test double"
 - Produces: 表结构供 Task 4.2（sync_rules repo）与 Task 5.2（issue_task_map repo）使用。`github_apps` 新列供 Task 4b.3 落库。
 - 说明：D6 tasks.md 提到「同步频率」列与「每规则水位/游标」（tasks 3.1/3.3）。按 D6 最终决策「规则仅启/停，无每规则频率；单一全局 worker」，本迁移**不建独立频率列，也不建独立游标表**；改为在 `sync_rules` 保留 `last_synced_at` 作为每规则增量水位（满足 tasks 3.3 的 per-rule 游标意图，避免过度设计）。若审阅坚持独立列，可在此文件加 `poll_interval_seconds INT`，但 worker 不消费。
 
-- [ ] **Step 1: 写 up 迁移**
+- [x] **Task 3.1 Step 1: 写 up 迁移**
 
 创建 `backend/migrations/000010_issue_task_sync.up.sql`：
 
@@ -741,7 +741,7 @@ CREATE TABLE issue_task_map (
 CREATE INDEX issue_task_map_task_idx ON issue_task_map (tenant_id, task_id);
 ```
 
-- [ ] **Step 2: 写 down 迁移**
+- [x] **Task 3.1 Step 2: 写 down 迁移**
 
 创建 `backend/migrations/000010_issue_task_sync.down.sql`：
 
@@ -754,14 +754,14 @@ ALTER TABLE github_apps DROP COLUMN IF EXISTS client_id;
 ALTER TABLE github_apps DROP COLUMN IF EXISTS webhook_secret;
 ```
 
-- [ ] **Step 3: 登记进 testdb**
+- [x] **Task 3.1 Step 3: 登记进 testdb**
 
 在 `backend/internal/testdb/postgres.go`：
 - `openAndMigrate` 的 up 列表末尾追加 `applyMigration(t, db, "000010_issue_task_sync.up.sql")`。
 - `ApplyUpMigration` 末尾追加同一行。
 - `ApplyDownMigration` **开头**追加 `applyMigration(t, db, "000010_issue_task_sync.down.sql")`（down 顺序为倒序，最新的先降）。
 
-- [ ] **Step 4: 验证迁移可应用（up/down 往返）**
+- [x] **Task 3.1 Step 4: 验证迁移可应用（up/down 往返）**
 
 Run: `cd backend && go test ./internal/git/postgres/ -run TestMigration -count=1` —— 若无迁移往返测试，改为编译并在本地 psql 手动应用：
 
@@ -772,7 +772,7 @@ psql "postgres://agentguild:agentguild@127.0.0.1:5432/agentguild?sslmode=disable
 ```
 Expected: 两条 psql 均无错误。
 
-- [ ] **Step 5: 提交**
+- [x] **Task 3.1 Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild

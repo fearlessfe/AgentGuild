@@ -15,10 +15,10 @@
 
 ## 3. 数据模型与迁移
 
-- [ ] 3.1 新增迁移：同步规则表（仓库、包含/排除标签、状态、任务类型、优先级、重复策略、启用、频率）
-- [ ] 3.2 新增迁移：Issue↔Task 映射/去重表（tenant, repo, issue_number → task_id, 最后同步态）
-- [ ] 3.3 新增迁移：同步水位/游标（每规则或每 repo）
-- [ ] 3.4 提供 down 迁移
+- [x] 3.1 新增迁移：同步规则表（仓库、包含/排除标签、状态、任务类型、优先级、重复策略、启用、频率）
+- [x] 3.2 新增迁移：Issue↔Task 映射/去重表（tenant, repo, issue_number → task_id, 最后同步态）
+- [x] 3.3 新增迁移：同步水位/游标（每规则或每 repo）
+- [x] 3.4 提供 down 迁移
 
 ## 4. 同步规则领域/应用/存储 + REST
 
@@ -31,7 +31,7 @@
 
 ## 4b. GitHub 一键接入（Manifest）+ 连接检测
 
-- [ ] 4b.1 迁移：`github_apps` 增可空列 `webhook_secret`/`client_id`/`client_secret`/`app_slug`（+down）
+- [x] 4b.1 迁移：`github_apps` 增可空列 `webhook_secret`/`client_id`/`client_secret`/`app_slug`（+down）
 - [ ] 4b.2 `GET /oauth/github/app/manifest`：生成 App Manifest（权限 + 回调 + state）并跳转 GitHub
 - [ ] 4b.3 `GET /oauth/github/app/callback`：校验 state → 用 code 调 conversions 换 app_id/私钥 → 落库
 - [ ] 4b.4 安装回调（setup URL）：捕获 `installation_id` 并持久化
