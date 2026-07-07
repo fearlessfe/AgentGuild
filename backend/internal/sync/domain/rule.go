@@ -50,7 +50,11 @@ func (e Error) Is(target error) bool {
 	}
 }
 
-var ErrInvalidArgument = &Error{Code: "invalid_argument", Message: "request argument is invalid"}
+var (
+	ErrInvalidArgument = &Error{Code: "invalid_argument", Message: "request argument is invalid"}
+	ErrNotFound        = &Error{Code: "not_found", Message: "resource not found"}
+	ErrForbidden       = &Error{Code: "forbidden", Message: "actor is not allowed to perform this action"}
+)
 
 func NewRule(
 	id, tenantID, repo, taskType string,

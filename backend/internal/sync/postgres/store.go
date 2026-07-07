@@ -1,0 +1,64 @@
+package postgres
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"agentguild.dev/agentguild/backend/internal/sync/application"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+func NewStore(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool}
+}
+
+func (s *Store) WithTx(ctx context.Context, fn func(application.Tx) error) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	wrapped := &Tx{tx: tx}
+	if err := fn(wrapped); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type Tx struct {
+	tx pgx.Tx
+
+	nowOnce sync.Once
+	now     time.Time
+	nowErr  error
+}
+
+func (tx *Tx) Now(ctx context.Context) (time.Time, error) {
+	tx.nowOnce.Do(func() {
+		tx.nowErr = tx.tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&tx.now)
+	})
+	return tx.now, tx.nowErr
+}
+
+func (tx *Tx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return tx.tx.Exec(ctx, sql, args...)
+}
+
+func (tx *Tx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return tx.tx.Query(ctx, sql, args...)
+}
+
+func (tx *Tx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return tx.tx.QueryRow(ctx, sql, args...)
+}
+
+var _ application.Store = (*Store)(nil)
+var _ application.Tx = (*Tx)(nil)
