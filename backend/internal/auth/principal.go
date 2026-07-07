@@ -30,8 +30,14 @@ const (
 type ScopePolicy struct{}
 
 func (ScopePolicy) Require(principal Principal, scope string) error {
+	if principal.TenantID == "" {
+		return &domain.Error{Code: "invalid_argument", Message: "tenant_id is invalid", Field: "tenant_id"}
+	}
+	if principal.Type == PrincipalTypeHuman {
+		return nil
+	}
 	for field, value := range map[string]string{
-		"tenant_id": principal.TenantID, "agent_id": principal.AgentID, "agent_version_id": principal.AgentVersionID,
+		"agent_id": principal.AgentID, "agent_version_id": principal.AgentVersionID,
 	} {
 		if value == "" {
 			return &domain.Error{Code: "invalid_argument", Message: field + " is invalid", Field: field}
