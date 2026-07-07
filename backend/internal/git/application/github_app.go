@@ -78,9 +78,6 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 	if cmd.AppID == 0 {
 		return invalid("app_id")
 	}
-	if cmd.InstallationID == 0 {
-		return invalid("installation_id")
-	}
 	if cmd.PrivateKey == "" {
 		return invalid("private_key")
 	}

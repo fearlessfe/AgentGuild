@@ -45,10 +45,6 @@ func TestGitHubAppUpsertValidatesRequiredFields(t *testing.T) {
 			cmd:  application.UpsertGitHubApp{TenantID: "tenant-1", InstallationID: 2, PrivateKey: validKey},
 		},
 		{
-			name: "missing installation_id",
-			cmd:  application.UpsertGitHubApp{TenantID: "tenant-1", AppID: 1, PrivateKey: validKey},
-		},
-		{
 			name: "missing private_key",
 			cmd:  application.UpsertGitHubApp{TenantID: "tenant-1", AppID: 1, InstallationID: 2},
 		},
@@ -64,6 +60,24 @@ func TestGitHubAppUpsertValidatesRequiredFields(t *testing.T) {
 			require.Equal(t, "invalid_argument", derr.Code)
 		})
 	}
+}
+
+func TestGitHubAppUpsertAllowsZeroInstallationID(t *testing.T) {
+	ctx := context.Background()
+	manager := newGitHubAppManager(t)
+	key := generateRSAPrivateKeyPEM(t)
+
+	err := manager.Upsert(ctx, application.UpsertGitHubApp{
+		TenantID:   "tenant-1",
+		AppID:      1,
+		PrivateKey: key,
+	})
+	require.NoError(t, err)
+
+	view, err := manager.Get(ctx, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, int64(0), view.InstallationID)
+	require.True(t, view.Configured)
 }
 
 func TestGitHubAppUpsertDefaultsProviderAndBaseURL(t *testing.T) {
