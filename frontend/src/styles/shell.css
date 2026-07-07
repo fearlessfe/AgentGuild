@@ -9,6 +9,10 @@
   height: 100vh;
 }
 
+.app[data-rail="expanded"] {
+  grid-template-columns: 220px 1fr;
+}
+
 /* left navigation rail */
 
 .rail {
@@ -19,6 +23,24 @@
   padding: var(--sp-4) 0;
   border-right: 1px solid var(--border);
   background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.rail[data-collapsed="false"] {
+  align-items: stretch;
+  padding: var(--sp-4) var(--sp-3);
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+
+.rail[data-collapsed="false"] .rail-head {
+  justify-content: space-between;
 }
 
 .rail-brand {
@@ -26,23 +48,63 @@
   place-items: center;
   width: 34px;
   height: 34px;
-  margin-bottom: var(--sp-4);
   border-radius: var(--r-md);
   background: var(--action);
   color: var(--text-invert);
   font-weight: 800;
   font-size: 15px;
+  flex: none;
+}
+
+.rail-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.rail-toggle:hover {
+  color: var(--action);
+  border-color: var(--action);
+}
+
+/* When collapsed the toggle stacks under the brand mark; when expanded it sits
+   to the right of the brand in a single row. */
+.rail[data-collapsed="true"] .rail-head {
+  flex-direction: column;
 }
 
 .rail-item {
   display: grid;
+  grid-template-columns: 40px;
   place-items: center;
-  width: 40px;
   height: 40px;
   border-radius: var(--r-md);
   color: var(--text-faint);
   font-size: 17px;
   text-decoration: none;
+}
+
+.rail[data-collapsed="false"] .rail-item {
+  grid-template-columns: 28px 1fr;
+  justify-items: start;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  font-size: 14px;
+}
+
+.rail-icon {
+  display: grid;
+  place-items: center;
+  font-size: 17px;
 }
 
 .rail-item[data-active="true"],
@@ -51,9 +113,20 @@
   color: var(--action);
 }
 
+.rail-item--static {
+  cursor: default;
+}
+
 .rail-item .rail-label {
   position: absolute;
   left: -9999px;
+}
+
+.rail[data-collapsed="false"] .rail-item .rail-label {
+  position: static;
+  left: auto;
+  color: inherit;
+  white-space: nowrap;
 }
 
 .rail-spacer { flex: 1; }

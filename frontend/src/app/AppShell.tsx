@@ -26,6 +26,7 @@ import { OutcomeScreen } from "../features/outcome/OutcomeScreen";
 import { PageHeader, ButtonLink } from "../ui";
 import { Rail } from "./Rail";
 import { Topbar } from "./Topbar";
+import { useRailCollapsed } from "./useRailCollapsed";
 
 /* Maps the current pathname to the module label shown in the topbar. Ordered
    most-specific first. */
@@ -50,6 +51,7 @@ function moduleLabel(pathname: string): string {
 
 export function AppShell() {
   const location = useLocation();
+  const { collapsed, toggle } = useRailCollapsed();
 
   // The login screen renders standalone, without the application chrome.
   if (location.pathname === "/login") {
@@ -57,8 +59,8 @@ export function AppShell() {
   }
 
   return (
-    <div className="app">
-      <Rail />
+    <div className="app" data-rail={collapsed ? "collapsed" : "expanded"}>
+      <Rail collapsed={collapsed} onToggle={toggle} />
       <div className="app-body">
         <Topbar module={moduleLabel(location.pathname)} />
         <main className="page scroll">

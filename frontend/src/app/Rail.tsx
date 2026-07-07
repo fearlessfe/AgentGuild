@@ -1,7 +1,9 @@
 import { NavLink } from "react-router-dom";
 
 /* Left navigation rail. Each item maps a module to its primary route; icons are
-   decorative and the accessible name comes from the aria-label. */
+   decorative and the accessible name comes from the aria-label. The rail
+   collapses to an icon-only strip or expands to show labels; the caller owns
+   that state so the surrounding grid can resize in step. */
 
 type RailItem = { to: string; icon: string; label: string };
 
@@ -13,12 +15,25 @@ const RAIL_ITEMS: readonly RailItem[] = [
   { to: "/outcome", icon: "◔", label: "结果" },
 ];
 
-export function Rail() {
+type RailProps = { collapsed: boolean; onToggle: () => void };
+
+export function Rail({ collapsed, onToggle }: RailProps) {
   return (
-    <nav className="rail" aria-label="主导航">
-      <span className="rail-brand" aria-hidden="true">
-        AG
-      </span>
+    <nav className="rail" data-collapsed={collapsed} aria-label="主导航">
+      <div className="rail-head">
+        <span className="rail-brand" aria-hidden="true">
+          AG
+        </span>
+        <button
+          type="button"
+          className="rail-toggle"
+          onClick={onToggle}
+          aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+          aria-pressed={!collapsed}
+        >
+          <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
+        </button>
+      </div>
       {RAIL_ITEMS.map((item) => (
         <NavLink
           key={item.to}
@@ -26,7 +41,9 @@ export function Rail() {
           className={({ isActive }) => (isActive ? "rail-item active" : "rail-item")}
           aria-label={item.label}
         >
-          <span aria-hidden="true">{item.icon}</span>
+          <span className="rail-icon" aria-hidden="true">
+            {item.icon}
+          </span>
           <span className="rail-label">{item.label}</span>
         </NavLink>
       ))}
@@ -36,11 +53,14 @@ export function Rail() {
         className={({ isActive }) => (isActive ? "rail-item active" : "rail-item")}
         aria-label="Agents"
       >
-        <span aria-hidden="true">◉</span>
+        <span className="rail-icon" aria-hidden="true">
+          ◉
+        </span>
         <span className="rail-label">Agents</span>
       </NavLink>
-      <span className="rail-item" aria-hidden="true">
-        ⚙
+      <span className="rail-item rail-item--static" aria-hidden="true">
+        <span className="rail-icon">⚙</span>
+        <span className="rail-label">设置</span>
       </span>
     </nav>
   );
