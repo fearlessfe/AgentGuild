@@ -10,7 +10,7 @@
 ## 2. GitHub 客户端能力扩展
 
 - [x] 2.1 在 `git/github` 驱动新增 `ListInstallationRepositories` 与 `ListIssues(repo, filter, since)`，复用 App 安装认证与 base URL 解析
-- [ ] 2.2 定义 sync 应用层依赖的 Issue 源抽象接口，并提供 stub 实现供测试
+- [x] 2.2 定义 sync 应用层依赖的 Issue 源抽象接口，并提供 stub 实现供测试
 - [x] 2.3 单元测试：分页、标签/状态过滤、增量 `since` 水位
 
 ## 3. 数据模型与迁移

@@ -625,7 +625,7 @@ git commit -m "feat(git): expose IssueSource from GitHubAppManager"
 **Interfaces:**
 - Produces: `type StubIssueSource struct { Repos []git.Repository; Issues map[string][]git.Issue; Err error; Calls int }`，实现 `git.IssueSource`；`ListIssues` 返回 `Issues[repo]`，支持注入 `Err` 模拟失败。供 Task 4.5、Task 5.x 测试注入。
 
-- [ ] **Step 1: 写 stub**
+- [x] **Task 2.4 Step 1: 写 stub**
 
 创建 `backend/internal/git/gittest/stub_issue_source.go`：
 
@@ -666,12 +666,12 @@ func (s *StubIssueSource) ListIssues(ctx context.Context, repo string, filter gi
 var _ git.IssueSource = (*StubIssueSource)(nil)
 ```
 
-- [ ] **Step 2: 编译**
+- [x] **Task 2.4 Step 2: 编译**
 
 Run: `cd backend && go build ./internal/git/...`
 Expected: PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Task 2.4 Step 3: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
