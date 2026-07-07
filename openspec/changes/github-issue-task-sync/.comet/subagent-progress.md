@@ -1,23 +1,28 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 2.4: stub IssueSource（供后续 sync/REST 测试复用）**
-Mapped OpenSpec task: **2.2 定义 sync 应用层依赖的 Issue 源抽象接口**
+Current plan task: **Task 3.1: 迁移 —— github_apps 增列 + sync_rules + issue_task_map（含 down）**
+Mapped OpenSpec task: **3.1 新增迁移：同步规则表；3.2 新增迁移：Issue↔Task 映射/去重表；3.3 新增迁移：同步水位/游标；3.4 提供 down 迁移；4b.1 迁移：`github_apps` 增可空列 `webhook_secret`/`client_id`/`client_secret`/`app_slug`（+down）**
 
-Stage: done
+Stage: blocked
 Review mode: off
 TDD mode: tdd
-Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-2.4-brief.md
-Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-2.4-report.md
-Agent: 019f3c6f-0727-7c30-93f8-18c6edee9c51 (Lorentz)
+Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-3.1-brief.md
+Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-3.1-report.md
+Agent: 019f3c73-11d2-7111-a342-65de4ae7eeb3 (Russell)
 
-Implementation commit: 209bd0a
+Implementation commit: 97b107b
 Changed files:
-- backend/internal/git/gittest/stub_issue_source.go
-RED evidence: not applicable; allowed write scope only permitted the reusable test double file, no meaningful behavior test file.
-GREEN evidence: `cd backend && go build ./internal/git/...` passed; controller re-ran it successfully.
+- backend/migrations/000010_issue_task_sync.up.sql
+- backend/migrations/000010_issue_task_sync.down.sql
+- backend/internal/testdb/postgres.go
+RED evidence: not applicable; SQL migration task with no meaningful pre-implementation unit test in allowed scope.
+GREEN evidence:
+- `cd backend && go test ./internal/git/postgres/ -run TestMigration -count=1` passed but reported no matching tests.
+- `cd backend && go test ./internal/testdb/ -count=1` passed with no test files.
+- `cd backend && go test ./internal/postgres/ -run TestMigration -count=1` failed before applying migrations because Docker daemon is unavailable.
 Review/fix rounds: 0
 
 Notes:
 - Main session is coordinating only; implementation is delegated per Comet subagent-driven-development rules.
-- Previous completed task: Task 2.3, implementation commit 1be7032, progress commit a6a9ca1.
-- Task 2.4 accepted. OpenSpec task 2.2 is now complete together with Task 2.1 and Task 2.3.
+- Previous completed task: Task 2.4, implementation commit 209bd0a, progress commit 32c822f.
+- Blocked on real PostgreSQL migration round-trip verification: `AGENTGUILD_TEST_DATABASE_URL` is unset, `psql`/`pg_isready` are unavailable, and Docker daemon is not running at `unix:///Users/pengzhen/.docker/run/docker.sock`.
