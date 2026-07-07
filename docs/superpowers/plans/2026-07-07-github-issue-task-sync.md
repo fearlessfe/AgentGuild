@@ -796,7 +796,7 @@ git commit -m "feat(db): migration for sync_rules, issue_task_map, github_apps m
 **Interfaces:**
 - Produces: `GitHubAppRecord` 新增 `WebhookSecret, ClientID, ClientSecret, AppSlug string`；`UpsertGitHubApp` 同样新增这些可选字段。`GitHubAppView` 不新增私密字段（仅可选 `AppSlug string \`json:"app_slug,omitempty"\``）。
 
-- [ ] **Step 1: 写失败测试（仓储往返含新列）**
+- [x] **Step 1: 写失败测试（仓储往返含新列）**
 
 在 `backend/internal/git/postgres/repository_test.go` 追加：
 
@@ -818,12 +818,12 @@ func TestGitHubAppRepositoryPersistsManifestColumns(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/git/postgres/ -run TestGitHubAppRepositoryPersistsManifestColumns -v`
 Expected: FAIL（字段不存在 / 未 scan）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `github_app.go`：给 `GitHubAppRecord` 与 `UpsertGitHubApp` 增字段；`Upsert` 方法透传新字段（provider/baseURL 默认逻辑不变）；`toGitHubAppView` 增加 `AppSlug`。给 `GitHubAppView` 加 `AppSlug string \`json:"app_slug,omitempty"\``。
 
@@ -873,12 +873,12 @@ record.AppSlug = appSlug.String
 
 加辅助（同文件）：`func nullString(s string) any { if s == "" { return nil }; return s }`，并 import `database/sql`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/git/postgres/ -run TestGitHubAppRepositoryPersistsManifestColumns -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
