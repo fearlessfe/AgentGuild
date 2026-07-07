@@ -14,6 +14,8 @@ const (
 	TaskExpired    TaskStatus = "expired"
 )
 
+const SystemIssuePublisherID = "system-issue-sync"
+
 type Intent uint8
 
 const (
