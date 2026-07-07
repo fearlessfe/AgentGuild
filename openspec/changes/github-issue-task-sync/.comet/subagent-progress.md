@@ -1,28 +1,28 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 5.2: 同步引擎（拉取→过滤→映射→去重→更新/取消/对账）（TDD，stub IssueSource）**
-Mapped OpenSpec task: **5.2 同步引擎：按规则拉取 Issue → 过滤 → 映射为 Task → 去重 → 按重复策略更新/跳过**
+Current plan task: **Task 4.3 + 4.4 + 4.5: REST —— /v1/repositories、/v1/sync-rules CRUD、:run（TDD）**
+Mapped OpenSpec task: **4.3/4.4/4.5 repositories listing + sync-rules CRUD + manual run**
 
 Stage: done
 Review mode: off
 TDD mode: tdd
-Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-5.2-brief.md
-Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-5.2-report.md
-Agent: 019f3d40-1029-7b32-a618-adb102a954a8 (background implementer, completed task 5.2)
+Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4.3-brief.md
+Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4.3-report.md
+Agent: 019f3d47-d947-7772-9999-a212f36b154f (background implementer, completed task 4.3/4.4/4.5)
 
-Implementation commit: d09c2a6
+Implementation commit: fce9f69
 Changed files:
-- backend/internal/sync/application/engine.go
-- backend/internal/sync/application/engine_test.go
+- backend/internal/transport/rest/router.go
+- backend/internal/transport/rest/sync_router.go
+- backend/internal/transport/rest/sync_router_test.go
 RED evidence:
-- `cd backend && go test ./internal/sync/application/ -run TestEngine -v` failed before implementation with undefined `NewEngine`, `EngineOptions`, `PublishSystemTaskInput`, and `ContentInput`.
+- `cd backend && go test ./internal/transport/rest/ -run TestSync -v` failed before implementation with undefined `WithSyncRuleService` and `WithSyncEngine`.
 GREEN evidence:
-- `cd backend && go test ./internal/sync/application/ -run TestEngine -v -count=1` PASS.
+- `cd backend && go test ./internal/transport/rest/ -run TestSync -v -count=1` PASS.
 Review/fix rounds: 0
 
 Notes:
 - Main session is coordinating only; implementation is delegated per Comet subagent-driven-development rules.
 - review_mode: off — accepted on RED/GREEN + worktree confirmation + targeted checkoff.
-- Task 4.3/4.4/4.5 deferred until after Task 5.2 because plan marks REST `:run` as engine-dependent.
-- Task 5.1 completed with production Postgres content persistence fix; TaskSink can rely on update/cancel/create behavior.
-- Previous completed task: Task 5.1, implementation commits 1a0d62b + 405655d, progress commit c80cdfc.
+- Task 5.2 is now complete, so REST `:run` can call the real sync engine interface.
+- Previous completed task: Task 5.2, implementation commit d09c2a6, progress commit b77a1e4.

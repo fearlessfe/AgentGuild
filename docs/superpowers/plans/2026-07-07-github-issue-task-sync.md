@@ -1112,16 +1112,16 @@ git commit -m "feat(sync): rule repository and CRUD service with admin authz"
 Run: `cd backend && go test ./internal/transport/rest/ -run TestSync -v`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现 handler + 注册**
+- [x] **Step 3: 实现 handler + 注册**
 
 在 `router.go` `/v1` 块内 gate 于 `s.syncRules != nil` 注册上述路由（全部 `requireSession`；写路由在 handler 内检查 `principal.IsAdmin`，非 admin → `writeError(...,403,"FORBIDDEN",...)`）。`/v1/repositories` gate 于 `s.gitHubAppManager != nil`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/transport/rest/ -run TestSync -v`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
