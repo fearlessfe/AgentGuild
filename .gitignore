@@ -20,6 +20,8 @@ Thumbs.db
 !.env.example
 !.env.sample
 !.env.template
+env.sh
+.local/env.sh
 
 # Logs
 *.log
@@ -53,5 +55,6 @@ frontend/*.tsbuildinfo
 
 # Documentation / asset caches
 docs/.DS_Store
-.local
-.claude
+.local/
+.claude/
+.superpowers/
