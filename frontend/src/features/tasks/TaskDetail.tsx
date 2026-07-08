@@ -209,6 +209,21 @@ function TaskDetailContent({
         <span className="ctx-label">目标</span>
         <div className="text-sm muted">{task.problem}</div>
       </div>
+      {task.source?.kind === "issue" && (
+        <div className="detail-block">
+          <span className="ctx-label">来源</span>
+          <div className="text-sm">
+            <a
+              href={task.source.issue_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: "none" }}
+            >
+              Issue #{task.source.issue_number} @ {task.source.repo}
+            </a>
+          </div>
+        </div>
+      )}
       <div className="detail-block">
         <span className="ctx-label">仓库</span>
         <div className="text-sm">{task.publisher_agent_version_id} ↗</div>
