@@ -69,7 +69,6 @@ export function AppShell() {
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route path="/git-integration" element={<GitIntegrationScreen />} />
             <Route path="/sync" element={<SyncRuleScreen />} />
-            <Route path="/sync-result" element={<SyncResultScreen />} />
             <Route path="/tasks" element={<Workbench />} />
             <Route path="/tasks/:taskId" element={<Workbench />} />
             <Route path="/executions/:executionId" element={<ExecutionDetailScreen />} />

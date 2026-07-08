@@ -1,91 +1,50 @@
-import { PageHeader, Card, Button, StatusChip, DenseTable, MetricGrid, ApiNote } from "../../ui";
-import type { DenseRow, Metric } from "../../ui";
-import { sharedData } from "../shared/mockData";
+import { PageHeader, Card, Button, MetricGrid } from "../../ui";
+import type { Metric } from "../../ui";
+import type { SyncResult } from "../../api/client";
 
-const METRICS: Metric[] = [
-  { label: "新增", value: "8", positive: true },
-  { label: "更新", value: "3" },
-  { label: "忽略", value: "5" },
-  { label: "冲突", value: "2" },
-];
+type SyncResultScreenProps = {
+  result: SyncResult;
+  onClose: () => void;
+};
 
-const RESULT_ROWS: DenseRow[] = [
-  {
-    cells: [
-      <code>#412</code>,
-      <code>{sharedData.taskId}</code>,
-      <StatusChip tone="success">新增</StatusChip>,
-      "标签匹配 agent-ready",
-      "20s 前",
-      <Button variant="ghost">查看</Button>,
-    ],
-  },
-  {
-    cells: [
-      <code>#398</code>,
-      <code>AG-188</code>,
-      <StatusChip tone="info">更新</StatusChip>,
-      "标题与验收条件变更",
-      "20s 前",
-      <Button variant="ghost">查看</Button>,
-    ],
-  },
-  {
-    cells: [
-      <code>#377</code>,
-      "—",
-      <StatusChip tone="neutral">忽略</StatusChip>,
-      "命中排除标签 needs-product",
-      "20s 前",
-      <Button variant="ghost">查看</Button>,
-    ],
-  },
-  {
-    cells: [
-      <code>#365</code>,
-      <code>AG-171</code>,
-      <StatusChip tone="warning">冲突</StatusChip>,
-      "Task 已被人工修改",
-      "21s 前",
-      <span className="row">
-        <Button variant="ghost">重试</Button>
-        <Button variant="ghost">忽略</Button>
-        <Button variant="ghost">暂停规则</Button>
-      </span>,
-    ],
-  },
-  {
-    cells: [
-      <code>#359</code>,
-      "—",
-      <StatusChip tone="danger">失败</StatusChip>,
-      "GitHub 速率限制 · 可重试",
-      "21s 前",
-      <Button variant="ghost">重试</Button>,
-    ],
-  },
-];
+export function SyncResultScreen({ result, onClose }: SyncResultScreenProps) {
+  const metrics: Metric[] = [
+    { label: "新增", value: String(result.created), positive: result.created > 0 },
+    { label: "更新", value: String(result.updated) },
+    { label: "跳过", value: String(result.skipped) },
+    { label: "取消", value: String(result.cancelled) },
+    { label: "失败", value: String(result.failed), positive: result.failed === 0 },
+  ];
 
-export function SyncResultScreen() {
+  const total = result.created + result.updated + result.skipped + result.cancelled + result.failed;
+
   return (
     <div className="stack">
-      <PageHeader title="同步结果" sub="规则 billing-service · agent-ready 的最近一次运行。" />
-      <MetricGrid metrics={METRICS} />
-      <div className="row">
-        <span className="faint text-sm">另有</span>
-        <StatusChip tone="danger">失败 1</StatusChip>
-        <span className="faint text-sm">为平台可重试错误</span>
-      </div>
-      <Card title="运行明细" sub="19 条" pad={false}>
-        <DenseTable
-          columns={["Issue", "Task", "结果", "原因", "更新时间", "操作"]}
-          rows={RESULT_ROWS}
-          caption="同步运行明细"
-        />
+      <PageHeader
+        title="同步结果"
+        sub={`同步已完成，共处理 ${total} 项`}
+        actions={<Button onClick={onClose}>返回</Button>}
+      />
+      <MetricGrid metrics={metrics} />
+      <Card title="摘要">
+        <div className="stack">
+          <p className="text-sm">
+            本次同步创建了 <strong>{result.created}</strong> 个新任务，
+            更新了 <strong>{result.updated}</strong> 个现有任务，
+            跳过了 <strong>{result.skipped}</strong> 个不符合条件的 Issue。
+          </p>
+          {result.cancelled > 0 && (
+            <p className="text-sm muted">
+              有 <strong>{result.cancelled}</strong> 个操作被取消。
+            </p>
+          )}
+          {result.failed > 0 && (
+            <p className="text-sm" style={{ color: "var(--danger)" }}>
+              有 <strong>{result.failed}</strong> 个操作失败，请检查日志。
+            </p>
+          )}
+        </div>
       </Card>
-      <ApiNote status="planned">
-        同步运行、结果列表、冲突处理与重试/审计均为规划能力；冲突行不提供直接编辑正式 Task 的入口。
-      </ApiNote>
     </div>
   );
 }
