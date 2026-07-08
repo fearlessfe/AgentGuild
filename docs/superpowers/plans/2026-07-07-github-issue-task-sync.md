@@ -1149,14 +1149,14 @@ git commit -m "feat(rest): repositories listing and sync-rule CRUD/run endpoints
   - `func (s *Service) UpdateSystemTaskContent(ctx, tenantID, taskID string, title, problem string, constraints, requirements []string) error` —— 仅当当前 status ∈ {open, draft} 才更新内容字段（引擎侧也会判，双保险）。
 - Consumes: 既有 `Service.store`, `Service.newID`, `TaskRepository`（`InsertTask/GetTask/UpdateTask`）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `system_task_test.go`（复用 `service_test.go` 的 `newTestService`）：
 - `PublishSystemTask` 成功创建，`view.PublisherAgentVersionID == domain.SystemIssuePublisherID`，`Status == open`。
 - `CancelSystemTask` 对 open 任务 → `cancelled`（无 forbidden，验证 D8 合法性）。
 - `UpdateSystemTaskContent` 对 open 任务更新 title；对 claimed 任务（先人为置 claimed）不更新内容（返回 nil 但内容不变，或返回哨兵——按实现约定，测试断言内容未变）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/application/ -run TestSystemTask -v`
 Expected: FAIL。
@@ -1301,25 +1301,25 @@ git commit -m "feat(app): wire sync worker, engine and manifest service"
 - Produces: `type TaskSource struct { Kind string \`json:"kind"\`; Repo string \`json:"repo,omitempty"\`; IssueNumber int \`json:"issue_number,omitempty"\`; IssueURL string \`json:"issue_url,omitempty"\` }`；`TaskView.Source *TaskSource \`json:"source,omitempty"\``。
 - 实现取舍：为避免 core application 依赖 sync 包，在 core 定义只读端口 `type IssueSourceLookup interface { LookupByTaskIDs(ctx, tenantID string, taskIDs []string) (map[string]TaskSource, error) }`，由 sync/postgres 的 `map_repository` 实现并在 main.go 注入 `Service`（新增 `Service` 可选字段 + `WithIssueSourceLookup` option / setter）。若注入为 nil，`Source` 留空（向后兼容）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `task_queries_test.go`：注入一个 fake `IssueSourceLookup`（task→source），`ListTasks` 返回项的 `Source.Kind=="issue"`, `Repo`, `IssueNumber` 正确；无映射的任务 `Source == nil`。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/application/ -run TestListTasksSource -v`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `ListTasks`/`GetTask` 在构造 views 后，若 `s.issueSource != nil`，批量 `LookupByTaskIDs` 并填 `Source`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd backend && go test ./internal/application/ -run TestListTasksSource -v`
 Expected: PASS。
 
-- [ ] **Step 5: 全量后端测试 + 提交**
+- [x] **Step 5: 全量后端测试 + 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild

@@ -3,17 +3,31 @@
 Current plan task: **Task 5.5: Issue 来源标识可读（TaskView 关联映射）**
 Mapped OpenSpec task: **5.5 Issue 来源标识：Task 视图可辨识来源仓库与 Issue 编号**
 
-Stage: implementing
+Stage: done
 Review mode: off
 TDD mode: tdd
 Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-5.5-brief.md
 Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-5.5-report.md
-Agent: 019f3f71-e6d3-7462-ac26-9108c1abea3f (background implementer, task 5.5 in progress)
+Agent: 019f3f71-e6d3-7462-ac26-9108c1abea3f (background implementer, blocked on final verification; controller completed verification/commit)
 
-Implementation commit: pending
-Changed files: pending
-RED evidence: pending
-GREEN evidence: pending
+Implementation commit: 7061dbb
+Changed files:
+- backend/internal/application/contracts.go
+- backend/internal/application/ports.go
+- backend/internal/application/service.go
+- backend/internal/application/task_queries.go
+- backend/internal/application/task_queries_test.go
+- backend/internal/sync/postgres/map_repository.go
+- backend/internal/sync/postgres/rule_repository_test.go
+- backend/cmd/agentguild-api/main.go
+RED evidence:
+- `cd backend && go test ./internal/application/ -run TestListTasksSource -v` failed with missing `TaskSource`, `IssueSourceLookup`, and `TaskView.Source`.
+- `cd backend && go test ./internal/application/ -run TestGetTaskSource -v` failed before `GetTask` attached source data.
+- `cd backend && go test ./internal/sync/postgres/ -run TestMapRepositoryLookupByTaskIDs -v` failed before `MapRepository.LookupByTaskIDs` existed.
+GREEN evidence:
+- `cd backend && GOCACHE=/private/tmp/agentguild-task-5.5-gocache AGENTGUILD_TEST_DATABASE_URL=postgres://agentguild:agentguild@127.0.0.1:5432/agentguild?sslmode=disable go test ./internal/application/ ./internal/sync/postgres/ -run 'Test(ListTasksSource|GetTaskSource|MapRepositoryLookupByTaskIDs)' -v -count=1` PASS.
+- `cd backend && GOCACHE=/private/tmp/agentguild-task-5.5-gocache go build ./...` PASS.
+- Full `go test -race ./... -count=1` was attempted against local PostgreSQL on 5432 but failed with shared test database connection deadlines and `unexpected EOF`; not accepted as a code failure for this task.
 Review/fix rounds: 0
 
 Notes:

@@ -44,7 +44,7 @@
 - [x] 5.2 同步引擎：按规则拉取 Issue → 过滤 → 映射为 Task → 去重（tenant,repo,number）→ 按重复策略更新/跳过
 - [x] 5.3 sync worker：复用 `runWorker/repeat`，per-tenant 遍历启用规则，单规则失败不阻塞其它，接入 `main.go` 与配置间隔
 - [x] 5.4 单元/集成测试：生成、排除标签、去重更新、单规则失败容错
-- [ ] 5.5 Issue 来源标识：Task 视图可辨识来源仓库与 Issue 编号
+- [x] 5.5 Issue 来源标识：Task 视图可辨识来源仓库与 Issue 编号
 
 ## 6. 前端接线
 
