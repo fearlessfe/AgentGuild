@@ -1,28 +1,23 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 4.3 + 4.4 + 4.5: REST —— /v1/repositories、/v1/sync-rules CRUD、:run（TDD）**
-Mapped OpenSpec task: **4.3/4.4/4.5 repositories listing + sync-rules CRUD + manual run**
+Current plan task: **Task 5.3: sync worker 接线 main.go + 配置间隔**
+Mapped OpenSpec task: **5.3 sync worker：复用 runWorker/repeat，per-tenant 遍历启用规则，接入 main.go 与配置间隔**
 
 Stage: done
 Review mode: off
 TDD mode: tdd
-Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4.3-brief.md
-Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-4.3-report.md
-Agent: 019f3d47-d947-7772-9999-a212f36b154f (background implementer, completed task 4.3/4.4/4.5)
+Brief: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-5.3-brief.md
+Report: /Users/pengzhen/work/AgentGuild/.superpowers/sdd/task-5.3-report.md
+Agent: pending dispatch
 
-Implementation commit: fce9f69
-Changed files:
-- backend/internal/transport/rest/router.go
-- backend/internal/transport/rest/sync_router.go
-- backend/internal/transport/rest/sync_router_test.go
-RED evidence:
-- `cd backend && go test ./internal/transport/rest/ -run TestSync -v` failed before implementation with undefined `WithSyncRuleService` and `WithSyncEngine`.
-GREEN evidence:
-- `cd backend && go test ./internal/transport/rest/ -run TestSync -v -count=1` PASS.
+Implementation commit: pending
+Changed files: pending
+RED evidence: pending
+GREEN evidence: pending
 Review/fix rounds: 0
 
 Notes:
 - Main session is coordinating only; implementation is delegated per Comet subagent-driven-development rules.
-- review_mode: off — accepted on RED/GREEN + worktree confirmation + targeted checkoff.
-- Task 5.2 is now complete, so REST `:run` can call the real sync engine interface.
-- Previous completed task: Task 5.2, implementation commit d09c2a6, progress commit b77a1e4.
+- review_mode: off — accept on RED/GREEN + worktree confirmation + targeted checkoff.
+- REST sync route group is complete and waiting for main.go injection.
+- Previous completed task: Task 4.3/4.4/4.5, implementation commit fce9f69, progress commit 01408b1.
