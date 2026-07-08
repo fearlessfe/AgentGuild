@@ -52,7 +52,7 @@
 - [x] 6.2 `features/sync/SyncRuleScreen` 接同步规则 CRUD + 立即同步；`SyncResultScreen` 接同步结果
 - [x] 6.3 任务中心展示 Issue 来源任务及其来源标识
 - [x] 6.4 新增 `frontend/.env.example`（默认不启用 demo）；确认默认走真实后端
-- [ ] 6.5 移除相关页面的 `ApiNote status="planned"` 或改为 available
+- [x] 6.5 移除相关页面的 `ApiNote status="planned"` 或改为 available
 
 ## 7. 本地运行脚手架
 

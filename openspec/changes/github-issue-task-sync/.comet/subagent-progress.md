@@ -1,7 +1,7 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 6.6: 移除 ApiNote planned**
-Mapped OpenSpec task: **6.5 移除相关页面的 ApiNote status="planned" 或改为 available**
+Current plan task: **Task 7.1: .local/env.sh 补同步与回调变量**
+Mapped OpenSpec task: **7.1 .local/env.sh 补同步间隔、回调 base URL 等变量**
 
 Stage: ready
 Review mode: off
@@ -12,8 +12,8 @@ Agent: (pending dispatch)
 
 Implementation commit: pending
 Changed files: pending
-RED evidence: N/A (UI cleanup)
-GREEN evidence: pending (build pass)
+RED evidence: N/A (config script)
+GREEN evidence: pending
 Review/fix rounds: 0
 
 Notes:
