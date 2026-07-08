@@ -70,6 +70,10 @@ type TaskRepository interface {
 	ClaimTask(context.Context, string, string, int64, string) (bool, error)
 }
 
+type IssueSourceLookup interface {
+	LookupByTaskIDs(context.Context, string, []string) (map[string]TaskSource, error)
+}
+
 type TaskListQuery struct {
 	TenantID                string
 	Statuses                []domain.TaskStatus

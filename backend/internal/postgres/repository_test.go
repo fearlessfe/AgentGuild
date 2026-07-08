@@ -50,6 +50,53 @@ func TestTaskPersistenceRecordRoundTripsWithoutInventedContent(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskPersistsContentFields(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	ctx := context.Background()
+	task := application.TaskRecord{
+		ID: "task-update-content", TenantID: "tenant-1", PublisherAgentVersionID: "publisher-7",
+		Type: "issue-sync", Title: "Old issue title", Problem: "Old issue body",
+		Constraints:  []byte(`{"priority":"low"}`),
+		Requirements: []byte(`{"checks":["old"]}`),
+		Deadline:     time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond),
+		Status:       domain.TaskOpen,
+	}
+
+	if err := store.WithTx(ctx, func(tx application.Tx) error {
+		if err := tx.InsertTask(ctx, task); err != nil {
+			return err
+		}
+		task.Title = "New issue title"
+		task.Problem = "New issue body"
+		task.Constraints = []byte(`{"priority":"high","labels":["bug","sync"]}`)
+		task.Requirements = []byte(`{"checks":["unit","integration"],"review":true}`)
+		task.Status = domain.TaskCancelled
+		updated, err := tx.UpdateTask(ctx, task, 0, "")
+		if err != nil {
+			return err
+		}
+		if !updated {
+			t.Fatal("UpdateTask returned updated=false")
+		}
+		got, err := tx.GetTask(ctx, task.TenantID, task.ID)
+		if err != nil {
+			return err
+		}
+		if got.Title != task.Title || got.Problem != task.Problem {
+			t.Fatalf("content text was not persisted: got title=%q problem=%q", got.Title, got.Problem)
+		}
+		assertJSONEqual(t, got.Constraints, task.Constraints)
+		assertJSONEqual(t, got.Requirements, task.Requirements)
+		if got.Status != task.Status || got.StateVersion != 1 || got.ActiveExecutionID != "" {
+			t.Fatalf("task state changed unexpectedly: status=%s version=%d active=%q", got.Status, got.StateVersion, got.ActiveExecutionID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOnlyOneNonTerminalExecutionPerTask(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	seedTask(t, db, "tenant-1", "task-1")

@@ -16,12 +16,14 @@ import (
 
 // fakeGitHubAppManager 是一个内存实现的 gitapp.GitHubAppManager，用于隔离路由层测试。
 type fakeGitHubAppManager struct {
-	calls      []githubAppCall
-	store      map[string]*gitapp.GitHubAppRecord
-	getErr     error
-	upsertErr  error
-	deleteErr  error
-	driverErr  error
+	calls          []githubAppCall
+	store          map[string]*gitapp.GitHubAppRecord
+	getErr         error
+	upsertErr      error
+	deleteErr      error
+	driverErr      error
+	issueSource    git.IssueSource
+	issueSourceErr error
 }
 
 type githubAppCall struct {
@@ -33,6 +35,17 @@ type githubAppCall struct {
 func (f *fakeGitHubAppManager) Driver(ctx context.Context, tenantID string) (git.Driver, error) {
 	f.calls = append(f.calls, githubAppCall{method: "Driver", tenantID: tenantID})
 	return nil, f.driverErr
+}
+
+func (f *fakeGitHubAppManager) IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error) {
+	f.calls = append(f.calls, githubAppCall{method: "IssueSource", tenantID: tenantID})
+	if f.issueSourceErr != nil {
+		return nil, f.issueSourceErr
+	}
+	if f.issueSource != nil {
+		return f.issueSource, nil
+	}
+	return nil, git.ErrGitHubAppNotConfigured
 }
 
 func (f *fakeGitHubAppManager) Get(ctx context.Context, tenantID string) (gitapp.GitHubAppView, error) {

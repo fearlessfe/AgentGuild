@@ -28,6 +28,8 @@ func TestLoadAppliesAdapterSwitchesAndWorkerDefaults(t *testing.T) {
 	require.False(t, cfg.LangfuseEnabled)
 	require.Equal(t, 7*time.Second, cfg.ReaperInterval)
 	require.Equal(t, 11*time.Second, cfg.OutboxInterval)
+	require.Equal(t, 60*time.Second, cfg.SyncWorkerInterval)
+	require.Equal(t, 365*24*time.Hour, cfg.SyncDefaultDeadline)
 }
 
 func TestLoadRejectsInvalidBoolean(t *testing.T) {
@@ -92,6 +94,7 @@ func TestLoadParsesGitHubConfiguration(t *testing.T) {
 	env["GITHUB_INSTALLATION_ID"] = "123"
 	env["GITHUB_PRIVATE_KEY"] = "-----BEGIN RSA PRIVATE KEY-----\nMIIB"
 	env["GITHUB_BASE_URL"] = "https://github.example.com/api/v3"
+	env["GITHUB_APP_PUBLIC_BASE_URL"] = "https://agentguild.example.com"
 
 	cfg, err := config.Load(func(key string) string { return env[key] })
 	require.NoError(t, err)
@@ -99,6 +102,8 @@ func TestLoadParsesGitHubConfiguration(t *testing.T) {
 	require.Equal(t, int64(123), cfg.GitHub.InstallationID)
 	require.Equal(t, "https://github.example.com/api/v3", cfg.GitHub.BaseURL)
 	require.Equal(t, "-----BEGIN RSA PRIVATE KEY-----\nMIIB", cfg.GitHub.PrivateKey)
+	require.Equal(t, "https://agentguild.example.com", cfg.GitHubAppPublicBaseURL)
+	require.Equal(t, env["SESSION_COOKIE_SECRET"], cfg.GitHubAppManifestStateSecret)
 }
 
 func TestLoadRejectsInvalidGitHubAppID(t *testing.T) {

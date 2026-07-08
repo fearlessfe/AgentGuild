@@ -120,10 +120,12 @@ func (tx *Tx) UpdateTask(
 	}
 	tag, err := tx.tx.Exec(ctx, `
 		UPDATE tasks
-		SET status=$4, state_version=state_version+1,
-		    active_execution_id=NULLIF($5, ''), updated_at=$6
+		SET title=$4, problem=$5, constraints=$6::jsonb, requirements=$7::jsonb,
+		    status=$8, state_version=state_version+1,
+		    active_execution_id=NULLIF($9, ''), updated_at=$10
 		WHERE tenant_id=$1 AND id=$2 AND state_version=$3`,
-		task.TenantID, task.ID, expectedVersion, task.Status, activeExecutionID, now,
+		task.TenantID, task.ID, expectedVersion, task.Title, task.Problem,
+		task.Constraints, task.Requirements, task.Status, activeExecutionID, now,
 	)
 	return tag.RowsAffected() == 1, err
 }

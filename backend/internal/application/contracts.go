@@ -97,6 +97,13 @@ type TaskPage struct {
 	Items []TaskView `json:"items"`
 }
 
+type TaskSource struct {
+	Kind        string `json:"kind"`
+	Repo        string `json:"repo,omitempty"`
+	IssueNumber int    `json:"issue_number,omitempty"`
+	IssueURL    string `json:"issue_url,omitempty"`
+}
+
 type TaskView struct {
 	ID                      string            `json:"id"`
 	TenantID                string            `json:"tenant_id"`
@@ -113,4 +120,5 @@ type TaskView struct {
 	CreatedAt               time.Time         `json:"created_at"`
 	UpdatedAt               time.Time         `json:"updated_at"`
 	StateVersion            int64             `json:"state_version"`
+	Source                  *TaskSource       `json:"source,omitempty"`
 }

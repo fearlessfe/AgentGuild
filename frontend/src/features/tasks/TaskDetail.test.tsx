@@ -41,4 +41,40 @@ describe("TaskDetail", () => {
     expect(screen.getByText(/Provider: langfuse/)).toBeVisible();
     expect(screen.queryByRole("button", { name: /claim|accept|set status/i })).toBeNull();
   });
+
+  it("renders synced issue tasks when requirements are null", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify(
+          envelope({
+            ...taskViewFixture({
+              id: "issue-task-1",
+              type: "github_issue",
+              title: "Update instructions for Monitoring Workshop section",
+              requirements: null,
+              constraints: null,
+              source: {
+                kind: "issue",
+                repo: "langfuse/langfuse",
+                issue_number: 13862,
+                issue_url: "https://github.com/langfuse/langfuse/issues/13862",
+              },
+            }),
+          }),
+        ),
+        { status: 200 },
+      ),
+    );
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <TaskDetail taskId="issue-task-1" />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Update instructions for Monitoring Workshop section")).toBeVisible();
+    expect(screen.getByText("Issue #13862 @ langfuse/langfuse")).toBeVisible();
+    expect(screen.getByText("暂无验收标准")).toBeVisible();
+  });
 });

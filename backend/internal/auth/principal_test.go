@@ -51,6 +51,47 @@ func TestPrincipalSupportsHumanSessionShape(t *testing.T) {
 	}
 }
 
+func TestScopePolicyHumanReadOnlyPasses(t *testing.T) {
+	p := auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman}
+	if err := (auth.ScopePolicy{}).Require(p, "tasks:read"); err != nil {
+		t.Fatalf("human read should pass, got %v", err)
+	}
+}
+
+func TestScopePolicyHumanMissingTenantRejected(t *testing.T) {
+	p := auth.Principal{Type: auth.PrincipalTypeHuman}
+	err := (auth.ScopePolicy{}).Require(p, "tasks:read")
+	if err == nil {
+		t.Fatal("human without tenant_id should be rejected")
+	}
+}
+
+func TestScopePolicyAgentMissingFieldsRejected(t *testing.T) {
+	p := auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentVersionID: "v", Scopes: []string{"tasks:read"}}
+	err := (auth.ScopePolicy{}).Require(p, "tasks:read")
+	var de *domain.Error
+	if err == nil {
+		t.Fatal("agent with empty agent_id should be rejected")
+	}
+	if !errors.As(err, &de) || de.Field != "agent_id" {
+		t.Fatalf("expected agent_id field error, got %v", err)
+	}
+}
+
+func TestScopePolicyAgentAuthorizedUnchanged(t *testing.T) {
+	p := auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "a", AgentVersionID: "v", Scopes: []string{"tasks:read"}}
+	if err := (auth.ScopePolicy{}).Require(p, "tasks:read"); err != nil {
+		t.Fatalf("authorized agent should pass, got %v", err)
+	}
+}
+
+func TestScopePolicyAgentScopeMissingForbidden(t *testing.T) {
+	p := auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "a", AgentVersionID: "v", Scopes: []string{"tasks:publish"}}
+	if err := (auth.ScopePolicy{}).Require(p, "tasks:read"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
 func TestTokenVerifierContract(t *testing.T) {
 	var verifier auth.TokenVerifier = verifierFunc(func(context.Context, string) (auth.Principal, error) {
 		return auth.Principal{TenantID: "tenant-1"}, nil

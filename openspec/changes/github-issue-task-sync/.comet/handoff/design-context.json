@@ -1,0 +1,16 @@
+{
+  "change": "github-issue-task-sync",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "b3ca7ffea6c3439cc64c0ee65b6558c853ba7a2b033fade5857165c98d154055",
+  "files": [
+    { "path": "openspec/changes/github-issue-task-sync/proposal.md", "sha256": "b59faee53d894c0a8bf29b5cd291effa332671590bd7867b8dfd5e5e1768960a" },
+    { "path": "openspec/changes/github-issue-task-sync/design.md", "sha256": "88906dfdaf90cf5e9ef2b910d3ffd43efa2e7b2d83575e5e71d7b7cb2dd9160d" },
+    { "path": "openspec/changes/github-issue-task-sync/tasks.md", "sha256": "7222b4762fbf45cf9591d0258ceee9d2a2e82f249c46109f10d3216db5a04a56" },
+    { "path": "openspec/changes/github-issue-task-sync/specs/agent-access-control/spec.md", "sha256": "2575163dd442995b5db0e96c1171a5f5f0f662974d22d54635759fb9e5d1505a" },
+    { "path": "openspec/changes/github-issue-task-sync/specs/issue-task-sync/spec.md", "sha256": "f4d08d8ce039f5754bf7941ae6bc2c647dc4788823747dfa890f0030ac01e79c" },
+    { "path": "openspec/changes/github-issue-task-sync/specs/local-dev-bootstrap/spec.md", "sha256": "b6d73ddad282865062799539e8df093130d148551175baf1a503dda746280639" }
+  ]
+}

@@ -54,3 +54,4 @@ frontend/*.tsbuildinfo
 # Documentation / asset caches
 docs/.DS_Store
 .local
+.claude

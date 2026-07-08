@@ -151,6 +151,24 @@ func TestCredentialServiceRevokeThroughPostgresStore(t *testing.T) {
 	require.NotNil(t, record.RevokedAt)
 }
 
+func TestGitHubAppRepositoryPersistsManifestColumns(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+	repo := postgres.NewGitHubAppRepository(db)
+	rec := &application.GitHubAppRecord{
+		TenantID: "t1", Provider: "github", AppID: 10, InstallationID: 20,
+		PrivateKey: "pk", BaseURL: "https://api.github.com",
+		WebhookSecret: "ws", ClientID: "cid", ClientSecret: "cs", AppSlug: "my-app",
+	}
+	require.NoError(t, repo.Upsert(ctx, rec))
+	got, err := repo.GetByTenant(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, "ws", got.WebhookSecret)
+	require.Equal(t, "cid", got.ClientID)
+	require.Equal(t, "cs", got.ClientSecret)
+	require.Equal(t, "my-app", got.AppSlug)
+}
+
 func sampleRecord(tenantID, executionID string) *application.CredentialRecord {
 	return &application.CredentialRecord{
 		ID:          "cred-" + executionID,

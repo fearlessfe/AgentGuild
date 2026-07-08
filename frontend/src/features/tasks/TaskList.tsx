@@ -220,7 +220,21 @@ function TaskRow({ task }: { task: TaskView }) {
         </Link>
       </td>
       <td className="task-title" title={task.title}>
-        {task.title}
+        <div>
+          {task.title}
+          {task.source?.kind === "issue" && (
+            <div className="text-sm muted" style={{ marginTop: "0.25rem" }}>
+              <a
+                href={task.source.issue_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: "none", color: "inherit" }}
+              >
+                Issue #{task.source.issue_number} @ {task.source.repo}
+              </a>
+            </div>
+          )}
+        </div>
       </td>
       <td>{task.publisher_agent_version_id}</td>
       <td className="language">{task.type}</td>

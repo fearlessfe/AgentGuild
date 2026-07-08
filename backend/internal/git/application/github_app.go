@@ -16,6 +16,10 @@ type GitHubAppRecord struct {
 	InstallationID int64
 	PrivateKey     string
 	BaseURL        string
+	WebhookSecret  string
+	ClientID       string
+	ClientSecret   string
+	AppSlug        string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -28,6 +32,7 @@ type GitHubAppView struct {
 	AppID          int64     `json:"app_id"`
 	InstallationID int64     `json:"installation_id"`
 	BaseURL        string    `json:"base_url"`
+	AppSlug        string    `json:"app_slug,omitempty"`
 	Configured     bool      `json:"configured"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -41,6 +46,10 @@ type UpsertGitHubApp struct {
 	InstallationID int64
 	PrivateKey     string
 	BaseURL        string
+	WebhookSecret  string
+	ClientID       string
+	ClientSecret   string
+	AppSlug        string
 }
 
 // gitHubAppService is the concrete implementation of GitHubAppService.
@@ -69,9 +78,6 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 	if cmd.AppID == 0 {
 		return invalid("app_id")
 	}
-	if cmd.InstallationID == 0 {
-		return invalid("installation_id")
-	}
 	if cmd.PrivateKey == "" {
 		return invalid("private_key")
 	}
@@ -90,6 +96,10 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 		InstallationID: cmd.InstallationID,
 		PrivateKey:     cmd.PrivateKey,
 		BaseURL:        baseURL,
+		WebhookSecret:  cmd.WebhookSecret,
+		ClientID:       cmd.ClientID,
+		ClientSecret:   cmd.ClientSecret,
+		AppSlug:        cmd.AppSlug,
 	})
 }
 
@@ -131,6 +141,19 @@ func (s *gitHubAppService) Driver(ctx context.Context, tenantID string) (git.Dri
 	})
 }
 
+// IssueSource returns a git.IssueSource for the tenant's configured installation.
+func (s *gitHubAppService) IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error) {
+	driver, err := s.Driver(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	source, ok := driver.(git.IssueSource)
+	if !ok {
+		return nil, invalid("issue_source")
+	}
+	return source, nil
+}
+
 func toGitHubAppView(record *GitHubAppRecord) GitHubAppView {
 	if record == nil {
 		return GitHubAppView{Configured: false}
@@ -141,6 +164,7 @@ func toGitHubAppView(record *GitHubAppRecord) GitHubAppView {
 		AppID:          record.AppID,
 		InstallationID: record.InstallationID,
 		BaseURL:        record.BaseURL,
+		AppSlug:        record.AppSlug,
 		Configured:     true,
 		CreatedAt:      record.CreatedAt,
 		UpdatedAt:      record.UpdatedAt,

@@ -267,7 +267,7 @@ func TestCreateReviewRequiresSession(t *testing.T) {
 	require.Len(t, review.calls, 1)
 }
 
-func TestPublishTaskStillRequiresBearer(t *testing.T) {
+func TestPublishTaskRejectsSessionOnly(t *testing.T) {
 	app := &fakeApplication{}
 	server := newTestServer(app)
 	body := `{"type":"code","title":"Fix parser","problem":"It races","deadline":"2026-07-02T11:00:00Z"}`

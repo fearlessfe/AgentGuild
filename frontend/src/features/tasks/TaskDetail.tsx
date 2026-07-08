@@ -191,6 +191,7 @@ function TaskDetailContent({
   serverTime: string;
 }) {
   const leaseActive = execution && ["leased", "running"].includes(execution.status);
+  const requirements = listOrEmpty(task.requirements);
 
   return (
     <div className="stack">
@@ -209,17 +210,36 @@ function TaskDetailContent({
         <span className="ctx-label">目标</span>
         <div className="text-sm muted">{task.problem}</div>
       </div>
+      {task.source?.kind === "issue" && (
+        <div className="detail-block">
+          <span className="ctx-label">来源</span>
+          <div className="text-sm">
+            <a
+              href={task.source.issue_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: "none" }}
+            >
+              Issue #{task.source.issue_number} @ {task.source.repo}
+            </a>
+          </div>
+        </div>
+      )}
       <div className="detail-block">
         <span className="ctx-label">仓库</span>
         <div className="text-sm">{task.publisher_agent_version_id} ↗</div>
       </div>
       <div className="detail-block">
         <span className="ctx-label">验收标准</span>
-        <ul className="perm-list">
-          {task.requirements.map((requirement) => (
-            <li key={requirement}>{requirement}</li>
-          ))}
-        </ul>
+        {requirements.length > 0 ? (
+          <ul className="perm-list">
+            {requirements.map((requirement) => (
+              <li key={requirement}>{requirement}</li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-sm muted">暂无验收标准</div>
+        )}
       </div>
 
       <div className="fact-grid">
@@ -284,4 +304,8 @@ function TaskDetailContent({
       ) : null}
     </div>
   );
+}
+
+function listOrEmpty(value: string[] | null | undefined): string[] {
+  return Array.isArray(value) ? value : [];
 }

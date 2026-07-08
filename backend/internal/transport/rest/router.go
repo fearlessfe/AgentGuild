@@ -20,6 +20,7 @@ import (
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
+	syncapp "agentguild.dev/agentguild/backend/internal/sync/application"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -95,23 +96,26 @@ type socketRemoteAddrContextKey struct{}
 
 // Server 暴露任务生命周期、Submission、代码评审、版本管理与经验治理的 REST API。
 type Server struct {
-	svc           applicationService
-	submissions   submissionService
-	credentials   credentialService
-	identity      identityService
-	reviewSvc     ReviewService
-	rubricSvc     RubricService
-	reputationSvc ReputationService
-	versions      versionService
-	evaluations   evaluationService
-	experiences   experienceService
-	verifier      auth.TokenVerifier
-	limiter       RateLimiter
-	sessionSecret string
-	sessionSecure bool
-	oidc          oidcProvider
+	svc              applicationService
+	submissions      submissionService
+	credentials      credentialService
+	identity         identityService
+	reviewSvc        ReviewService
+	rubricSvc        RubricService
+	reputationSvc    ReputationService
+	versions         versionService
+	evaluations      evaluationService
+	experiences      experienceService
+	verifier         auth.TokenVerifier
+	limiter          RateLimiter
+	sessionSecret    string
+	sessionSecure    bool
+	oidc             oidcProvider
 	localAdmin       *localAdmin
 	gitHubAppManager gitapp.GitHubAppManager
+	manifest         *gitapp.ManifestService
+	syncRules        *syncapp.RuleService
+	syncEngine       SyncEngine
 }
 
 // WithLocalAdmin 挂载本地管理员 fallback 登录接口。
@@ -122,6 +126,21 @@ func WithLocalAdmin(cfg config.Config) Option {
 // WithGitHubAppManager 挂载 tenant 级 GitHub App 管理。
 func WithGitHubAppManager(m gitapp.GitHubAppManager) Option {
 	return func(s *Server) { s.gitHubAppManager = m }
+}
+
+// WithGitHubManifest 挂载 GitHub App manifest 安装流程（manifest/callback/installed）。
+func WithGitHubManifest(m *gitapp.ManifestService) Option {
+	return func(s *Server) { s.manifest = m }
+}
+
+// WithSyncRuleService 挂载 GitHub Issue 到任务的同步规则管理接口。
+func WithSyncRuleService(svc *syncapp.RuleService) Option {
+	return func(s *Server) { s.syncRules = svc }
+}
+
+// WithSyncEngine 挂载同步引擎，用于手动触发单条同步规则。
+func WithSyncEngine(engine SyncEngine) Option {
+	return func(s *Server) { s.syncEngine = engine }
 }
 
 // Option 配置 Server。
@@ -200,6 +219,11 @@ func (s *Server) Router() http.Handler {
 	if s.oidc != nil {
 		r.Get("/oauth/oidc/login", s.oidcLogin)
 		r.Get("/oauth/oidc/callback", s.oidcCallback)
+	}
+	if s.manifest != nil {
+		r.With(s.requireSession).Get("/oauth/github/app/manifest", s.githubManifest)
+		r.With(s.requireSession).Get("/oauth/github/app/callback", s.githubManifestCallback)
+		r.With(s.requireSession).Get("/oauth/github/app/installed", s.githubAppInstalled)
 	}
 	if s.localAdmin != nil {
 		r.Post("/oauth/local/login", s.localAdmin.login)
@@ -312,9 +336,21 @@ func (s *Server) Router() http.Handler {
 
 		// Tenant-level GitHub App configuration (human-only)
 		if s.gitHubAppManager != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/repositories", s.listRepositories)
 			r.With(s.requireSession, s.rateLimit).Get("/github-app", s.getGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Post("/github-app", s.upsertGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Delete("/github-app", s.deleteGitHubApp)
+			r.With(s.requireSession, s.rateLimit).Post("/github-app:test", s.testGitHubApp)
+		}
+		if s.syncRules != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/sync-rules", s.listSyncRules)
+			r.With(s.requireSession, s.rateLimit).Post("/sync-rules", s.createSyncRule)
+			r.With(s.requireSession, s.rateLimit).Get("/sync-rules/{id}", s.getSyncRule)
+			r.With(s.requireSession, s.rateLimit).Put("/sync-rules/{id}", s.updateSyncRule)
+			r.With(s.requireSession, s.rateLimit).Delete("/sync-rules/{id}", s.deleteSyncRule)
+			if s.syncEngine != nil {
+				r.With(s.requireSession, s.rateLimit).Post("/sync-rules/{id}:run", s.runSyncRule)
+			}
 		}
 	})
 	return r
