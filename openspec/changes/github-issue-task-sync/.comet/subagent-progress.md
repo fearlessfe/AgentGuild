@@ -1,7 +1,7 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 6.5: frontend/.env.example + 默认真实后端确认**
-Mapped OpenSpec task: **6.4 新增 frontend/.env.example；确认默认走真实后端**
+Current plan task: **Task 6.6: 移除 ApiNote planned**
+Mapped OpenSpec task: **6.5 移除相关页面的 ApiNote status="planned" 或改为 available**
 
 Stage: ready
 Review mode: off
@@ -12,7 +12,7 @@ Agent: (pending dispatch)
 
 Implementation commit: pending
 Changed files: pending
-RED evidence: N/A (config file)
+RED evidence: N/A (UI cleanup)
 GREEN evidence: pending (build pass)
 Review/fix rounds: 0
 
