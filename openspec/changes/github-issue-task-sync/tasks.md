@@ -56,7 +56,7 @@
 
 ## 7. 本地运行脚手架
 
-- [ ] 7.1 `.local/env.sh` 补同步间隔、回调 base URL 等变量
+- [x] 7.1 `.local/env.sh` 补同步间隔、回调 base URL 等变量
 - [ ] 7.2 文档化/脚本化本地启动：Postgres → backend → frontend
 - [ ] 7.3 本地冒烟文档：一键接入回调需公网可达，给出隧道（cloudflared/ngrok）或手动配置降级两条路径
 

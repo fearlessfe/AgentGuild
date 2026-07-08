@@ -1,7 +1,7 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 7.1: .local/env.sh 补同步与回调变量**
-Mapped OpenSpec task: **7.1 .local/env.sh 补同步间隔、回调 base URL 等变量**
+Current plan task: **Task 7.2+7.3: 本地启动 + 冒烟文档**
+Mapped OpenSpec task: **7.2 文档化/脚本化本地启动 + 7.3 本地冒烟文档（含隧道/降级两路径）**
 
 Stage: ready
 Review mode: off
@@ -12,7 +12,7 @@ Agent: (pending dispatch)
 
 Implementation commit: pending
 Changed files: pending
-RED evidence: N/A (config script)
+RED evidence: N/A (docs)
 GREEN evidence: pending
 Review/fix rounds: 0
 
