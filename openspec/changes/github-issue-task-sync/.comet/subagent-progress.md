@@ -25,5 +25,6 @@ Notes:
 - Main session is coordinating only; implementation is delegated per Comet subagent-driven-development rules.
 - review_mode: off — accept on RED/GREEN + worktree confirmation + targeted checkoff.
 - REST sync route group is now wired into main.go with the sync worker.
+- OpenSpec 4.6 was satisfied by Task 4.3/4.4/4.5 REST tests: non-admin human writes return 403 and agent bearer writes return 401/403; checked off during coordination.
 - OpenSpec 5.4 was satisfied by Task 5.2 engine tests (`TestEngineCreatesSystemTaskForMatchingOpenIssue`, excluded label, dedupe update, claimed-task skip, closed issue reconciliation, failed-rule continuation, since watermark); checked off during Task 5.3 coordination.
 - Previous completed task: Task 4.3/4.4/4.5, implementation commit fce9f69, progress commit 01408b1.

@@ -27,7 +27,7 @@
 - [x] 4.3 REST：`GET /v1/repositories`（实时列安装仓库）
 - [x] 4.4 REST：`GET/POST/PUT/DELETE /v1/sync-rules`（人类 session，写操作要求 admin）
 - [x] 4.5 REST：`POST /v1/sync-rules/{id}:run`（立即同步，返回结果摘要）
-- [ ] 4.6 路由级鉴权测试：非 admin/Agent token 不可写规则
+- [x] 4.6 路由级鉴权测试：非 admin/Agent token 不可写规则
 
 ## 4b. GitHub 一键接入（Manifest）+ 连接检测
 
