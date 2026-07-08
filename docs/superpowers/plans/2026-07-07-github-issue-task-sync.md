@@ -1251,16 +1251,16 @@ git commit -m "feat(sync): issue-to-task engine with dedupe and close reconcilia
 - Consumes: 全部上游产物。
 - Produces: 运行期 sync worker（`runWorker(workerCtx, &wg, cfg.SyncWorkerInterval, "sync", func(ctx) error { _, err := engine.RunAllEnabled(ctx); return err })`）；REST 挂载 `WithSyncRuleService`、`WithSyncEngine`、`WithGitHubManifest`。
 
-- [ ] **Step 1: 写配置默认值测试**
+- [x] **Step 1: 写配置默认值测试**
 
 `config_test.go` 追加：默认 `SyncWorkerInterval == 60s`（用 `duration(get,"SYNC_WORKER_INTERVAL",60*time.Second)`）、`SyncDefaultDeadline == 365*24h`（新 `duration` 项 `SYNC_DEFAULT_DEADLINE`）。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd backend && go test ./internal/config/ -run TestLoad -v`
 Expected: FAIL（字段/默认未加）。
 
-- [ ] **Step 3: 实现 config + main 接线**
+- [x] **Step 3: 实现 config + main 接线**
 
 config：加字段 + `duration(...)` 加载 + `GITHUB_APP_PUBLIC_BASE_URL`（`value(get, "GITHUB_APP_PUBLIC_BASE_URL", "")`，用于回调 URL；空时 manifest handler 用请求 Host 推导）。
 main.go：在 `buildGitRuntime` 之后构造：
@@ -1276,12 +1276,12 @@ REST options 追加 `WithSyncRuleService(ruleSvc)`, `WithSyncEngine(engine)`, `W
 `runWorker(workerCtx, &wg, cfg.SyncWorkerInterval, "sync", func(ctx context.Context) error { _, err := engine.RunAllEnabled(ctx); return err })`（仅当 web/App 可用时启动）。
 在 `application` 包新增 `NewSyncTaskSink(*Service) syncapp.TaskSink` 的适配器（放 `backend/internal/application/sync_sink.go`，或放 main.go 内联 adapter 以避免 core→sync 依赖倒置——优先 main.go 内联 adapter，保持 core 包不 import sync 包）。
 
-- [ ] **Step 4: 运行确认通过 + 全量构建**
+- [x] **Step 4: 运行确认通过 + 全量构建**
 
 Run: `cd backend && go test ./internal/config/ -run TestLoad -v && go build ./...`
 Expected: PASS + 构建通过。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
