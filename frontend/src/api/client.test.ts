@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getExecution, getTask, listTasks } from "./client";
+import { createSyncRule, getExecution, getTask, listSyncRules, listTasks, testGitHubApp } from "./client";
 
-const baseUrl = "http://localhost/api";
+const baseUrl = "/api";
 
 describe("REST client authorization", () => {
   afterEach(() => {
@@ -76,5 +76,60 @@ describe("REST client authorization", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     delete (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE;
+  });
+});
+
+describe("GitHub issue sync API client", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (import.meta.env as Record<string, string | undefined>).VITE_API_TOKEN;
+  });
+
+  it("lists sync rules with GET /v1/sync-rules", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { items: [] }, meta: {} }), { status: 200 }),
+    );
+
+    await listSyncRules();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${baseUrl}/v1/sync-rules`);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBeUndefined();
+  });
+
+  it("creates sync rules with a POST JSON body", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { id: "rule-1" }, meta: {} }), { status: 200 }),
+    );
+    const input = {
+      repo: "acme/billing-service",
+      include_labels: ["bug", "agent-task"],
+      exclude_labels: ["wontfix"],
+      issue_state: "open",
+      task_type: "github_issue",
+      default_priority: "normal",
+      dedupe_strategy: "repo_issue",
+    };
+
+    await createSyncRule(input);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/v1/sync-rules`);
+    expect((init as RequestInit).method).toBe("POST");
+    expect((init as RequestInit).body).toBe(JSON.stringify(input));
+    expect((init as RequestInit).headers).toMatchObject({ "Content-Type": "application/json" });
+  });
+
+  it("tests the GitHub app connection with POST /v1/github-app:test", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { ok: true }, meta: {} }), { status: 200 }),
+    );
+
+    await testGitHubApp();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(`${baseUrl}/v1/github-app:test`);
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("POST");
   });
 });

@@ -67,6 +67,64 @@ export type TaskView = {
   created_at: string;
   updated_at: string;
   state_version: number;
+  source?: { kind: string; repo?: string; issue_number?: number; issue_url?: string };
+};
+
+export type GitHubAppView = {
+  tenant_id?: string;
+  provider?: string;
+  app_id?: number;
+  installation_id?: number;
+  base_url?: string;
+  app_slug?: string;
+  configured: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type Repository = {
+  full_name: string;
+  default_branch: string;
+  visibility: string;
+};
+
+export type SyncRule = {
+  id: string;
+  repo: string;
+  include_labels: string[];
+  exclude_labels: string[];
+  issue_state: string;
+  task_type: string;
+  default_priority: string;
+  dedupe_strategy: string;
+  enabled: boolean;
+  last_synced_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SyncRuleInput = {
+  repo: string;
+  include_labels?: string[];
+  exclude_labels?: string[];
+  issue_state?: string;
+  task_type?: string;
+  default_priority?: string;
+  dedupe_strategy?: string;
+};
+
+export type SyncResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  cancelled: number;
+  failed: number;
+};
+
+export type ConnectionTestResult = {
+  ok: boolean;
+  repo_count: number;
+  error?: string;
 };
 
 type ApiRequestInit = Omit<RequestInit, "body"> & {
@@ -179,6 +237,17 @@ export async function listTasks(filters: {
 export const getTask = (id: string) => apiRequest<TaskView>(`/v1/tasks/${encodeURIComponent(id)}`);
 export const getExecution = (id: string) => apiRequest<ExecutionView>(`/v1/executions/${encodeURIComponent(id)}`);
 export const pollInterval = (seconds?: number) => (seconds && seconds > 0 ? seconds * 1000 : false);
+export const getGitHubApp = () => apiRequest<GitHubAppView>("/v1/github-app");
+export const deleteGitHubApp = () => apiRequest<{ deleted: boolean }>("/v1/github-app", { method: "DELETE" });
+export const testGitHubApp = () => apiRequest<ConnectionTestResult>("/v1/github-app:test", { method: "POST" });
+export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/repositories");
+export const listSyncRules = () => apiRequest<{ items: SyncRule[] }>("/v1/sync-rules");
+export const getSyncRule = (id: string) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`);
+export const createSyncRule = (input: SyncRuleInput) => apiRequest<SyncRule>("/v1/sync-rules", { method: "POST", body: input });
+export const updateSyncRule = (id: string, input: SyncRuleInput) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "PUT", body: input });
+export const deleteSyncRule = (id: string) => apiRequest<{ deleted: boolean }>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const runSyncRule = (id: string) => apiRequest<SyncResult>(`/v1/sync-rules/${encodeURIComponent(id)}:run`, { method: "POST" });
+export const githubManifestUrl = () => `${base}/oauth/github/app/manifest`;
 
 const demoTasks: TaskView[] = [
   ["AG-192", "修复批量退款时的余额竞争条件", "open", "billing-service", "TypeScript"],
@@ -215,6 +284,15 @@ const demoTasks: TaskView[] = [
   state_version: 2,
   active_execution_id: status === "in_progress" ? `exec-${id}` : undefined,
   claimed_by: status !== "open" ? "Atlas v12" : undefined,
+  source:
+    id === "AG-192"
+      ? {
+          kind: "github_issue",
+          repo: "acme/billing-service",
+          issue_number: 192,
+          issue_url: "https://github.com/acme/billing-service/issues/192",
+        }
+      : undefined,
 }));
 
 const demoMeta = {
@@ -225,6 +303,52 @@ const demoMeta = {
 
 let demoAgentCounter = 4;
 let demoAgents: DemoAgent[] = createDemoAgents();
+const demoGitHubApp: GitHubAppView = {
+  tenant_id: "billing-platform",
+  provider: "github",
+  app_id: 123456,
+  installation_id: 987654,
+  base_url: "https://api.github.com",
+  app_slug: "agentguild-billing-platform",
+  configured: true,
+  created_at: "2026-07-01T08:00:00Z",
+  updated_at: "2026-07-02T12:30:00Z",
+};
+const demoRepositories: Repository[] = [
+  { full_name: "acme/billing-service", default_branch: "main", visibility: "private" },
+  { full_name: "acme/event-gateway", default_branch: "main", visibility: "private" },
+  { full_name: "acme/frontend", default_branch: "main", visibility: "internal" },
+];
+let demoSyncRuleCounter = 2;
+let demoSyncRules: SyncRule[] = [
+  {
+    id: "sync-rule-1",
+    repo: "acme/billing-service",
+    include_labels: ["agent-task", "bug"],
+    exclude_labels: ["wontfix"],
+    issue_state: "open",
+    task_type: "github_issue",
+    default_priority: "normal",
+    dedupe_strategy: "repo_issue",
+    enabled: true,
+    last_synced_at: "2026-07-02T13:50:00Z",
+    created_at: "2026-07-01T08:30:00Z",
+    updated_at: "2026-07-02T13:50:00Z",
+  },
+  {
+    id: "sync-rule-2",
+    repo: "acme/event-gateway",
+    include_labels: ["agent-task"],
+    exclude_labels: [],
+    issue_state: "all",
+    task_type: "maintenance",
+    default_priority: "low",
+    dedupe_strategy: "repo_issue",
+    enabled: true,
+    created_at: "2026-07-01T09:00:00Z",
+    updated_at: "2026-07-01T09:00:00Z",
+  },
+];
 
 let demoBenchmarkSetCounter = 1;
 const demoBenchmarkSets = [
@@ -336,6 +460,9 @@ function createDemoAgents(): DemoAgent[] {
 }
 
 function parseDemoBody(body: unknown): Record<string, unknown> {
+  if (body && typeof body === "object" && !(body instanceof FormData)) {
+    return body as Record<string, unknown>;
+  }
   if (typeof body !== "string") {
     return {};
   }
@@ -353,6 +480,91 @@ function clone<T>(value: T): T {
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
+
+  if (url.pathname === "/v1/github-app" && method === "GET") {
+    return clone({ data: demoGitHubApp, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/github-app" && method === "DELETE") {
+    return clone({ data: { deleted: true }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/github-app:test" && method === "POST") {
+    return clone({ data: { ok: true, repo_count: demoRepositories.length }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/repositories" && method === "GET") {
+    return clone({ data: { items: demoRepositories }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/sync-rules" && method === "GET") {
+    return clone({ data: { items: demoSyncRules }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/sync-rules" && method === "POST") {
+    const body = parseDemoBody(init.body);
+    demoSyncRuleCounter += 1;
+    const now = "2026-07-02T14:00:00Z";
+    const rule: SyncRule = {
+      id: `sync-rule-${demoSyncRuleCounter}`,
+      repo: String(body.repo ?? "acme/billing-service"),
+      include_labels: Array.isArray(body.include_labels) ? body.include_labels.map(String) : [],
+      exclude_labels: Array.isArray(body.exclude_labels) ? body.exclude_labels.map(String) : [],
+      issue_state: typeof body.issue_state === "string" ? body.issue_state : "open",
+      task_type: typeof body.task_type === "string" ? body.task_type : "github_issue",
+      default_priority: typeof body.default_priority === "string" ? body.default_priority : "normal",
+      dedupe_strategy: typeof body.dedupe_strategy === "string" ? body.dedupe_strategy : "repo_issue",
+      enabled: true,
+      created_at: now,
+      updated_at: now,
+    };
+    demoSyncRules = [rule, ...demoSyncRules];
+    return clone({ data: rule, meta: demoMeta });
+  }
+
+  const syncRuleRunMatch = url.pathname.match(/^\/v1\/sync-rules\/([^/:]+):run$/);
+  if (syncRuleRunMatch && method === "POST") {
+    return clone({ data: { created: 2, updated: 1, skipped: 3, cancelled: 0, failed: 0 }, meta: demoMeta });
+  }
+
+  const syncRuleMatch = url.pathname.match(/^\/v1\/sync-rules\/([^/:]+)$/);
+  if (syncRuleMatch) {
+    const id = decodeURIComponent(syncRuleMatch[1]);
+    if (method === "GET") {
+      const rule = demoSyncRules.find((item) => item.id === id);
+      if (!rule) {
+        throw new Error(`Demo sync rule not found: ${id}`);
+      }
+      return clone({ data: rule, meta: demoMeta });
+    }
+    if (method === "PUT") {
+      const body = parseDemoBody(init.body);
+      let updatedRule: SyncRule | undefined;
+      demoSyncRules = demoSyncRules.map((rule) => {
+        if (rule.id !== id) return rule;
+        updatedRule = {
+          ...rule,
+          repo: typeof body.repo === "string" ? body.repo : rule.repo,
+          include_labels: Array.isArray(body.include_labels) ? body.include_labels.map(String) : rule.include_labels,
+          exclude_labels: Array.isArray(body.exclude_labels) ? body.exclude_labels.map(String) : rule.exclude_labels,
+          issue_state: typeof body.issue_state === "string" ? body.issue_state : rule.issue_state,
+          task_type: typeof body.task_type === "string" ? body.task_type : rule.task_type,
+          default_priority: typeof body.default_priority === "string" ? body.default_priority : rule.default_priority,
+          dedupe_strategy: typeof body.dedupe_strategy === "string" ? body.dedupe_strategy : rule.dedupe_strategy,
+          updated_at: "2026-07-02T14:00:00Z",
+        };
+        return updatedRule;
+      });
+      if (!updatedRule) {
+        throw new Error(`Demo sync rule not found: ${id}`);
+      }
+      return clone({ data: updatedRule, meta: demoMeta });
+    }
+    if (method === "DELETE") {
+      demoSyncRules = demoSyncRules.filter((rule) => rule.id !== id);
+      return clone({ data: { deleted: true }, meta: demoMeta });
+    }
+  }
 
   if (url.pathname === "/v1/tasks" && method === "GET") {
     const statuses = url.searchParams.getAll("status");
