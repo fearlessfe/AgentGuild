@@ -1380,16 +1380,16 @@ git commit -m "feat(web): api client methods for github app and sync rules"
 **Interfaces:**
 - Consumes: `getGitHubApp`, `testGitHubApp`, `deleteGitHubApp`, `githubManifestUrl`（Task 6.1）。
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 改为函数组件用 `useEffect` 调 `getGitHubApp()` 渲染 configured/未配置态；「连接 GitHub」按钮 `onClick` → `window.location.href = githubManifestUrl()`；「检测连接」→ `testGitHubApp()` 渲染 ok/error；「删除」→ `deleteGitHubApp()` 后刷新。移除 `ApiNote status="planned"`（连接检测已实现），保留/更新 `status="available"` 说明。
 
-- [ ] **Step 2: 构建 + 类型检查**
+- [x] **Step 2: 构建 + 类型检查**
 
 Run: `cd frontend && npm run build`
 Expected: PASS（tsc + vite 通过）。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
