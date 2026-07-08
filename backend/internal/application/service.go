@@ -13,19 +13,21 @@ import (
 )
 
 type Options struct {
-	CursorSecret []byte
-	CursorTTL    time.Duration
-	NewID        func() string
-	RateLimiter  ratelimit.RateLimiter
+	CursorSecret      []byte
+	CursorTTL         time.Duration
+	NewID             func() string
+	RateLimiter       ratelimit.RateLimiter
+	IssueSourceLookup IssueSourceLookup
 }
 
 type Service struct {
-	store        Store
-	policy       auth.ScopePolicy
-	cursorSecret []byte
-	cursorTTL    time.Duration
-	newID        func() string
-	rateLimiter  ratelimit.RateLimiter
+	store             Store
+	policy            auth.ScopePolicy
+	cursorSecret      []byte
+	cursorTTL         time.Duration
+	newID             func() string
+	rateLimiter       ratelimit.RateLimiter
+	issueSourceLookup IssueSourceLookup
 }
 
 func NewService(store Store, options Options) (*Service, error) {
@@ -42,11 +44,12 @@ func NewService(store Store, options Options) (*Service, error) {
 		options.RateLimiter = ratelimit.NewUnlimited()
 	}
 	return &Service{
-		store:        store,
-		cursorSecret: append([]byte(nil), options.CursorSecret...),
-		cursorTTL:    options.CursorTTL,
-		newID:        options.NewID,
-		rateLimiter:  options.RateLimiter,
+		store:             store,
+		cursorSecret:      append([]byte(nil), options.CursorSecret...),
+		cursorTTL:         options.CursorTTL,
+		newID:             options.NewID,
+		rateLimiter:       options.RateLimiter,
+		issueSourceLookup: options.IssueSourceLookup,
 	}, nil
 }
 

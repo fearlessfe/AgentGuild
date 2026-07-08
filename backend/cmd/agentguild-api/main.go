@@ -69,8 +69,10 @@ func run() error {
 	if err := pool.Ping(ctx); err != nil {
 		return err
 	}
+	mapRepo := syncpostgres.NewMapRepository(pool)
 	service, err := application.NewService(postgres.NewStore(pool), application.Options{
-		CursorSecret: []byte(cfg.CursorSecret),
+		CursorSecret:      []byte(cfg.CursorSecret),
+		IssueSourceLookup: mapRepo,
 	})
 	if err != nil {
 		return err
@@ -95,7 +97,6 @@ func run() error {
 	var manifestService *gitapp.ManifestService
 	if gitAppManager != nil {
 		ruleRepo := syncpostgres.NewRuleRepository(pool)
-		mapRepo := syncpostgres.NewMapRepository(pool)
 		ruleService, err = syncapp.NewRuleService(ruleRepo, syncapp.RuleServiceOptions{})
 		if err != nil {
 			return err

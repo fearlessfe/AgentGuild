@@ -52,6 +52,11 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 		if err != nil {
 			return err
 		}
+		views := []TaskView{view}
+		if err := s.attachTaskSources(ctx, principal.TenantID, views); err != nil {
+			return err
+		}
+		view = views[0]
 		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion, PollAfterSeconds: defaultPollAfterSeconds}}
 		return nil
 	})
@@ -106,6 +111,9 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 				return err
 			}
 		}
+		if err := s.attachTaskSources(ctx, principal.TenantID, views); err != nil {
+			return err
+		}
 		result = Envelope[TaskPage]{Data: TaskPage{Items: views}, Meta: Meta{ServerTime: now, PollAfterSeconds: defaultPollAfterSeconds}}
 		if hasMore {
 			last := records[len(records)-1]
@@ -114,6 +122,26 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 		return nil
 	})
 	return result, err
+}
+
+func (s *Service) attachTaskSources(ctx context.Context, tenantID string, views []TaskView) error {
+	if s.issueSourceLookup == nil || len(views) == 0 {
+		return nil
+	}
+	taskIDs := make([]string, 0, len(views))
+	for i := range views {
+		taskIDs = append(taskIDs, views[i].ID)
+	}
+	sources, err := s.issueSourceLookup.LookupByTaskIDs(ctx, tenantID, taskIDs)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		if source, ok := sources[views[i].ID]; ok {
+			views[i].Source = &source
+		}
+	}
+	return nil
 }
 
 func taskView(record TaskRecord) (TaskView, error) {

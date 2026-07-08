@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	coreapp "agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/sync/application"
 	"agentguild.dev/agentguild/backend/internal/sync/domain"
 	"github.com/jackc/pgx/v5"
@@ -65,6 +66,33 @@ func (r *MapRepository) Upsert(ctx context.Context, mapping *application.Mapping
 	return err
 }
 
+func (r *MapRepository) LookupByTaskIDs(ctx context.Context, tenantID string, taskIDs []string) (map[string]coreapp.TaskSource, error) {
+	if len(taskIDs) == 0 {
+		return map[string]coreapp.TaskSource{}, nil
+	}
+	rows, err := r.q.Query(ctx, `
+		SELECT task_id, repo, issue_number, COALESCE(issue_url, '')
+		FROM issue_task_map
+		WHERE tenant_id=$1 AND task_id=ANY($2::text[])`,
+		tenantID, taskIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sources := map[string]coreapp.TaskSource{}
+	for rows.Next() {
+		var taskID string
+		var source coreapp.TaskSource
+		if err := rows.Scan(&taskID, &source.Repo, &source.IssueNumber, &source.IssueURL); err != nil {
+			return nil, err
+		}
+		source.Kind = "issue"
+		sources[taskID] = source
+	}
+	return sources, rows.Err()
+}
+
 func nullableString(value string) any {
 	if value == "" {
 		return nil
@@ -73,3 +101,4 @@ func nullableString(value string) any {
 }
 
 var _ application.MapRepository = (*MapRepository)(nil)
+var _ coreapp.IssueSourceLookup = (*MapRepository)(nil)

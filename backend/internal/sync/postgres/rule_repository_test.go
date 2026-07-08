@@ -136,6 +136,42 @@ func TestMapRepositoryUpsertRoundTrip(t *testing.T) {
 	assertMappingEqual(t, got, mapping)
 }
 
+func TestMapRepositoryLookupByTaskIDs(t *testing.T) {
+	ctx := context.Background()
+	db := testdb.StartPostgres(t)
+	repo := NewMapRepository(db)
+
+	now := time.Date(2026, 7, 7, 15, 0, 0, 0, time.UTC)
+	mappings := []*syncapp.Mapping{
+		{TenantID: "tenant-1", Repo: "octo/hello-world", IssueNumber: 42, TaskID: "task-1", IssueState: "open", IssueURL: "https://github.com/octo/hello-world/issues/42", LastSyncedAt: now},
+		{TenantID: "tenant-1", Repo: "octo/hello-world", IssueNumber: 43, TaskID: "task-2", IssueState: "open", IssueURL: "https://github.com/octo/hello-world/issues/43", LastSyncedAt: now},
+		{TenantID: "tenant-2", Repo: "octo/hello-world", IssueNumber: 44, TaskID: "task-1", IssueState: "open", IssueURL: "https://github.com/octo/hello-world/issues/44", LastSyncedAt: now},
+	}
+	for _, mapping := range mappings {
+		if err := repo.Upsert(ctx, mapping); err != nil {
+			t.Fatalf("Upsert(%s/%d) error = %v", mapping.TenantID, mapping.IssueNumber, err)
+		}
+	}
+
+	sources, err := repo.LookupByTaskIDs(ctx, "tenant-1", []string{"task-1", "task-2", "missing"})
+	if err != nil {
+		t.Fatalf("LookupByTaskIDs() error = %v", err)
+	}
+
+	if len(sources) != 2 {
+		t.Fatalf("sources len = %d, want 2: %#v", len(sources), sources)
+	}
+	if got := sources["task-1"]; got.Kind != "issue" || got.Repo != "octo/hello-world" || got.IssueNumber != 42 || got.IssueURL != "https://github.com/octo/hello-world/issues/42" {
+		t.Fatalf("task-1 source = %#v, want issue octo/hello-world #42", got)
+	}
+	if got := sources["task-2"]; got.Kind != "issue" || got.Repo != "octo/hello-world" || got.IssueNumber != 43 || got.IssueURL != "https://github.com/octo/hello-world/issues/43" {
+		t.Fatalf("task-2 source = %#v, want issue octo/hello-world #43", got)
+	}
+	if _, ok := sources["missing"]; ok {
+		t.Fatalf("missing task returned a source: %#v", sources["missing"])
+	}
+}
+
 func newTestRule(t *testing.T, id, tenantID string, enabled bool, lastSyncedAt, now time.Time) *syncdomain.Rule {
 	t.Helper()
 	rule, err := syncdomain.NewRule(
