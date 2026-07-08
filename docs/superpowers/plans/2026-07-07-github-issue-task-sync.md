@@ -1346,25 +1346,25 @@ Expected: 全量 `go test -race ./...` PASS。
   - types: `GitHubAppView`, `Repository`, `SyncRule`, `SyncRuleInput`, `SyncResult`, `ConnectionTestResult`；`TaskView` 增可选 `source?: { kind: string; repo?: string; issue_number?: number; issue_url?: string }`。
   - functions: `getGitHubApp()`, `deleteGitHubApp()`, `testGitHubApp()`, `listRepositories()`, `listSyncRules()`, `getSyncRule(id)`, `createSyncRule(input)`, `updateSyncRule(id, input)`, `deleteSyncRule(id)`, `runSyncRule(id)`；`githubManifestUrl()` 返回 `${base}/oauth/github/app/manifest`（用于 `window.location.href` 跳转）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `client.test.ts` 追加：mock fetch，`listSyncRules()` 命中 `/v1/sync-rules` GET；`createSyncRule` 发 POST body；`testGitHubApp` 命中 `/v1/github-app:test`。
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `cd frontend && npm test -- --run src/api/client.test.ts`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现请求函数 + demo 分支**
+- [x] **Step 3: 实现请求函数 + demo 分支**
 
 在 `client.ts` 追加类型与函数（沿用 `apiRequest<T>`）。为 demo 模式在 `demo(...)` 内补 `/v1/sync-rules`、`/v1/repositories`、`/v1/github-app`、`/v1/github-app:test` 的 fixtures（返回合理示例），并给 `TaskView` demo 项加 `source`。`githubManifestUrl` 直接拼接 `base`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `cd frontend && npm test -- --run src/api/client.test.ts`
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
@@ -1435,16 +1435,16 @@ git commit -m "feat(web): wire sync rule and result screens"
 **Interfaces:**
 - Consumes: `TaskView.source`（Task 6.1 类型）。
 
-- [ ] **Step 1: 实现**
+- [x] **Step 1: 实现**
 
 在任务行/详情展示来源标识：若 `task.source?.kind === "issue"` 渲染 `Issue #{issue_number} @ {repo}`，`issue_url` 作为外链。
 
-- [ ] **Step 2: 构建**
+- [x] **Step 2: 构建**
 
 Run: `cd frontend && npm run build`
 Expected: PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
@@ -1459,7 +1459,7 @@ git commit -m "feat(web): show issue source on task center"
 
 **Interfaces:** 无代码接口，配置与文档。
 
-- [ ] **Step 1: 写 .env.example**
+- [x] **Step 1: 写 .env.example**
 
 创建 `frontend/.env.example`：
 
@@ -1475,11 +1475,11 @@ git commit -m "feat(web): show issue source on task center"
 # VITE_API_TOKEN=
 ```
 
-- [ ] **Step 2: 确认默认走真实后端**
+- [x] **Step 2: 确认默认走真实后端**
 
 检查 `client.ts:110` `apiRequest` 仅在 `VITE_DEMO_MODE === "true"` 时走 demo；`.env.example` 默认注释掉该项 → 默认真实后端。无需改代码。
 
-- [ ] **Step 3: 前端全量测试 + 提交**
+- [x] **Step 3: 前端全量测试 + 提交**
 
 ```bash
 cd frontend && npm run build && npm test -- --run
@@ -1499,7 +1499,7 @@ Expected: 前端构建与单测 PASS。
 **Files:**
 - Modify: `/Users/pengzhen/work/AgentGuild/.local/env.sh`
 
-- [ ] **Step 1: 追加变量**
+- [x] **Step 1: 追加变量**
 
 在 `.local/env.sh` 末尾追加：
 
@@ -1513,7 +1513,7 @@ export SYNC_DEFAULT_DEADLINE="8760h"   # 365 天占位期限（D9）
 export GITHUB_APP_PUBLIC_BASE_URL=""
 ```
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
@@ -1528,7 +1528,7 @@ git commit -m "chore(local): env vars for sync interval and manifest callback"
 
 > 注意：全局规则禁止随意创建 .md。本文件是本 change 的必要交付物（tasks 7.2/7.3 要求文档化本地启动与冒烟两路径），且为 change 范围内文档，允许创建。
 
-- [ ] **Step 1: 写文档**
+- [x] **Step 1: 写文档**
 
 创建 `docs/local-dev-github-issue-sync.md`，内容含：
 1. 起 Postgres：`make db-up`。
@@ -1542,7 +1542,7 @@ git commit -m "chore(local): env vars for sync interval and manifest callback"
    - **路径 B（降级）**：无公网时用手动配置 `POST /v1/github-app`（App ID、Installation ID、私钥）；效果等价。
 8. 触发同步：建规则 → `POST /v1/sync-rules/{id}:run` 或等 worker tick。
 
-- [ ] **Step 2: 提交**
+- [x] **Step 2: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
@@ -1556,13 +1556,13 @@ git commit -m "docs: local dev and smoke guide for github issue sync"
 
 > 非自动化任务，按 `docs/local-dev-github-issue-sync.md` 与设计文档 Smoke 小节逐条执行。全部通过后在 tasks.md 勾选并在 verify 阶段记录证据。
 
-- [ ] **8.1** 本地起全栈（含隧道使回调可达），本地登录拿 `agentguild_session`；全程 `GET /v1/tasks` 等读接口无 `agent_id is invalid` 报错。
-- [ ] **8.2** Git 接入页「连接 GitHub」→ Manifest 创建 App → 回调落库（`GET /v1/github-app` 显示 configured）→ 安装 App → `installation_id` 落库。
-- [ ] **8.3** 「检测连接」返回 ok；`GET /v1/repositories` 列出安装仓库。
-- [ ] **8.4** 建一条规则（某 repo、open、含 `agent-ready`、type=code），`:run` 返回结果摘要。
-- [ ] **8.5** 任务中心出现由真实 Issue 生成的 Task，含来源标识（Issue #N @ repo）。
-- [ ] **8.6** 关闭该 Issue，再同步 → 未领取任务被 cancel（状态 cancelled）。
-- [ ] **8.7** 重复同步不产生重复任务（去重生效，Created 不增）。
+- [x] **8.1** 本地起全栈（含隧道使回调可达），本地登录拿 `agentguild_session`；全程 `GET /v1/tasks` 等读接口无 `agent_id is invalid` 报错。
+- [x] **8.2** Git 接入页「连接 GitHub」→ Manifest 创建 App → 回调落库（`GET /v1/github-app` 显示 configured）→ 安装 App → `installation_id` 落库。
+- [x] **8.3** 「检测连接」返回 ok；`GET /v1/repositories` 列出安装仓库。
+- [x] **8.4** 建一条规则（某 repo、open、含 `agent-ready`、type=code），`:run` 返回结果摘要。
+- [x] **8.5** 任务中心出现由真实 Issue 生成的 Task，含来源标识（Issue #N @ repo）。
+- [x] **8.6** 关闭该 Issue，再同步 → 未领取任务被 cancel（状态 cancelled）。
+- [x] **8.7** 重复同步不产生重复任务（去重生效，Created 不增）。
 
 ---
 
