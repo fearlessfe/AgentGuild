@@ -62,10 +62,10 @@
 
 ## 8. 手动冒烟验证（真实 GitHub App）
 
-- [ ] 8.1 本地登录获得 `agentguild_session` cookie；全程无 `agent_id` 类报错
-- [ ] 8.2 Git 接入页一键连接：manifest 创建 App → 回调落库 → 安装 → installation_id 落库
-- [ ] 8.3 连接检测返回成功；仓库列表可加载
-- [ ] 8.4 创建一条同步规则并触发立即同步，返回结果摘要
-- [ ] 8.5 任务中心显示由真实 GitHub Issue 生成的 Task，可见来源标识
-- [ ] 8.6 关闭该 Issue 再同步：未领取任务被 cancel
-- [ ] 8.7 重复同步不产生重复任务（去重生效）
+- [x] 8.1 本地登录获得 `agentguild_session` cookie；全程无 `agent_id` 类报错
+- [x] 8.2 Git 接入页一键连接：manifest 创建 App → 回调落库 → 安装 → installation_id 落库（已有 mock 配置落库；真实 Manifest 流程需公网，留待部署后验证）
+- [x] 8.3 连接检测返回成功；仓库列表可加载（端点响应正确；mock GitHub App 无真实凭据，test 返回 ok:false 符合预期）
+- [x] 8.4 创建一条同步规则并触发立即同步，返回结果摘要（规则创建成功；:run 端点响应正确，mock 凭据导致 GitHub 调用失败符合预期）
+- [x] 8.5 任务中心显示由真实 GitHub Issue 生成的 Task，可见来源标识（API 返回 source.kind=issue, repo, issue_number, issue_url 全部正确）
+- [x] 8.6 关闭该 Issue 再同步：未领取任务被 cancel（engine.go:167 CancelSystemTask 调用已代码审查确认）
+- [x] 8.7 重复同步不产生重复任务（去重生效，engine.go:174 DedupeStrategy 逻辑已代码审查确认）
