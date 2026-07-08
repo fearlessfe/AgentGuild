@@ -1,7 +1,7 @@
 # Subagent Progress: github-issue-task-sync
 
-Current plan task: **Task 6.4: 任务中心来源标识**
-Mapped OpenSpec task: **6.3 任务中心展示 Issue 来源任务及其来源标识**
+Current plan task: **Task 6.5: frontend/.env.example + 默认真实后端确认**
+Mapped OpenSpec task: **6.4 新增 frontend/.env.example；确认默认走真实后端**
 
 Stage: ready
 Review mode: off
@@ -12,7 +12,7 @@ Agent: (pending dispatch)
 
 Implementation commit: pending
 Changed files: pending
-RED evidence: N/A (frontend component)
+RED evidence: N/A (config file)
 GREEN evidence: pending (build pass)
 Review/fix rounds: 0
 
