@@ -28,7 +28,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
-		gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
+	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
 	"agentguild.dev/agentguild/backend/internal/git/validation"
 	gitworker "agentguild.dev/agentguild/backend/internal/git/worker"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -38,6 +38,8 @@ import (
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
+	syncapp "agentguild.dev/agentguild/backend/internal/sync/application"
+	syncpostgres "agentguild.dev/agentguild/backend/internal/sync/postgres"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
 	mcptransport "agentguild.dev/agentguild/backend/internal/transport/mcp"
 	resttransport "agentguild.dev/agentguild/backend/internal/transport/rest"
@@ -88,7 +90,28 @@ func run() error {
 		return err
 	}
 
-	restOptions := make([]resttransport.Option, 0, 10)
+	var ruleService *syncapp.RuleService
+	var syncEngine *syncapp.Engine
+	var manifestService *gitapp.ManifestService
+	if gitAppManager != nil {
+		ruleRepo := syncpostgres.NewRuleRepository(pool)
+		mapRepo := syncpostgres.NewMapRepository(pool)
+		ruleService, err = syncapp.NewRuleService(ruleRepo, syncapp.RuleServiceOptions{})
+		if err != nil {
+			return err
+		}
+		syncEngine = syncapp.NewEngine(ruleRepo, mapRepo, syncTaskSink{service: service, pool: pool}, gitAppManager, syncapp.EngineOptions{
+			DefaultDeadline: cfg.SyncDefaultDeadline,
+		})
+		if cfg.WebEnabled {
+			manifestService = gitapp.NewManifestService(gitAppManager, gitapp.ManifestOptions{
+				PublicBaseURL: cfg.GitHubAppPublicBaseURL,
+				StateSecret:   []byte(cfg.GitHubAppManifestStateSecret),
+			})
+		}
+	}
+
+	restOptions := make([]resttransport.Option, 0, 13)
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
 	}
@@ -100,6 +123,15 @@ func run() error {
 	}
 	if gitAppManager != nil {
 		restOptions = append(restOptions, resttransport.WithGitHubAppManager(gitAppManager))
+	}
+	if ruleService != nil && syncEngine != nil {
+		restOptions = append(restOptions,
+			resttransport.WithSyncRuleService(ruleService),
+			resttransport.WithSyncEngine(syncEngine),
+		)
+	}
+	if manifestService != nil {
+		restOptions = append(restOptions, resttransport.WithGitHubManifest(manifestService))
 	}
 	if versionService != nil {
 		restOptions = append(restOptions, resttransport.WithVersionService(versionService))
@@ -171,6 +203,12 @@ func run() error {
 	if gitRuntime != nil {
 		runWorker(workerCtx, &wg, cfg.ValidationWorkerInterval, "validation", func(ctx context.Context) error {
 			return runValidationWorker(ctx, gitRuntime.validationWorker, pool)
+		})
+	}
+	if syncEngine != nil {
+		runWorker(workerCtx, &wg, cfg.SyncWorkerInterval, "sync", func(ctx context.Context) error {
+			_, err := syncEngine.RunAllEnabled(ctx)
+			return err
 		})
 	}
 
@@ -439,6 +477,50 @@ func repeat(ctx context.Context, interval time.Duration, name string, fn func(co
 		}
 	}
 }
+
+type syncTaskSink struct {
+	service *application.Service
+	pool    *pgxpool.Pool
+}
+
+func (s syncTaskSink) PublishSystemTask(ctx context.Context, in syncapp.PublishSystemTaskInput) (string, error) {
+	task, err := s.service.PublishSystemTask(ctx, application.PublishSystemTask{
+		TenantID:     in.TenantID,
+		RequestID:    in.RequestID,
+		Type:         in.Type,
+		Title:        in.Title,
+		Problem:      in.Problem,
+		Constraints:  in.Constraints,
+		Requirements: in.Requirements,
+		Deadline:     in.Deadline,
+	})
+	if err != nil {
+		return "", err
+	}
+	return task.ID, nil
+}
+
+func (s syncTaskSink) CancelSystemTask(ctx context.Context, tenantID, taskID, reason string) error {
+	_, err := s.service.CancelSystemTask(ctx, tenantID, taskID, reason)
+	return err
+}
+
+func (s syncTaskSink) UpdateSystemTaskContent(ctx context.Context, tenantID, taskID string, in syncapp.ContentInput) (string, error) {
+	if err := s.service.UpdateSystemTaskContent(ctx, tenantID, taskID, in.Title, in.Problem, in.Constraints, in.Requirements); err != nil {
+		return "", err
+	}
+	return s.TaskStatus(ctx, tenantID, taskID)
+}
+
+func (s syncTaskSink) TaskStatus(ctx context.Context, tenantID, taskID string) (string, error) {
+	var status string
+	if err := s.pool.QueryRow(ctx, `SELECT status FROM tasks WHERE tenant_id=$1 AND id=$2`, tenantID, taskID).Scan(&status); err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
+var _ syncapp.TaskSink = (*syncTaskSink)(nil)
 
 // gitRuntime holds the git delivery and validation services initialized for
 // this process. It is nil when GitHub App configuration is not provided.

@@ -22,12 +22,14 @@ type Config struct {
 	SessionCookieSecure                                    bool
 	ReaperInterval, OutboxInterval, ShutdownTimeout        time.Duration
 	ReputationWorkerInterval                               time.Duration
+	SyncWorkerInterval, SyncDefaultDeadline                time.Duration
 	ReviewSeedTenantID                                     string
 	ValidationWorkerInterval, ValidationLease              time.Duration
 	ValidationMaxAttempts                                  int
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
+	GitHubAppPublicBaseURL, GitHubAppManifestStateSecret   string
 	GitHub                                                 struct {
 		AppID          int64
 		PrivateKey     string
@@ -35,11 +37,11 @@ type Config struct {
 		BaseURL        string
 	}
 	LocalAdmin struct {
-		TenantID    string
-		OwnerID     string
-		OwnerEmail  string
-		Password    string
-		Enabled     bool
+		TenantID   string
+		OwnerID    string
+		OwnerEmail string
+		Password   string
+		Enabled    bool
 	}
 }
 
@@ -57,7 +59,9 @@ func Load(get LookupEnv) (Config, error) {
 		OIDCAdminEmails: splitCSV(get("OIDC_ADMIN_EMAILS")),
 		LangfuseBaseURL: get("LANGFUSE_BASE_URL"), LangfusePublicKey: get("LANGFUSE_PUBLIC_KEY"), LangfuseSecretKey: get("LANGFUSE_SECRET_KEY"),
 		LangfuseMode: value(get, "LANGFUSE_MODE", "cloud"), LangfuseMetricsPath: get("LANGFUSE_METRICS_PATH"), LangfuseCompleteTag: get("LANGFUSE_COMPLETE_COVERAGE_TAG"),
-		ReviewSeedTenantID: get("REVIEW_SEED_TENANT_ID"),
+		ReviewSeedTenantID:           get("REVIEW_SEED_TENANT_ID"),
+		GitHubAppPublicBaseURL:       get("GITHUB_APP_PUBLIC_BASE_URL"),
+		GitHubAppManifestStateSecret: get("SESSION_COOKIE_SECRET"),
 		LocalAdmin: struct {
 			TenantID   string
 			OwnerID    string
@@ -107,6 +111,12 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ReputationWorkerInterval, err = duration(get, "REPUTATION_WORKER_INTERVAL", 30*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.SyncWorkerInterval, err = duration(get, "SYNC_WORKER_INTERVAL", 60*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.SyncDefaultDeadline, err = duration(get, "SYNC_DEFAULT_DEADLINE", 365*24*time.Hour); err != nil {
 		return Config{}, err
 	}
 	if cfg.ShutdownTimeout, err = duration(get, "SHUTDOWN_TIMEOUT", 10*time.Second); err != nil {
