@@ -1406,20 +1406,20 @@ git commit -m "feat(web): wire git integration screen to real backend"
 **Interfaces:**
 - Consumes: `listRepositories`, `listSyncRules`, `createSyncRule`, `updateSyncRule`, `deleteSyncRule`, `runSyncRule`。
 
-- [ ] **Step 1: 实现 SyncRuleScreen**
+- [x] **Step 1: 实现 SyncRuleScreen**
 
 `useEffect` 加载 `listRepositories()` 填「安装仓库」表；加载 `listSyncRules()` 渲染规则；表单收集字段调 `createSyncRule/updateSyncRule`；「启用/暂停」调 `updateSyncRule({enabled})`；「预览/立即同步」调 `runSyncRule(id)` 并把结果传给同步结果展示。移除 `ApiNote status="planned"`。
 
-- [ ] **Step 2: 实现 SyncResultScreen**
+- [x] **Step 2: 实现 SyncResultScreen**
 
 接收 `runSyncRule` 返回的 `SyncResult`（或按 rule 展示最近一次结果摘要 metrics：created/updated/skipped/cancelled/failed）。移除 `ApiNote status="planned"`（或降级为 available 说明冲突行不提供直接编辑正式 Task 的入口——保留该行为提示）。
 
-- [ ] **Step 3: 构建**
+- [x] **Step 3: 构建**
 
 Run: `cd frontend && npm run build`
 Expected: PASS。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 cd /Users/pengzhen/work/AgentGuild
