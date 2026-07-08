@@ -191,6 +191,7 @@ function TaskDetailContent({
   serverTime: string;
 }) {
   const leaseActive = execution && ["leased", "running"].includes(execution.status);
+  const requirements = listOrEmpty(task.requirements);
 
   return (
     <div className="stack">
@@ -230,11 +231,15 @@ function TaskDetailContent({
       </div>
       <div className="detail-block">
         <span className="ctx-label">验收标准</span>
-        <ul className="perm-list">
-          {task.requirements.map((requirement) => (
-            <li key={requirement}>{requirement}</li>
-          ))}
-        </ul>
+        {requirements.length > 0 ? (
+          <ul className="perm-list">
+            {requirements.map((requirement) => (
+              <li key={requirement}>{requirement}</li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-sm muted">暂无验收标准</div>
+        )}
       </div>
 
       <div className="fact-grid">
@@ -299,4 +304,8 @@ function TaskDetailContent({
       ) : null}
     </div>
   );
+}
+
+function listOrEmpty(value: string[] | null | undefined): string[] {
+  return Array.isArray(value) ? value : [];
 }

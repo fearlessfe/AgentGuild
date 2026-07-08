@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -46,6 +47,27 @@ func TestSyncCreateRuleAdminSessionReturnsCreatedView(t *testing.T) {
 	require.True(t, body.Data.Enabled)
 }
 
+func TestSyncCreateRuleAcceptsPublicSourceAuth(t *testing.T) {
+	rules := newSyncRuleService(t)
+	server := newTestServer(&fakeApplication{}, rest.WithSyncRuleService(rules))
+
+	res := postJSONWithSession(t, server, "/v1/sync-rules", `{
+		"repo":"octo/hello-world",
+		"include_labels":["good first issue"],
+		"issue_state":"open",
+		"task_type":"coding",
+		"dedupe_strategy":"update",
+		"source_auth":"public"
+	}`, sessionCookie(t, "admin-1", true))
+
+	require.Equal(t, http.StatusCreated, res.Code)
+	var body struct {
+		Data syncapp.RuleView `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
+	require.Equal(t, "public", body.Data.SourceAuth)
+}
+
 func TestSyncCreateRuleRejectsNonAdminHuman(t *testing.T) {
 	rules := newSyncRuleService(t)
 	server := newTestServer(&fakeApplication{}, rest.WithSyncRuleService(rules))
@@ -73,6 +95,38 @@ func TestSyncCreateRuleRejectsAgentBearer(t *testing.T) {
 	}`, "token-agent-1")
 
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, res.Code)
+}
+
+func TestSyncUpdateRuleCanToggleEnabled(t *testing.T) {
+	rules := newSyncRuleService(t)
+	server := newTestServer(&fakeApplication{}, rest.WithSyncRuleService(rules))
+	cookie := sessionCookie(t, "admin-1", true)
+	created := postJSONWithSession(t, server, "/v1/sync-rules", `{
+		"repo":"agentguild/agentguild",
+		"issue_state":"open",
+		"task_type":"coding",
+		"dedupe_strategy":"update"
+	}`, cookie)
+	require.Equal(t, http.StatusCreated, created.Code)
+	var createdBody struct {
+		Data syncapp.RuleView `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
+
+	updated := putJSONWithSession(t, server, "/v1/sync-rules/"+createdBody.Data.ID, `{
+		"repo":"agentguild/agentguild",
+		"issue_state":"open",
+		"task_type":"coding",
+		"dedupe_strategy":"update",
+		"enabled":false
+	}`, cookie)
+
+	require.Equal(t, http.StatusOK, updated.Code)
+	var updatedBody struct {
+		Data syncapp.RuleView `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(updated.Body.Bytes(), &updatedBody))
+	require.False(t, updatedBody.Data.Enabled)
 }
 
 func TestSyncListRepositoriesReturnsInstallationRepositories(t *testing.T) {
@@ -179,6 +233,16 @@ func newSyncRuleService(t *testing.T) *syncapp.RuleService {
 	})
 	require.NoError(t, err)
 	return svc
+}
+
+func putJSONWithSession(t *testing.T, server http.Handler, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	return rec
 }
 
 type memoryRuleRepository struct {

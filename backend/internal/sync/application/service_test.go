@@ -98,6 +98,25 @@ func TestRuleServiceUpdateDeleteAndSetEnabledRequireAdmin(t *testing.T) {
 		t.Fatalf("Update() view = %+v, want updated fields preserving enabled", updated)
 	}
 
+	enabled := false
+	disabledByUpdate, err := svc.Update(ctx, admin, UpdateRuleCommand{
+		ID:              "rule-1",
+		Repo:            "octo/hello-world",
+		IncludeLabels:   []string{"triage"},
+		ExcludeLabels:   []string{"duplicate"},
+		IssueState:      "all",
+		TaskType:        "investigation",
+		DefaultPriority: "P1",
+		DedupeStrategy:  domain.DedupeSkip,
+		Enabled:         &enabled,
+	})
+	if err != nil {
+		t.Fatalf("Update() enabled error = %v", err)
+	}
+	if disabledByUpdate.Enabled {
+		t.Fatalf("Update() enabled = true, want false")
+	}
+
 	if _, err := svc.SetEnabled(ctx, human, "rule-1", false); !errors.Is(err, domain.ErrForbidden) {
 		t.Fatalf("SetEnabled() non-admin error = %v, want ErrForbidden", err)
 	}
@@ -166,6 +185,7 @@ func newDomainRule(t *testing.T, tenantID, id string, enabled bool, now time.Tim
 		"open",
 		"P2",
 		domain.DedupeUpdate,
+		"",
 		enabled,
 		time.Time{},
 		now,

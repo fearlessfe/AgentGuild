@@ -23,6 +23,8 @@ type syncRuleBody struct {
 	TaskType        string   `json:"task_type"`
 	DefaultPriority string   `json:"default_priority"`
 	DedupeStrategy  string   `json:"dedupe_strategy"`
+	SourceAuth      string   `json:"source_auth"`
+	Enabled         *bool    `json:"enabled"`
 }
 
 type repositoryView struct {
@@ -93,6 +95,7 @@ func (s *Server) createSyncRule(w http.ResponseWriter, r *http.Request) {
 		TaskType:        body.TaskType,
 		DefaultPriority: body.DefaultPriority,
 		DedupeStrategy:  body.DedupeStrategy,
+		SourceAuth:      body.SourceAuth,
 	})
 	if err != nil {
 		mapSyncRuleError(w, err, principal)
@@ -129,6 +132,8 @@ func (s *Server) updateSyncRule(w http.ResponseWriter, r *http.Request) {
 		TaskType:        body.TaskType,
 		DefaultPriority: body.DefaultPriority,
 		DedupeStrategy:  body.DedupeStrategy,
+		SourceAuth:      body.SourceAuth,
+		Enabled:         body.Enabled,
 	})
 	if err != nil {
 		mapSyncRuleError(w, err, principal)

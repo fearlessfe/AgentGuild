@@ -20,6 +20,7 @@ func TestRuleRepositoryRoundTrip(t *testing.T) {
 	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 	lastSyncedAt := now.Add(-2 * time.Hour)
 	rule := newTestRule(t, "rule-1", "tenant-1", true, lastSyncedAt, now)
+	rule.SourceAuth = syncdomain.SourceAuthPublic
 
 	if err := repo.Create(ctx, rule); err != nil {
 		t.Fatalf("Create() error = %v", err)
@@ -184,6 +185,7 @@ func newTestRule(t *testing.T, id, tenantID string, enabled bool, lastSyncedAt, 
 		"open",
 		"P2",
 		syncdomain.DedupeUpdate,
+		"",
 		enabled,
 		lastSyncedAt,
 		now,
@@ -204,6 +206,7 @@ func assertRuleEqual(t *testing.T, got, want *syncdomain.Rule) {
 		got.TaskType != want.TaskType ||
 		got.DefaultPriority != want.DefaultPriority ||
 		got.DedupeStrategy != want.DedupeStrategy ||
+		got.SourceAuth != want.SourceAuth ||
 		got.Enabled != want.Enabled ||
 		!got.LastSyncedAt.Equal(want.LastSyncedAt) ||
 		!got.CreatedAt.Equal(want.CreatedAt) ||

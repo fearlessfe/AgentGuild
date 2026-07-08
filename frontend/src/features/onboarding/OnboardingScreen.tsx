@@ -1,4 +1,4 @@
-import { PageHeader, Card, Button, Steps, ApiNote } from "../../ui";
+import { PageHeader, Card, Button, ButtonLink, Steps, ApiNote } from "../../ui";
 import type { Step } from "../../ui";
 
 const ONBOARDING_STEPS: Step[] = [
@@ -21,7 +21,9 @@ export function OnboardingScreen() {
                 选择企业 Git 提供商并安装 AgentGuild App，仅授予任务治理所需的最小权限。
               </p>
               <div className="row">
-                <Button variant="primary">连接 GitHub</Button>
+                <ButtonLink to="/git-integration" variant="primary">
+                  连接 GitHub
+                </ButtonLink>
                 <Button variant="ghost">稍后再说</Button>
               </div>
             </div>

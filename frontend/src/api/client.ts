@@ -58,8 +58,8 @@ export type TaskView = {
   type: string;
   title: string;
   problem: string;
-  constraints: string[];
-  requirements: string[];
+  constraints: string[] | null;
+  requirements: string[] | null;
   deadline: string;
   status: TaskStatus;
   claimed_by?: string;
@@ -91,12 +91,13 @@ export type Repository = {
 export type SyncRule = {
   id: string;
   repo: string;
-  include_labels: string[];
-  exclude_labels: string[];
+  include_labels: string[] | null;
+  exclude_labels: string[] | null;
   issue_state: string;
   task_type: string;
   default_priority: string;
   dedupe_strategy: string;
+  source_auth: "app" | "public" | string;
   enabled: boolean;
   last_synced_at?: string;
   created_at: string;
@@ -111,6 +112,8 @@ export type SyncRuleInput = {
   task_type?: string;
   default_priority?: string;
   dedupe_strategy?: string;
+  source_auth?: "app" | "public" | string;
+  enabled?: boolean;
 };
 
 export type SyncResult = {
@@ -237,7 +240,16 @@ export async function listTasks(filters: {
 export const getTask = (id: string) => apiRequest<TaskView>(`/v1/tasks/${encodeURIComponent(id)}`);
 export const getExecution = (id: string) => apiRequest<ExecutionView>(`/v1/executions/${encodeURIComponent(id)}`);
 export const pollInterval = (seconds?: number) => (seconds && seconds > 0 ? seconds * 1000 : false);
-export const getGitHubApp = () => apiRequest<GitHubAppView>("/v1/github-app");
+export async function getGitHubApp(): Promise<Envelope<GitHubAppView>> {
+  const response = await apiRequest<GitHubAppView>("/v1/github-app");
+  if ("data" in response) {
+    return response;
+  }
+  return {
+    data: response as unknown as GitHubAppView,
+    meta: { server_time: "", resource_version: 0 },
+  };
+}
 export const deleteGitHubApp = () => apiRequest<{ deleted: boolean }>("/v1/github-app", { method: "DELETE" });
 export const testGitHubApp = () => apiRequest<ConnectionTestResult>("/v1/github-app:test", { method: "POST" });
 export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/repositories");
@@ -330,6 +342,7 @@ let demoSyncRules: SyncRule[] = [
     task_type: "github_issue",
     default_priority: "normal",
     dedupe_strategy: "repo_issue",
+    source_auth: "app",
     enabled: true,
     last_synced_at: "2026-07-02T13:50:00Z",
     created_at: "2026-07-01T08:30:00Z",
@@ -344,6 +357,7 @@ let demoSyncRules: SyncRule[] = [
     task_type: "maintenance",
     default_priority: "low",
     dedupe_strategy: "repo_issue",
+    source_auth: "app",
     enabled: true,
     created_at: "2026-07-01T09:00:00Z",
     updated_at: "2026-07-01T09:00:00Z",
@@ -514,6 +528,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
       task_type: typeof body.task_type === "string" ? body.task_type : "github_issue",
       default_priority: typeof body.default_priority === "string" ? body.default_priority : "normal",
       dedupe_strategy: typeof body.dedupe_strategy === "string" ? body.dedupe_strategy : "repo_issue",
+      source_auth: typeof body.source_auth === "string" ? body.source_auth : "app",
       enabled: true,
       created_at: now,
       updated_at: now,
@@ -551,6 +566,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
           task_type: typeof body.task_type === "string" ? body.task_type : rule.task_type,
           default_priority: typeof body.default_priority === "string" ? body.default_priority : rule.default_priority,
           dedupe_strategy: typeof body.dedupe_strategy === "string" ? body.dedupe_strategy : rule.dedupe_strategy,
+          source_auth: typeof body.source_auth === "string" ? body.source_auth : rule.source_auth,
           updated_at: "2026-07-02T14:00:00Z",
         };
         return updatedRule;

@@ -29,6 +29,7 @@ type CreateRuleCommand struct {
 	TaskType        string
 	DefaultPriority string
 	DedupeStrategy  string
+	SourceAuth      string
 }
 
 type UpdateRuleCommand struct {
@@ -40,6 +41,8 @@ type UpdateRuleCommand struct {
 	TaskType        string
 	DefaultPriority string
 	DedupeStrategy  string
+	SourceAuth      string
+	Enabled         *bool
 }
 
 type RuleView struct {
@@ -51,6 +54,7 @@ type RuleView struct {
 	TaskType        string    `json:"task_type"`
 	DefaultPriority string    `json:"default_priority"`
 	DedupeStrategy  string    `json:"dedupe_strategy"`
+	SourceAuth      string    `json:"source_auth"`
 	Enabled         bool      `json:"enabled"`
 	LastSyncedAt    time.Time `json:"last_synced_at"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -85,6 +89,7 @@ func (s *RuleService) Create(ctx context.Context, principal auth.Principal, cmd 
 		cmd.IssueState,
 		cmd.DefaultPriority,
 		cmd.DedupeStrategy,
+		cmd.SourceAuth,
 		true,
 		time.Time{},
 		now,
@@ -133,6 +138,14 @@ func (s *RuleService) Update(ctx context.Context, principal auth.Principal, cmd 
 	if err != nil {
 		return RuleView{}, err
 	}
+	enabled := existing.Enabled
+	if cmd.Enabled != nil {
+		enabled = *cmd.Enabled
+	}
+	sourceAuth := existing.SourceAuth
+	if cmd.SourceAuth != "" {
+		sourceAuth = cmd.SourceAuth
+	}
 	rule, err := domain.NewRule(
 		cmd.ID,
 		principal.TenantID,
@@ -143,7 +156,8 @@ func (s *RuleService) Update(ctx context.Context, principal auth.Principal, cmd 
 		cmd.IssueState,
 		cmd.DefaultPriority,
 		cmd.DedupeStrategy,
-		existing.Enabled,
+		sourceAuth,
+		enabled,
 		existing.LastSyncedAt,
 		existing.CreatedAt,
 		s.now(),
@@ -210,6 +224,7 @@ func toRuleView(rule *domain.Rule) RuleView {
 		TaskType:        rule.TaskType,
 		DefaultPriority: rule.DefaultPriority,
 		DedupeStrategy:  rule.DedupeStrategy,
+		SourceAuth:      rule.SourceAuth,
 		Enabled:         rule.Enabled,
 		LastSyncedAt:    rule.LastSyncedAt,
 		CreatedAt:       rule.CreatedAt,

@@ -38,7 +38,7 @@ type TaskSink interface {
 }
 
 type IssueSourceProvider interface {
-	IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)
+	IssueSource(ctx context.Context, tenantID, sourceAuth string) (git.IssueSource, error)
 }
 
 type EngineOptions struct {
@@ -80,7 +80,7 @@ func (e *Engine) RunRule(ctx context.Context, tenantID, ruleID string) (SyncResu
 	if err != nil {
 		return result, err
 	}
-	source, err := e.sources.IssueSource(ctx, tenantID)
+	source, err := e.sources.IssueSource(ctx, tenantID, rule.SourceAuth)
 	if err != nil {
 		return result, err
 	}

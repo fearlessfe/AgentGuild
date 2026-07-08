@@ -11,6 +11,9 @@ import (
 const (
 	DedupeUpdate = "update"
 	DedupeSkip   = "skip"
+
+	SourceAuthApp    = "app"
+	SourceAuthPublic = "public"
 )
 
 type Rule struct {
@@ -23,6 +26,7 @@ type Rule struct {
 	TaskType        string
 	DefaultPriority string
 	DedupeStrategy  string
+	SourceAuth      string
 	Enabled         bool
 	LastSyncedAt    time.Time
 	CreatedAt       time.Time
@@ -59,10 +63,13 @@ var (
 func NewRule(
 	id, tenantID, repo, taskType string,
 	includeLabels, excludeLabels []string,
-	issueState, defaultPriority, dedupeStrategy string,
+	issueState, defaultPriority, dedupeStrategy, sourceAuth string,
 	enabled bool,
 	lastSyncedAt, createdAt, updatedAt time.Time,
 ) (*Rule, error) {
+	if sourceAuth == "" {
+		sourceAuth = SourceAuthApp
+	}
 	if !validRepo(repo) {
 		return nil, invalidArgument("repo")
 	}
@@ -75,6 +82,9 @@ func NewRule(
 	if !validDedupeStrategy(dedupeStrategy) {
 		return nil, invalidArgument("dedupe_strategy")
 	}
+	if !validSourceAuth(sourceAuth) {
+		return nil, invalidArgument("source_auth")
+	}
 
 	return &Rule{
 		ID:              id,
@@ -86,6 +96,7 @@ func NewRule(
 		TaskType:        taskType,
 		DefaultPriority: defaultPriority,
 		DedupeStrategy:  dedupeStrategy,
+		SourceAuth:      sourceAuth,
 		Enabled:         enabled,
 		LastSyncedAt:    lastSyncedAt,
 		CreatedAt:       createdAt,
@@ -164,6 +175,15 @@ func validIssueState(state string) bool {
 func validDedupeStrategy(strategy string) bool {
 	switch strategy {
 	case DedupeUpdate, DedupeSkip:
+		return true
+	default:
+		return false
+	}
+}
+
+func validSourceAuth(sourceAuth string) bool {
+	switch sourceAuth {
+	case SourceAuthApp, SourceAuthPublic:
 		return true
 	default:
 		return false

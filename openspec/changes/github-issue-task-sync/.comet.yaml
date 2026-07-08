@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 context_compression: off
 build_mode: subagent-driven-development
 build_pause: null
@@ -7,7 +7,7 @@ subagent_dispatch: confirmed
 tdd_mode: tdd
 review_mode: off
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: 380e213eba528594f5929c1ce638bfb6959a6264
 design_doc: docs/superpowers/specs/2026-07-07-github-issue-task-sync-design.md

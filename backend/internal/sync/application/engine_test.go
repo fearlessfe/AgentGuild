@@ -272,6 +272,37 @@ func TestEngineUsesLastSyncedAtAsNextSinceWatermark(t *testing.T) {
 	}
 }
 
+func TestEngineUsesPublicSourceForPublicRule(t *testing.T) {
+	ctx := context.Background()
+	rule := mustRule(t, "rule-public", "tenant-1", "octo/hello-world", nil, nil, "open", syncdomain.DedupeUpdate)
+	rule.SourceAuth = syncdomain.SourceAuthPublic
+	rules := newFakeRuleRepo(rule)
+	maps := newFakeMapRepo()
+	sink := newFakeTaskSink()
+	publicSource := &recordingIssueSource{issues: map[string][]git.Issue{
+		"octo/hello-world": {{Number: 99, Title: "Public issue", State: "open"}},
+	}}
+	appSource := &recordingIssueSource{err: errors.New("app source should not be used")}
+	engine := NewEngine(rules, maps, sink, fakeSources{
+		syncdomain.SourceAuthApp + ":tenant-1": appSource,
+		syncdomain.SourceAuthPublic:            publicSource,
+	}, EngineOptions{})
+
+	result, err := engine.RunRule(ctx, "tenant-1", "rule-public")
+	if err != nil {
+		t.Fatalf("RunRule returned error: %v", err)
+	}
+	if result.Created != 1 {
+		t.Fatalf("result = %+v, want Created=1", result)
+	}
+	if len(publicSource.calls) != 1 || publicSource.calls[0].Repo != "octo/hello-world" {
+		t.Fatalf("public source calls = %+v, want repo octo/hello-world", publicSource.calls)
+	}
+	if len(appSource.calls) != 0 {
+		t.Fatalf("app source calls = %+v, want unused", appSource.calls)
+	}
+}
+
 func mustRule(t *testing.T, id, tenantID, repo string, include, exclude []string, issueState, dedupe string) *syncdomain.Rule {
 	t.Helper()
 	rule, err := syncdomain.NewRule(
@@ -284,6 +315,7 @@ func mustRule(t *testing.T, id, tenantID, repo string, include, exclude []string
 		issueState,
 		"normal",
 		dedupe,
+		"",
 		true,
 		time.Time{},
 		time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC),
@@ -480,8 +512,17 @@ func (s *fakeTaskSink) TaskStatus(ctx context.Context, tenantID, taskID string) 
 
 type fakeSources map[string]git.IssueSource
 
-func (s fakeSources) IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error) {
-	source, ok := s[tenantID]
+func (s fakeSources) IssueSource(ctx context.Context, tenantID, sourceAuth string) (git.IssueSource, error) {
+	key := tenantID
+	if sourceAuth == syncdomain.SourceAuthPublic {
+		key = syncdomain.SourceAuthPublic
+	} else if sourceAuth != "" {
+		key = sourceAuth + ":" + tenantID
+	}
+	source, ok := s[key]
+	if !ok && sourceAuth == syncdomain.SourceAuthApp {
+		source, ok = s[tenantID]
+	}
 	if !ok {
 		return nil, syncdomain.ErrNotFound
 	}

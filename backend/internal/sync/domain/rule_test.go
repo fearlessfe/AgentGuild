@@ -22,6 +22,7 @@ func TestNewRuleAcceptsValidRule(t *testing.T) {
 		"open",
 		"p1",
 		DedupeUpdate,
+		SourceAuthPublic,
 		true,
 		lastSyncedAt,
 		now,
@@ -36,6 +37,9 @@ func TestNewRuleAcceptsValidRule(t *testing.T) {
 	}
 	if rule.TaskType != "bugfix" || rule.DefaultPriority != "p1" || rule.DedupeStrategy != DedupeUpdate {
 		t.Fatalf("NewRule did not preserve task defaults: %+v", rule)
+	}
+	if rule.SourceAuth != SourceAuthPublic {
+		t.Fatalf("NewRule SourceAuth = %q, want public", rule.SourceAuth)
 	}
 	if rule.IssueState != "open" || !rule.Enabled || !rule.LastSyncedAt.Equal(lastSyncedAt) {
 		t.Fatalf("NewRule did not preserve sync settings: %+v", rule)
@@ -162,6 +166,7 @@ func validRule(repo, issueState, taskType, dedupeStrategy string) (*Rule, error)
 		issueState,
 		"p1",
 		dedupeStrategy,
+		"",
 		true,
 		time.Time{},
 		now,

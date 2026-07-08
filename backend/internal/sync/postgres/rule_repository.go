@@ -34,13 +34,13 @@ func (r *RuleRepository) Create(ctx context.Context, rule *domain.Rule) error {
 		return err
 	}
 	_, err = r.q.Exec(ctx, `
-		INSERT INTO sync_rules (
-			id, tenant_id, repo, include_labels, exclude_labels, issue_state,
-			task_type, default_priority, dedupe_strategy, enabled, last_synced_at,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			INSERT INTO sync_rules (
+				id, tenant_id, repo, include_labels, exclude_labels, issue_state,
+				task_type, default_priority, dedupe_strategy, source_auth, enabled, last_synced_at,
+				created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		rule.ID, rule.TenantID, rule.Repo, includeLabels, excludeLabels, rule.IssueState,
-		rule.TaskType, rule.DefaultPriority, rule.DedupeStrategy, rule.Enabled,
+		rule.TaskType, rule.DefaultPriority, rule.DedupeStrategy, rule.SourceAuth, rule.Enabled,
 		nullableTime(rule.LastSyncedAt), rule.CreatedAt, rule.UpdatedAt,
 	)
 	return err
@@ -48,9 +48,9 @@ func (r *RuleRepository) Create(ctx context.Context, rule *domain.Rule) error {
 
 func (r *RuleRepository) Get(ctx context.Context, tenantID, id string) (*domain.Rule, error) {
 	rule, err := scanRule(r.q.QueryRow(ctx, `
-		SELECT id, tenant_id, repo, include_labels, exclude_labels, issue_state,
-		       task_type, default_priority, dedupe_strategy, enabled, last_synced_at,
-		       created_at, updated_at
+			SELECT id, tenant_id, repo, include_labels, exclude_labels, issue_state,
+			       task_type, default_priority, dedupe_strategy, source_auth, enabled, last_synced_at,
+			       created_at, updated_at
 		FROM sync_rules
 		WHERE tenant_id=$1 AND id=$2`,
 		tenantID, id,
@@ -63,9 +63,9 @@ func (r *RuleRepository) Get(ctx context.Context, tenantID, id string) (*domain.
 
 func (r *RuleRepository) List(ctx context.Context, tenantID string) ([]*domain.Rule, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT id, tenant_id, repo, include_labels, exclude_labels, issue_state,
-		       task_type, default_priority, dedupe_strategy, enabled, last_synced_at,
-		       created_at, updated_at
+			SELECT id, tenant_id, repo, include_labels, exclude_labels, issue_state,
+			       task_type, default_priority, dedupe_strategy, source_auth, enabled, last_synced_at,
+			       created_at, updated_at
 		FROM sync_rules
 		WHERE tenant_id=$1
 		ORDER BY created_at ASC, id ASC`,
@@ -80,9 +80,9 @@ func (r *RuleRepository) List(ctx context.Context, tenantID string) ([]*domain.R
 
 func (r *RuleRepository) ListEnabledAllTenants(ctx context.Context) ([]*domain.Rule, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT id, tenant_id, repo, include_labels, exclude_labels, issue_state,
-		       task_type, default_priority, dedupe_strategy, enabled, last_synced_at,
-		       created_at, updated_at
+			SELECT id, tenant_id, repo, include_labels, exclude_labels, issue_state,
+			       task_type, default_priority, dedupe_strategy, source_auth, enabled, last_synced_at,
+			       created_at, updated_at
 		FROM sync_rules
 		WHERE enabled=true
 		ORDER BY tenant_id ASC, id ASC`)
@@ -99,14 +99,14 @@ func (r *RuleRepository) Update(ctx context.Context, rule *domain.Rule) error {
 		return err
 	}
 	tag, err := r.q.Exec(ctx, `
-		UPDATE sync_rules
-		SET repo=$3, include_labels=$4, exclude_labels=$5, issue_state=$6,
-		    task_type=$7, default_priority=$8, dedupe_strategy=$9, enabled=$10,
-		    last_synced_at=$11, updated_at=$12
-		WHERE tenant_id=$1 AND id=$2`,
+			UPDATE sync_rules
+			SET repo=$3, include_labels=$4, exclude_labels=$5, issue_state=$6,
+			    task_type=$7, default_priority=$8, dedupe_strategy=$9, source_auth=$10,
+			    enabled=$11, last_synced_at=$12, updated_at=$13
+			WHERE tenant_id=$1 AND id=$2`,
 		rule.TenantID, rule.ID, rule.Repo, includeLabels, excludeLabels,
 		rule.IssueState, rule.TaskType, rule.DefaultPriority, rule.DedupeStrategy,
-		rule.Enabled, nullableTime(rule.LastSyncedAt), rule.UpdatedAt,
+		rule.SourceAuth, rule.Enabled, nullableTime(rule.LastSyncedAt), rule.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -174,6 +174,7 @@ func scanRule(row ruleScanner) (*domain.Rule, error) {
 		&rule.TaskType,
 		&rule.DefaultPriority,
 		&rule.DedupeStrategy,
+		&rule.SourceAuth,
 		&rule.Enabled,
 		&lastSyncedAt,
 		&rule.CreatedAt,

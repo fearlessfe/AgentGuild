@@ -28,6 +28,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	githubapi "agentguild.dev/agentguild/backend/internal/git/github"
 	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
 	"agentguild.dev/agentguild/backend/internal/git/validation"
 	gitworker "agentguild.dev/agentguild/backend/internal/git/worker"
@@ -39,6 +40,7 @@ import (
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
 	syncapp "agentguild.dev/agentguild/backend/internal/sync/application"
+	syncdomain "agentguild.dev/agentguild/backend/internal/sync/domain"
 	syncpostgres "agentguild.dev/agentguild/backend/internal/sync/postgres"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
 	mcptransport "agentguild.dev/agentguild/backend/internal/transport/mcp"
@@ -101,7 +103,11 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		syncEngine = syncapp.NewEngine(ruleRepo, mapRepo, syncTaskSink{service: service, pool: pool}, gitAppManager, syncapp.EngineOptions{
+		sources := syncIssueSourceProvider{
+			app:    gitAppManager,
+			public: githubapi.NewPublicIssueSource("", nil),
+		}
+		syncEngine = syncapp.NewEngine(ruleRepo, mapRepo, syncTaskSink{service: service, pool: pool}, sources, syncapp.EngineOptions{
 			DefaultDeadline: cfg.SyncDefaultDeadline,
 		})
 		if cfg.WebEnabled {
@@ -522,6 +528,34 @@ func (s syncTaskSink) TaskStatus(ctx context.Context, tenantID, taskID string) (
 }
 
 var _ syncapp.TaskSink = (*syncTaskSink)(nil)
+
+type syncAppIssueSource interface {
+	IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)
+}
+
+type syncIssueSourceProvider struct {
+	app    syncAppIssueSource
+	public git.IssueSource
+}
+
+func (p syncIssueSourceProvider) IssueSource(ctx context.Context, tenantID, sourceAuth string) (git.IssueSource, error) {
+	switch sourceAuth {
+	case "", syncdomain.SourceAuthApp:
+		if p.app == nil {
+			return nil, git.ErrGitHubAppNotConfigured
+		}
+		return p.app.IssueSource(ctx, tenantID)
+	case syncdomain.SourceAuthPublic:
+		if p.public == nil {
+			return nil, git.ErrUnauthorized
+		}
+		return p.public, nil
+	default:
+		return nil, &syncdomain.Error{Code: "invalid_argument", Message: "source_auth is invalid", Field: "source_auth"}
+	}
+}
+
+var _ syncapp.IssueSourceProvider = (*syncIssueSourceProvider)(nil)
 
 // gitRuntime holds the git delivery and validation services initialized for
 // this process. It is nil when GitHub App configuration is not provided.
