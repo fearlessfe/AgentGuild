@@ -2,6 +2,7 @@
 change: improve-console-ui-ux
 design-doc: docs/superpowers/specs/2026-07-09-improve-console-ui-ux-design.md
 base-ref: 116b13b4bea43bba1b3ee9172b6f782d860f9924
+archived-with: 2026-07-09-improve-console-ui-ux
 ---
 
 # Improve Console UI/UX Implementation Plan
@@ -24,6 +25,7 @@ base-ref: 116b13b4bea43bba1b3ee9172b6f782d860f9924
 - Diff content must not wrap into character-by-character columns.
 - Key mobile routes must not create page-level horizontal overflow.
 
+archived-with: 2026-07-09-improve-console-ui-ux
 ---
 
 ### Task 1: Add UI/UX Regression Checks

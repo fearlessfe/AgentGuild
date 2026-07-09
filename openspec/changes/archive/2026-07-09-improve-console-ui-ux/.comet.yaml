@@ -17,6 +17,6 @@ verification_report: docs/superpowers/reports/2026-07-09-improve-console-ui-ux-v
 branch_status: handled
 created_at: 2026-07-08
 verified_at: 2026-07-09
-archived: false
+archived: true
 handoff_context: openspec/changes/improve-console-ui-ux/.comet/handoff/design-context.json
 handoff_hash: ebddd226f391e9db8a30b0da8cc22fe346eafa9453f0f89e345e2249396bb436

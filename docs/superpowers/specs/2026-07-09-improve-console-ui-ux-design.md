@@ -2,6 +2,8 @@
 comet_change: improve-console-ui-ux
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-09-improve-console-ui-ux
+status: final
 ---
 
 # Improve Console UI/UX Technical Design
