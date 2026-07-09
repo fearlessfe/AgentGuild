@@ -13,7 +13,7 @@
 
 - Brief: `.superpowers/sdd/task-2-brief.md`
 - Report: `.superpowers/sdd/task-2-report.md`
-- Base commit: `46c6b8b`
+- Base commit: `64099db`
 - Implementer: pending
 
 ## Evidence
