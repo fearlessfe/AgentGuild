@@ -21,6 +21,6 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Add backend tests for repository onboarding service and REST behavior, including tenant isolation and admin-only mutations.
-- [ ] 4.2 Add frontend tests for navigation discoverability, App repository selection, and public repository addition.
-- [ ] 4.3 Run backend build/tests and frontend build/tests relevant to the changed surface.
+- [x] 4.1 Add backend tests for repository onboarding service and REST behavior, including tenant isolation and admin-only mutations.
+- [x] 4.2 Add frontend tests for navigation discoverability, App repository selection, and public repository addition.
+- [x] 4.3 Run backend build/tests and frontend build/tests relevant to the changed surface.

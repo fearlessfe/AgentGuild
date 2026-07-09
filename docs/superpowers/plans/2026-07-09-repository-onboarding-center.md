@@ -420,7 +420,7 @@ git commit -m "feat: surface repository onboarding in console"
 - Consumes all completed tasks.
 - Produces verification evidence for Comet build guard.
 
-- [ ] **Step 1: Run backend targeted tests**
+- [x] **Step 1: Run backend targeted tests**
 
 Run:
 
@@ -430,7 +430,7 @@ cd backend && go test ./internal/git/application ./internal/git/postgres ./inter
 
 Expected: PASS.
 
-- [ ] **Step 2: Run backend build**
+- [x] **Step 2: Run backend build**
 
 Run:
 
@@ -440,7 +440,7 @@ cd backend && go build ./...
 
 Expected: PASS.
 
-- [ ] **Step 3: Run frontend tests**
+- [x] **Step 3: Run frontend tests**
 
 Run:
 
@@ -450,7 +450,7 @@ cd frontend && npm test -- --run
 
 Expected: PASS.
 
-- [ ] **Step 4: Run frontend build**
+- [x] **Step 4: Run frontend build**
 
 Run:
 
@@ -460,11 +460,11 @@ cd frontend && npm run build
 
 Expected: PASS.
 
-- [ ] **Step 5: Update OpenSpec task checkboxes**
+- [x] **Step 5: Update OpenSpec task checkboxes**
 
 Check off completed implementation tasks in `openspec/changes/repository-onboarding-center/tasks.md` only after the matching implementation and verification pass.
 
-- [ ] **Step 6: Commit verification/docs updates**
+- [x] **Step 6: Commit verification/docs updates**
 
 ```bash
 git add openspec/changes/repository-onboarding-center/tasks.md
