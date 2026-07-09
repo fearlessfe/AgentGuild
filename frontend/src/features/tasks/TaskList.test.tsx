@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -99,10 +99,14 @@ describe("TaskList", () => {
     );
 
     renderList();
-    expect(await screen.findByText("服务器事实标题")).toBeVisible();
-    expect(screen.getByText("real-repo")).toBeVisible();
-    expect(screen.getByText("Rust", { selector: ".language" })).toBeVisible();
-    expect(screen.getByText("2026-07-04 18:30")).toBeVisible();
+    const desktopTaskList = await screen.findByRole("region", { name: "任务列表" });
+    const taskRow = within(desktopTaskList).getByRole("link", { name: "查看 AG-100" }).closest("tr");
+    expect(taskRow).not.toBeNull();
+    const row = within(taskRow!);
+    expect(row.getByText("服务器事实标题")).toBeVisible();
+    expect(row.getByText("real-repo")).toBeVisible();
+    expect(row.getByText("Rust")).toBeVisible();
+    expect(row.getByText("2026-07-04 18:30")).toBeVisible();
     expect(screen.queryByText(/\$[0-9]/)).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
