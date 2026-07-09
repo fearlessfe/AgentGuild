@@ -13,8 +13,8 @@
 
 - Brief: `.superpowers/sdd/task-2-brief.md`
 - Report: `.superpowers/sdd/task-2-report.md`
-- Base commit: `64099db`
-- Implementer: pending
+- Base commit: `25303ec`
+- Implementer: `019f45ad-8244-7043-9246-b8dba6fa71a6` (Lorentz)
 
 ## Evidence
 
