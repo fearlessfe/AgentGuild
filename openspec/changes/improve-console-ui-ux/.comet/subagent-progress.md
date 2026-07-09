@@ -9,7 +9,7 @@
 
 - Plan task: `Task 6: Final Verification And Documentation Sync`
 - OpenSpec task mapping: `6. Final Verification`
-- Stage: `final-review`
+- Stage: `done`
 - Implementer: pending
 - Base commit: `0649301`
 - Report: `.superpowers/sdd/task-6-report.md`
@@ -30,3 +30,13 @@
 - Task 4: complete (`7c06ef6`, plus test fixes `40f881d` and `a43c564`; frontend unit/e2e/build verified).
 - Task 5: complete (`2ccafcf`; frontend focused/unit/e2e/build verified).
 - Task 6: complete (verification report `.superpowers/sdd/task-6-report.md`; screenshots in `/private/tmp/agentguild-console-ui-ux/`; frontend build/unit/e2e and visual QA verified).
+
+## Final Review
+
+- Reviewer verdict: `With fixes`
+- Fix round: `1`
+- Important 1: mobile review `Split` / `Unified` buttons are below 44px hit target and need E2E coverage.
+- Important 2: structural Unicode affordances remain in shell/review/task/git/agent UI and should be migrated to `lucide-react`.
+- Minor included in fix: add E2E assertions for mobile default Unified and hit-target dimensions.
+- Final fix commit: `5ad50c9`
+- Re-review verdict: `Ready to merge: Yes`
