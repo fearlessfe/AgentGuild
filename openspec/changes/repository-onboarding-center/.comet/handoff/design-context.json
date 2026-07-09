@@ -1,0 +1,16 @@
+{
+  "change": "repository-onboarding-center",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "385f7723729d5665c3e8d86cea14c02fc5b6650947b8735dda57a1883f7ecf83",
+  "files": [
+    { "path": "openspec/changes/repository-onboarding-center/proposal.md", "sha256": "f4084ae4e524f72edcde184c9914fb8248378e052461c0504e1c1dcfec0ac32d" },
+    { "path": "openspec/changes/repository-onboarding-center/design.md", "sha256": "2bf868c5b69808ecf90bb9e4ecb1c0217a6982c732ded090a253c5316705aa69" },
+    { "path": "openspec/changes/repository-onboarding-center/tasks.md", "sha256": "754a068988d58ae7c351e4997da20033d0fdade6ab456c063a52aafb3a7eae0f" },
+    { "path": "openspec/changes/repository-onboarding-center/specs/console-ui-ux/spec.md", "sha256": "006d8656bdb3be9a856ed3625afedb2e5c6efb016b26f897cfc38025ad7ec316" },
+    { "path": "openspec/changes/repository-onboarding-center/specs/github-app-integration/spec.md", "sha256": "b5b04833bf72e07235ee6494c1211433ceaad906d4a66b61377d05ef68a374d6" },
+    { "path": "openspec/changes/repository-onboarding-center/specs/repository-onboarding-center/spec.md", "sha256": "e9e768ba846dd901b7b7af5b5c41a1101fec37aa09d4d814e4be9c3760394943" }
+  ]
+}
