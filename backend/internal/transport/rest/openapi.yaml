@@ -62,6 +62,118 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /v1/repository-onboarding:
+    get:
+      operationId: getRepositoryOnboarding
+      summary: 获取仓库 onboarding 汇总
+      description: |
+        返回当前 tenant 的 GitHub App public view、GitHub App installation 可见仓库，以及已 onboarding 的仓库列表。
+        GitHub App private key material 永远不会出现在响应中。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 仓库 onboarding 汇总
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRepositoryOnboardingSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/repositories/github-app:
+    post:
+      operationId: addGitHubAppRepository
+      summary: Onboard GitHub App installation 仓库
+      description: Human session/admin controlled mutation；只把 GitHub App installation 中已可见的仓库加入任务仓库池，不创建 Issue sync rule。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddRepositoryRequest'
+      responses:
+        '201':
+          description: 仓库已加入 onboarding 列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRepositoryItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/repositories/public:
+    post:
+      operationId: addPublicRepository
+      summary: Onboard public GitHub 仓库
+      description: Human session/admin controlled mutation；解析 public GitHub 仓库元数据后加入任务仓库池，不创建 Issue sync rule。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddRepositoryRequest'
+      responses:
+        '201':
+          description: 仓库已加入 onboarding 列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRepositoryItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/repositories/{id}:
+    delete:
+      operationId: deleteOnboardedRepository
+      summary: 移除 onboarded 仓库
+      description: Human session/admin controlled mutation；仅从任务仓库池移除指定仓库，不修改 GitHub App 配置或 Issue sync rules。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 仓库已移除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /v1/agents:
     post:
       operationId: registerAgent
@@ -716,6 +828,122 @@ components:
         next_cursor:
           type: string
           nullable: true
+
+    GitHubAppPublicView:
+      type: object
+      description: GitHub App public view；不会包含 private_key、webhook_secret 或 client_secret。
+      properties:
+        tenant_id:
+          type: string
+        provider:
+          type: string
+        app_id:
+          type: integer
+          format: int64
+        installation_id:
+          type: integer
+          format: int64
+        base_url:
+          type: string
+        app_slug:
+          type: string
+        configured:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RepositoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 已 onboarded 仓库 ID；GitHub App candidate item 中为空
+        source_type:
+          type: string
+          description: 已 onboarded 仓库来源；GitHub App candidate item 中为空
+          enum:
+            - github_app
+            - public_github
+        full_name:
+          type: string
+          example: agentguild/agentguild
+        default_branch:
+          type: string
+          example: main
+        visibility:
+          type: string
+          example: public
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RepositoryItems:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositoryItem'
+
+    RepositoryOnboardingSummary:
+      type: object
+      properties:
+        github_app:
+          $ref: '#/components/schemas/GitHubAppPublicView'
+        app_repositories:
+          $ref: '#/components/schemas/RepositoryItems'
+        onboarded_repositories:
+          $ref: '#/components/schemas/RepositoryItems'
+        app_repositories_error:
+          type: string
+          description: GitHub App installation repository listing error, when summary can otherwise be returned.
+
+    AddRepositoryRequest:
+      type: object
+      required:
+        - repo
+      properties:
+        repo:
+          type: string
+          description: GitHub 仓库 full name 或 https://github.com/{owner}/{repo} URL
+          example: agentguild/agentguild
+
+    DeleteResult:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+
+    EnvelopeRepositoryOnboardingSummary:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RepositoryOnboardingSummary'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeRepositoryItem:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RepositoryItem'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeDeleteResult:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/DeleteResult'
+        meta:
+          $ref: '#/components/schemas/Meta'
 
     TaskStatus:
       type: string

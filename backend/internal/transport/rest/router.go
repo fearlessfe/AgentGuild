@@ -87,6 +87,13 @@ type experienceService interface {
 	ReviewCandidate(ctx context.Context, cmd agentexperienceapp.ReviewCandidate) error
 }
 
+type repositoryOnboardingService interface {
+	Summary(ctx context.Context, principal gitapp.Principal) (gitapp.RepositoryOnboardingSummary, error)
+	AddGitHubAppRepository(ctx context.Context, principal gitapp.Principal, fullName string) (gitapp.OnboardedRepositoryView, error)
+	AddPublicRepository(ctx context.Context, principal gitapp.Principal, input string) (gitapp.OnboardedRepositoryView, error)
+	Remove(ctx context.Context, principal gitapp.Principal, id string) error
+}
+
 type oidcProvider interface {
 	BeginAuthURL(state string) string
 	Exchange(context.Context, string) (*auth.Session, error)
@@ -96,26 +103,27 @@ type socketRemoteAddrContextKey struct{}
 
 // Server 暴露任务生命周期、Submission、代码评审、版本管理与经验治理的 REST API。
 type Server struct {
-	svc              applicationService
-	submissions      submissionService
-	credentials      credentialService
-	identity         identityService
-	reviewSvc        ReviewService
-	rubricSvc        RubricService
-	reputationSvc    ReputationService
-	versions         versionService
-	evaluations      evaluationService
-	experiences      experienceService
-	verifier         auth.TokenVerifier
-	limiter          RateLimiter
-	sessionSecret    string
-	sessionSecure    bool
-	oidc             oidcProvider
-	localAdmin       *localAdmin
-	gitHubAppManager gitapp.GitHubAppManager
-	manifest         *gitapp.ManifestService
-	syncRules        *syncapp.RuleService
-	syncEngine       SyncEngine
+	svc                  applicationService
+	submissions          submissionService
+	credentials          credentialService
+	identity             identityService
+	reviewSvc            ReviewService
+	rubricSvc            RubricService
+	reputationSvc        ReputationService
+	versions             versionService
+	evaluations          evaluationService
+	experiences          experienceService
+	verifier             auth.TokenVerifier
+	limiter              RateLimiter
+	sessionSecret        string
+	sessionSecure        bool
+	oidc                 oidcProvider
+	localAdmin           *localAdmin
+	gitHubAppManager     gitapp.GitHubAppManager
+	manifest             *gitapp.ManifestService
+	syncRules            *syncapp.RuleService
+	syncEngine           SyncEngine
+	repositoryOnboarding repositoryOnboardingService
 }
 
 // WithLocalAdmin 挂载本地管理员 fallback 登录接口。
@@ -141,6 +149,11 @@ func WithSyncRuleService(svc *syncapp.RuleService) Option {
 // WithSyncEngine 挂载同步引擎，用于手动触发单条同步规则。
 func WithSyncEngine(engine SyncEngine) Option {
 	return func(s *Server) { s.syncEngine = engine }
+}
+
+// WithRepositoryOnboardingService 挂载仓库 onboarding REST API。
+func WithRepositoryOnboardingService(svc repositoryOnboardingService) Option {
+	return func(s *Server) { s.repositoryOnboarding = svc }
 }
 
 // Option 配置 Server。
@@ -351,6 +364,12 @@ func (s *Server) Router() http.Handler {
 			if s.syncEngine != nil {
 				r.With(s.requireSession, s.rateLimit).Post("/sync-rules/{id}:run", s.runSyncRule)
 			}
+		}
+		if s.repositoryOnboarding != nil {
+			r.With(s.requireSession, s.rateLimit).Get("/repository-onboarding", s.getRepositoryOnboarding)
+			r.With(s.requireSession, s.rateLimit).Post("/repositories/github-app", s.addGitHubAppRepository)
+			r.With(s.requireSession, s.rateLimit).Post("/repositories/public", s.addPublicRepository)
+			r.With(s.requireSession, s.rateLimit).Delete("/repositories/{id}", s.deleteOnboardedRepository)
 		}
 	})
 	return r

@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +27,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/config"
+	"agentguild.dev/agentguild/backend/internal/domain"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	evaluationpostgres "agentguild.dev/agentguild/backend/internal/evaluation/postgres"
 	"agentguild.dev/agentguild/backend/internal/git"
@@ -89,7 +94,7 @@ func run() error {
 		return err
 	}
 
-	gitRuntime, gitAppManager, err := buildGitRuntime(cfg, pool, service)
+	gitRuntime, gitAppManager, repositoryOnboarding, err := buildGitRuntime(cfg, pool, service)
 	if err != nil {
 		return err
 	}
@@ -130,6 +135,9 @@ func run() error {
 	}
 	if gitAppManager != nil {
 		restOptions = append(restOptions, resttransport.WithGitHubAppManager(gitAppManager))
+	}
+	if repositoryOnboarding != nil {
+		restOptions = append(restOptions, resttransport.WithRepositoryOnboardingService(repositoryOnboarding))
 	}
 	if ruleService != nil && syncEngine != nil {
 		restOptions = append(restOptions,
@@ -565,12 +573,12 @@ type gitRuntime struct {
 	validationWorker  *gitworker.ValidationWorker
 }
 
-func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, gitapp.GitHubAppManager, error) {
+func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, gitapp.GitHubAppManager, *gitapp.RepositoryOnboardingService, error) {
 	gitStore := gitpostgres.NewStore(pool)
 	gitAppRepo := gitpostgres.NewGitHubAppRepository(pool)
 	gitAppManager, err := gitapp.NewGitHubAppManager(gitAppRepo)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build github app service: %w", err)
+		return nil, nil, nil, fmt.Errorf("build github app service: %w", err)
 	}
 
 	ctx := context.Background()
@@ -590,11 +598,11 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 						PrivateKey:     cfg.GitHub.PrivateKey,
 						BaseURL:        cfg.GitHub.BaseURL,
 					}); upsertErr != nil {
-						return nil, nil, fmt.Errorf("seed github app configuration: %w", upsertErr)
+						return nil, nil, nil, fmt.Errorf("seed github app configuration: %w", upsertErr)
 					}
 					slog.Info("seeded github app configuration from environment", "tenant", seedTenant)
 				} else {
-					return nil, nil, fmt.Errorf("check existing github app configuration: %w", err)
+					return nil, nil, nil, fmt.Errorf("check existing github app configuration: %w", err)
 				}
 			}
 		}
@@ -604,14 +612,24 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		Provider: "github",
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("build credential service: %w", err)
+		return nil, nil, nil, fmt.Errorf("build credential service: %w", err)
 	}
 
 	verifier := gitapp.NewCommitVerifier(gitAppManager, &submissionRepoAdapter{store: gitStore})
 	notifier := application.NewCoreExecutionNotifier(service)
 	submissionService, err := gitapp.NewSubmissionService(gitStore, verifier, notifier, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build submission service: %w", err)
+		return nil, nil, nil, fmt.Errorf("build submission service: %w", err)
+	}
+
+	repositoryOnboarding, err := gitapp.NewRepositoryOnboardingService(
+		gitpostgres.NewOnboardedRepositoryRepository(pool),
+		gitAppManager,
+		newPublicRepositoryResolver(cfg.GitHub.BaseURL),
+		nil,
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build repository onboarding service: %w", err)
 	}
 
 	runner := validation.NewRunner(validation.DefaultRegistry(), &validation.TempWorkspaceFactory{}, nil)
@@ -628,7 +646,7 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		credentialService: credentialService,
 		submissionService: submissionService,
 		validationWorker:  validationWorker,
-	}, gitAppManager, nil
+	}, gitAppManager, repositoryOnboarding, nil
 }
 
 func runValidationWorker(ctx context.Context, w *gitworker.ValidationWorker, pool *pgxpool.Pool) error {
@@ -693,4 +711,74 @@ func (a *submissionRepoAdapter) GetByExecutionID(ctx context.Context, tenantID, 
 		return err
 	})
 	return result, err
+}
+
+type publicRepositoryResolver struct {
+	baseURL string
+	client  *http.Client
+}
+
+func newPublicRepositoryResolver(baseURL string) *publicRepositoryResolver {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://api.github.com"
+	}
+	return &publicRepositoryResolver{
+		baseURL: baseURL,
+		client:  &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (r *publicRepositoryResolver) ResolvePublicRepository(ctx context.Context, fullName string) (git.Repository, error) {
+	owner, name, ok := strings.Cut(fullName, "/")
+	if !ok || owner == "" || name == "" {
+		return git.Repository{}, &domain.Error{Code: "invalid_argument", Message: "repo is invalid", Field: "repo"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.baseURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name), nil)
+	if err != nil {
+		return git.Repository{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return git.Repository{}, fmt.Errorf("request github repository: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return git.Repository{}, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return git.Repository{}, &domain.Error{Code: "not_found", Message: "repository not found"}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return git.Repository{}, fmt.Errorf("github repository lookup failed: status %d", resp.StatusCode)
+	}
+	var payload struct {
+		FullName      string `json:"full_name"`
+		DefaultBranch string `json:"default_branch"`
+		Visibility    string `json:"visibility"`
+		Private       bool   `json:"private"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return git.Repository{}, fmt.Errorf("decode github repository: %w", err)
+	}
+	if payload.FullName == "" {
+		payload.FullName = fullName
+	}
+	if payload.DefaultBranch == "" {
+		payload.DefaultBranch = "main"
+	}
+	if payload.Visibility == "" {
+		if payload.Private {
+			payload.Visibility = "private"
+		} else {
+			payload.Visibility = "public"
+		}
+	}
+	return git.Repository{
+		FullName:      payload.FullName,
+		DefaultBranch: payload.DefaultBranch,
+		Visibility:    payload.Visibility,
+	}, nil
 }
