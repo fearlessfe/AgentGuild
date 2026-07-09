@@ -88,6 +88,25 @@ export type Repository = {
   visibility: string;
 };
 
+export type RepositorySourceType = "github_app" | "public_github";
+
+export type RepositoryInventoryItem = {
+  id?: string;
+  source_type?: RepositorySourceType;
+  full_name: string;
+  default_branch: string;
+  visibility: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type RepositoryOnboardingSummary = {
+  github_app: GitHubAppView;
+  app_repositories: { items: RepositoryInventoryItem[] };
+  onboarded_repositories: { items: RepositoryInventoryItem[] };
+  app_repositories_error?: string;
+};
+
 export type SyncRule = {
   id: string;
   repo: string;
@@ -253,6 +272,13 @@ export async function getGitHubApp(): Promise<Envelope<GitHubAppView>> {
 export const deleteGitHubApp = () => apiRequest<{ deleted: boolean }>("/v1/github-app", { method: "DELETE" });
 export const testGitHubApp = () => apiRequest<ConnectionTestResult>("/v1/github-app:test", { method: "POST" });
 export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/repositories");
+export const getRepositoryOnboarding = () => apiRequest<RepositoryOnboardingSummary>("/v1/repository-onboarding");
+export const addGitHubAppRepository = (repo: string) =>
+  apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", { method: "POST", body: { repo } });
+export const addPublicRepository = (repo: string) =>
+  apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", body: { repo } });
+export const removeRepository = (id: string) =>
+  apiRequest<{ deleted: boolean }>(`/v1/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const listSyncRules = () => apiRequest<{ items: SyncRule[] }>("/v1/sync-rules");
 export const getSyncRule = (id: string) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`);
 export const createSyncRule = (input: SyncRuleInput) => apiRequest<SyncRule>("/v1/sync-rules", { method: "POST", body: input });
@@ -330,6 +356,27 @@ const demoRepositories: Repository[] = [
   { full_name: "acme/billing-service", default_branch: "main", visibility: "private" },
   { full_name: "acme/event-gateway", default_branch: "main", visibility: "private" },
   { full_name: "acme/frontend", default_branch: "main", visibility: "internal" },
+];
+let demoOnboardedRepositoryCounter = 2;
+let demoOnboardedRepositories: RepositoryInventoryItem[] = [
+  {
+    id: "repo-inv-1",
+    source_type: "github_app",
+    full_name: "acme/billing-service",
+    default_branch: "main",
+    visibility: "private",
+    created_at: "2026-07-09T08:00:00Z",
+    updated_at: "2026-07-09T08:00:00Z",
+  },
+  {
+    id: "repo-inv-2",
+    source_type: "public_github",
+    full_name: "vercel/next.js",
+    default_branch: "canary",
+    visibility: "public",
+    created_at: "2026-07-09T08:10:00Z",
+    updated_at: "2026-07-09T08:10:00Z",
+  },
 ];
 let demoSyncRuleCounter = 2;
 let demoSyncRules: SyncRule[] = [
@@ -491,6 +538,46 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function normalizeDemoGitHubRepository(input: unknown): string {
+  let value = String(input ?? "").trim();
+  if (value.includes("://")) {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com") {
+      throw new Error("invalid repository");
+    }
+    value = parsed.pathname.replace(/^\/+|\/+$/g, "");
+  }
+  if (value.endsWith(".git")) {
+    value = value.slice(0, -4);
+  }
+  const parts = value.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error("invalid repository");
+  }
+  return `${parts[0]}/${parts[1]}`;
+}
+
+function upsertDemoOnboardedRepository(
+  input: Omit<RepositoryInventoryItem, "id" | "created_at" | "updated_at">,
+): RepositoryInventoryItem {
+  const existing = demoOnboardedRepositories.find(
+    (repo) => repo.full_name === input.full_name && repo.source_type === input.source_type,
+  );
+  if (existing) {
+    return existing;
+  }
+  demoOnboardedRepositoryCounter += 1;
+  const now = "2026-07-09T08:30:00Z";
+  const repo: RepositoryInventoryItem = {
+    id: `repo-inv-${demoOnboardedRepositoryCounter}`,
+    ...input,
+    created_at: now,
+    updated_at: now,
+  };
+  demoOnboardedRepositories = [repo, ...demoOnboardedRepositories];
+  return repo;
+}
+
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
@@ -509,6 +596,57 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
 
   if (url.pathname === "/v1/repositories" && method === "GET") {
     return clone({ data: { items: demoRepositories }, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/repository-onboarding" && method === "GET") {
+    return clone({
+      data: {
+        github_app: demoGitHubApp,
+        app_repositories: { items: demoRepositories },
+        onboarded_repositories: { items: demoOnboardedRepositories },
+      },
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname === "/v1/repositories/github-app" && method === "POST") {
+    const body = parseDemoBody(init.body);
+    const fullName = normalizeDemoGitHubRepository(body.repo);
+    const candidate = demoRepositories.find((repo) => repo.full_name === fullName);
+    if (!candidate) {
+      throw new Error(`Demo repository not found: ${fullName}`);
+    }
+    return clone({
+      data: upsertDemoOnboardedRepository({
+        source_type: "github_app",
+        full_name: candidate.full_name,
+        default_branch: candidate.default_branch,
+        visibility: candidate.visibility,
+      }),
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname === "/v1/repositories/public" && method === "POST") {
+    const body = parseDemoBody(init.body);
+    const fullName = normalizeDemoGitHubRepository(body.repo);
+    const defaultBranch = fullName === "vercel/next.js" ? "canary" : "main";
+    return clone({
+      data: upsertDemoOnboardedRepository({
+        source_type: "public_github",
+        full_name: fullName,
+        default_branch: defaultBranch,
+        visibility: "public",
+      }),
+      meta: demoMeta,
+    });
+  }
+
+  const onboardedRepositoryMatch = url.pathname.match(/^\/v1\/repositories\/([^/]+)$/);
+  if (onboardedRepositoryMatch && method === "DELETE") {
+    const id = decodeURIComponent(onboardedRepositoryMatch[1]);
+    demoOnboardedRepositories = demoOnboardedRepositories.filter((repo) => repo.id !== id);
+    return clone({ data: { deleted: true }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/sync-rules" && method === "GET") {
