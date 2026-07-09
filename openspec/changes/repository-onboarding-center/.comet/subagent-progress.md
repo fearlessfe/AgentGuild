@@ -4,7 +4,7 @@
 
 - Plan task: `Task 6: Final Verification and Documentation Sync`
 - OpenSpec mapping: `4.3 Run backend build/tests and frontend build/tests relevant to the changed surface.`
-- Stage: `final-fix`
+- Stage: `done`
 - Review mode: `standard`
 - TDD mode: `tdd`
 - Review/fix rounds: `1`
@@ -18,11 +18,13 @@
 
 ## Evidence
 
-- Implementation commit: pending verification/docs commit
+- Implementation commit: `3f2eebe fix: handle repository onboarding review findings`
 - Changed files:
   - `docs/superpowers/plans/2026-07-09-repository-onboarding-center.md`
   - `openspec/changes/repository-onboarding-center/tasks.md`
   - `openspec/changes/repository-onboarding-center/.comet/subagent-progress.md`
+  - `frontend/src/features/repositories/RepositoryOnboardingScreen.tsx`
+  - `frontend/src/features/repositories/RepositoryOnboardingScreen.test.tsx`
 - RED: not applicable; final verification task
 - GREEN:
   - `cd backend && go test ./internal/git/application ./internal/git/postgres ./internal/transport/rest -count=1`
@@ -37,7 +39,11 @@
 ## Reviews
 
 - Final review: important findings from `019f4622-4471-7cf0-9acf-f2e4c710924d` (Einstein)
-- Unresolved feedback:
-  - Show App repository listing error/empty state in onboarding UI.
-  - Key frontend added-state and local merge by `(source_type, full_name)` instead of `full_name` only.
-  - Minor accepted for now: public resolver base URL coupling to `cfg.GitHub.BaseURL`; not blocking this build, record for follow-up configuration hardening.
+- Resolved feedback:
+  - Show App repository listing error/empty state in onboarding UI: fixed in `3f2eebe`.
+  - Key frontend added-state and local merge by `(source_type, full_name)` instead of `full_name` only: fixed in `3f2eebe`.
+- Accepted minor:
+  - Public resolver base URL coupling to `cfg.GitHub.BaseURL`; not blocking this build, record for follow-up configuration hardening.
+- Recheck:
+  - `cd frontend && npm test -- RepositoryOnboardingScreen --run` PASS: 6 tests.
+  - `cd frontend && npm test -- --run src/features/repositories/RepositoryOnboardingScreen.test.tsx src/features/sync/SyncRuleScreen.test.tsx` PASS: 10 tests.
