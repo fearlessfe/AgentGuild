@@ -308,7 +308,7 @@ git commit -m "feat: expose repository onboarding API"
   - `addPublicRepository(repo: string)`
   - `removeRepository(id: string)`
 
-- [ ] **Step 1: Write failing API/demo tests through the screen**
+- [x] **Step 1: Write failing API/demo tests through the screen**
 
 Create a screen test in demo mode expectations:
 - renders Step 1 GitHub App area
@@ -319,7 +319,7 @@ Create a screen test in demo mode expectations:
 Run: `cd frontend && npm test -- RepositoryOnboardingScreen --run`
 Expected: FAIL because the screen does not exist.
 
-- [ ] **Step 2: Add API client types and demo state**
+- [x] **Step 2: Add API client types and demo state**
 
 Extend `client.ts` demo data with:
 
@@ -332,7 +332,7 @@ let demoOnboardedRepositories: RepositoryInventoryItem[] = [
 
 Handle demo paths for summary, App add, public add, and delete.
 
-- [ ] **Step 3: Build `RepositoryOnboardingScreen`**
+- [x] **Step 3: Build `RepositoryOnboardingScreen`**
 
 Implement the two-step page:
 - Step 1 card: GitHub App installed/uninstalled state and actions.
@@ -342,7 +342,7 @@ Implement the two-step page:
 
 Use existing `PageHeader`, `Card`, `Button`, `ButtonLink`, `StatusChip`, and `DenseTable` patterns.
 
-- [ ] **Step 4: Complete screen tests**
+- [x] **Step 4: Complete screen tests**
 
 Add tests for:
 - clicking an App repository add button adds it to the added repository list
@@ -352,7 +352,7 @@ Add tests for:
 Run: `cd frontend && npm test -- RepositoryOnboardingScreen --run`
 Expected: PASS.
 
-- [ ] **Step 5: Commit frontend onboarding screen**
+- [x] **Step 5: Commit frontend onboarding screen**
 
 ```bash
 git add frontend/src/api/client.ts frontend/src/features/repositories/RepositoryOnboardingScreen.tsx frontend/src/features/repositories/RepositoryOnboardingScreen.test.tsx

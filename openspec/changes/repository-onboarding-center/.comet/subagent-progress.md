@@ -4,7 +4,7 @@
 
 - Plan task: `Task 4: Frontend API Client and Repository Onboarding Screen`
 - OpenSpec mapping: `2.2 Build the repository onboarding page with separate GitHub App and public GitHub repository sections.`
-- Stage: `implementing`
+- Stage: `done`
 - Review mode: `standard`
 - TDD mode: `tdd`
 - Review/fix rounds: `0`
@@ -18,10 +18,17 @@
 
 ## Evidence
 
-- Implementation commit: pending
-- Changed files: pending
-- RED: pending
-- GREEN: pending
+- Implementation commit: `444227a feat: add repository onboarding screen`
+- Changed files:
+  - `frontend/src/api/client.ts`
+  - `frontend/src/features/repositories/RepositoryOnboardingScreen.tsx`
+  - `frontend/src/features/repositories/RepositoryOnboardingScreen.test.tsx`
+- RED:
+  - `cd frontend && npm test -- RepositoryOnboardingScreen --run`
+  - Expected Vite import failure for missing `RepositoryOnboardingScreen`.
+- GREEN:
+  - `cd frontend && npm test -- RepositoryOnboardingScreen --run`
+  - PASS: 3 tests in `RepositoryOnboardingScreen.test.tsx`
 
 ## Reviews
 

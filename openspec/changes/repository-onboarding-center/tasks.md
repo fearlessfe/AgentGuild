@@ -8,10 +8,10 @@
 ## 2. Frontend Repository Onboarding
 
 - [ ] 2.1 Add a persistent navigation entry and route for the repository onboarding module.
-- [ ] 2.2 Build the repository onboarding page with separate GitHub App and public GitHub repository sections.
-- [ ] 2.3 Show GitHub App configured/unconfigured/error states with a clear action back to GitHub integration setup.
-- [ ] 2.4 Support selecting GitHub App installation repositories and adding public GitHub repositories without creating sync rules.
-- [ ] 2.5 Update demo mode data and client helpers so both source types render without a backend.
+- [x] 2.2 Build the repository onboarding page with separate GitHub App and public GitHub repository sections.
+- [x] 2.3 Show GitHub App configured/unconfigured/error states with a clear action back to GitHub integration setup.
+- [x] 2.4 Support selecting GitHub App installation repositories and adding public GitHub repositories without creating sync rules.
+- [x] 2.5 Update demo mode data and client helpers so both source types render without a backend.
 
 ## 3. Existing Flow Integration
 
