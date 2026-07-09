@@ -121,7 +121,7 @@ describe("RepositoryOnboardingScreen", () => {
 function summaryFixture(overrides: Partial<RepositoryOnboardingSummary> = {}): RepositoryOnboardingSummary {
   return {
     github_app: {
-      app_id: "123",
+      app_id: 123,
       app_slug: "agentguild-test",
       configured: true,
     },
