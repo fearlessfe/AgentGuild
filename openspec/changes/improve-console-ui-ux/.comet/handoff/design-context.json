@@ -1,0 +1,14 @@
+{
+  "change": "improve-console-ui-ux",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "ebddd226f391e9db8a30b0da8cc22fe346eafa9453f0f89e345e2249396bb436",
+  "files": [
+    { "path": "openspec/changes/improve-console-ui-ux/proposal.md", "sha256": "97698f973b9eb585476b40bebfef4ca1bc84189dd1a6eeaa336665c7f18a0476" },
+    { "path": "openspec/changes/improve-console-ui-ux/design.md", "sha256": "ba7c2bc078ad4878910b5c8092fc196665dcc08b1a14d2732865f81c9579cb58" },
+    { "path": "openspec/changes/improve-console-ui-ux/tasks.md", "sha256": "be45c2951b95917c6da4dc1a4537897fdc532a932cde4e5d0cbfa43a3ee1a566" },
+    { "path": "openspec/changes/improve-console-ui-ux/specs/console-ui-ux/spec.md", "sha256": "90f15da42387cf58e179ca6fd7119de686c2f4c145bcf4ae2f41634411a74465" }
+  ]
+}
