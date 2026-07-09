@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -751,6 +752,9 @@ func (r *publicRepositoryResolver) ResolvePublicRepository(ctx context.Context, 
 	if resp.StatusCode == http.StatusNotFound {
 		return git.Repository{}, &domain.Error{Code: "not_found", Message: "repository not found"}
 	}
+	if isGitHubRateLimit(resp, body) {
+		return git.Repository{}, &domain.Error{Code: "rate_limited", Message: "github rate limit exceeded", RetryAfter: retryAfterDuration(resp.Header)}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return git.Repository{}, fmt.Errorf("github repository lookup failed: status %d", resp.StatusCode)
 	}
@@ -781,4 +785,43 @@ func (r *publicRepositoryResolver) ResolvePublicRepository(ctx context.Context, 
 		DefaultBranch: payload.DefaultBranch,
 		Visibility:    payload.Visibility,
 	}, nil
+}
+
+func isGitHubRateLimit(resp *http.Response, body []byte) bool {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		return false
+	}
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(string(body)), "rate limit")
+}
+
+func retryAfterDuration(header http.Header) time.Duration {
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if value != "" {
+		if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		if when, err := http.ParseTime(value); err == nil {
+			if wait := time.Until(when); wait > 0 {
+				return wait
+			}
+		}
+	}
+	reset := strings.TrimSpace(header.Get("X-RateLimit-Reset"))
+	if reset == "" {
+		return 0
+	}
+	seconds, err := strconv.ParseInt(reset, 10, 64)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	if wait := time.Until(time.Unix(seconds, 0)); wait > 0 {
+		return wait
+	}
+	return 0
 }
