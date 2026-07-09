@@ -389,7 +389,7 @@ git commit -m "feat: add mobile workbench cards"
 - Consumes: existing shell/navigation props and shared UI primitive APIs.
 - Produces: consistent Lucide icon usage and mobile hit-target CSS.
 
-- [ ] **Step 1: Add the icon package**
+- [x] **Step 1: Add the icon package**
 
 Run:
 
@@ -399,7 +399,7 @@ cd frontend && npm install lucide-react
 
 Expected: `frontend/package.json` and `frontend/package-lock.json` include `lucide-react`.
 
-- [ ] **Step 2: Replace Rail icons**
+- [x] **Step 2: Replace Rail icons**
 
 In `Rail.tsx`, import Lucide icons and change item shape:
 
@@ -429,7 +429,7 @@ const Icon = item.icon;
 
 Use `Bot` for Agents and `Settings` for the static settings item.
 
-- [ ] **Step 3: Replace Topbar icons**
+- [x] **Step 3: Replace Topbar icons**
 
 In `Topbar.tsx`, import:
 
@@ -439,7 +439,7 @@ import { CircleHelp, Moon, Search, Sun } from "lucide-react";
 
 Replace `⌕`, `◐`, `◑`, and `?` with `Search`, `Moon`, `Sun`, and `CircleHelp`, keeping existing aria labels.
 
-- [ ] **Step 4: Replace shared surface icons**
+- [x] **Step 4: Replace shared surface icons**
 
 Update shared UI surfaces that currently accept Unicode icon strings:
 
@@ -459,7 +459,7 @@ type ProviderCardProps = {
 
 Update `GitIntegrationScreen.tsx` provider logos to pass Lucide nodes instead of `"◐"` and `"◑"`. Update `TaskDetail.Empty` to render the shared `EmptyState` with a Lucide `SquareKanban` icon node instead of the inline `◱` character.
 
-- [ ] **Step 5: Add mobile hit-target CSS**
+- [x] **Step 5: Add mobile hit-target CSS**
 
 In `responsive.css` inside `@media (max-width: 700px)`:
 
@@ -492,7 +492,7 @@ In `responsive.css` inside `@media (max-width: 700px)`:
 }
 ```
 
-- [ ] **Step 6: Verify shell still renders**
+- [x] **Step 6: Verify shell still renders**
 
 Run:
 
@@ -503,7 +503,7 @@ cd frontend && npx playwright test e2e/console-ui-ux.spec.ts
 
 Expected: unit tests and UI/UX e2e checks pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit icon and mobile target changes**
 
 ```bash
 git add frontend/package.json frontend/package-lock.json frontend/src/app/Rail.tsx frontend/src/app/Topbar.tsx frontend/src/ui/EmptyState.tsx frontend/src/ui/ProviderCard.tsx frontend/src/features/tasks/TaskDetail.tsx frontend/src/features/git/GitIntegrationScreen.tsx frontend/src/styles/shell.css frontend/src/styles/components.css frontend/src/styles/responsive.css

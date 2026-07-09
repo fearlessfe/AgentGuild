@@ -19,10 +19,10 @@
 
 ## 4. Icon And Interaction Baseline
 
-- [ ] 4.1 Add the selected SVG icon dependency if needed and replace structural Unicode icons in the rail, topbar, empty states, and provider cards.
-- [ ] 4.2 Ensure icon-only interactive controls have accessible names and inherit semantic theme colors.
-- [ ] 4.3 Apply mobile hit-target improvements for rail items, icon buttons, tabs, selects, and primary actions while preserving desktop density.
-- [ ] 4.4 Confirm focus-visible states remain clear in dark and light themes.
+- [x] 4.1 Add the selected SVG icon dependency if needed and replace structural Unicode icons in the rail, topbar, empty states, and provider cards.
+- [x] 4.2 Ensure icon-only interactive controls have accessible names and inherit semantic theme colors.
+- [x] 4.3 Apply mobile hit-target improvements for rail items, icon buttons, tabs, selects, and primary actions while preserving desktop density.
+- [x] 4.4 Confirm focus-visible states remain clear in dark and light themes.
 
 ## 5. Feedback States
 
