@@ -47,3 +47,7 @@
 - Recheck:
   - `cd frontend && npm test -- RepositoryOnboardingScreen --run` PASS: 6 tests.
   - `cd frontend && npm test -- --run src/features/repositories/RepositoryOnboardingScreen.test.tsx src/features/sync/SyncRuleScreen.test.tsx` PASS: 10 tests.
+  - `cd backend && go test ./internal/git/application ./internal/git/postgres ./internal/transport/rest -count=1` PASS after final fixes.
+  - `cd backend && go build ./...` PASS after final fixes.
+  - `cd frontend && npm test -- --run` PASS: 14 files / 69 tests after final fixes.
+  - `cd frontend && npm run build` PASS after final fixes.
