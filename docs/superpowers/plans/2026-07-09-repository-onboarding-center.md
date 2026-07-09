@@ -234,7 +234,7 @@ git commit -m "feat: persist onboarded repositories"
   - `DELETE /v1/repositories/{id}`
   - `rest.WithRepositoryOnboardingService(svc repositoryOnboardingService) Option`
 
-- [ ] **Step 1: Write failing REST tests**
+- [x] **Step 1: Write failing REST tests**
 
 Add route tests for:
 - summary returns `github_app`, `app_repositories.items`, and `onboarded_repositories.items`
@@ -246,7 +246,7 @@ Add route tests for:
 Run: `cd backend && go test ./internal/transport/rest -run RepositoryOnboarding -count=1`
 Expected: FAIL because routes do not exist.
 
-- [ ] **Step 2: Add REST handler and DTOs**
+- [x] **Step 2: Add REST handler and DTOs**
 
 Create JSON shapes:
 
@@ -265,24 +265,24 @@ type addRepositoryBody struct {
 
 Use `writeEnvelope` for all success responses and `mapDomainError` or repository-specific field errors for failures.
 
-- [ ] **Step 3: Register routes and option**
+- [x] **Step 3: Register routes and option**
 
 Add `repositoryOnboarding repositoryOnboardingService` to `Server`, `WithRepositoryOnboardingService`, and routes under `/v1` when the service is present.
 
-- [ ] **Step 4: Wire main**
+- [x] **Step 4: Wire main**
 
 In `backend/cmd/agentguild-api/main.go`, construct the PostgreSQL store and repository onboarding service near existing GitHub App and sync service wiring, then pass `rest.WithRepositoryOnboardingService(...)`.
 
-- [ ] **Step 5: Update OpenAPI**
+- [x] **Step 5: Update OpenAPI**
 
 Add schemas for repository onboarding summary, repository item, add body, and the four endpoints. Document that mutation endpoints are human session/admin controlled.
 
-- [ ] **Step 6: Run REST tests**
+- [x] **Step 6: Run REST tests**
 
 Run: `cd backend && go test ./internal/transport/rest -run 'RepositoryOnboarding|GitHubApp' -count=1`
 Expected: PASS.
 
-- [ ] **Step 7: Commit REST layer**
+- [x] **Step 7: Commit REST layer**
 
 ```bash
 git add backend/internal/transport/rest/repository_onboarding_router.go backend/internal/transport/rest/repository_onboarding_router_test.go backend/internal/transport/rest/router.go backend/internal/transport/rest/openapi.yaml backend/cmd/agentguild-api/main.go
