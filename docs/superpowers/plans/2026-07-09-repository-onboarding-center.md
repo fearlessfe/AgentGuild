@@ -159,7 +159,7 @@ git commit -m "feat: add repository onboarding service"
 - Consumes: `application.OnboardedRepository` and `application.OnboardedRepositoryStore`.
 - Produces: `func NewOnboardedRepositoryRepository(pool queryer) application.OnboardedRepositoryStore`.
 
-- [ ] **Step 1: Write failing PostgreSQL repository tests**
+- [x] **Step 1: Write failing PostgreSQL repository tests**
 
 Create integration tests that:
 - insert a repository for `tenant-1`
@@ -170,7 +170,7 @@ Create integration tests that:
 Run: `cd backend && go test ./internal/git/postgres -run OnboardedRepository -count=1`
 Expected: FAIL because migration and repository do not exist.
 
-- [ ] **Step 2: Add migration**
+- [x] **Step 2: Add migration**
 
 `000012_repository_onboarding.up.sql` should create:
 
@@ -194,20 +194,20 @@ CREATE INDEX onboarded_repositories_tenant_source_idx
 
 The down migration drops the index and table.
 
-- [ ] **Step 3: Register migration in testdb**
+- [x] **Step 3: Register migration in testdb**
 
 Add `000012_repository_onboarding.up.sql` after `000011` in `openAndMigrate` and `ApplyUpMigration`; add `000012_repository_onboarding.down.sql` before `000011` in `ApplyDownMigration`.
 
-- [ ] **Step 4: Implement PostgreSQL store**
+- [x] **Step 4: Implement PostgreSQL store**
 
 Implement `Upsert`, `List`, and `Delete` with tenant filters on every query. Use `clock_timestamp()` on upsert updates to refresh `updated_at`.
 
-- [ ] **Step 5: Run persistence tests**
+- [x] **Step 5: Run persistence tests**
 
 Run: `cd backend && go test ./internal/git/postgres -run OnboardedRepository -count=1`
 Expected: PASS.
 
-- [ ] **Step 6: Commit persistence layer**
+- [x] **Step 6: Commit persistence layer**
 
 ```bash
 git add backend/migrations/000012_repository_onboarding.up.sql backend/migrations/000012_repository_onboarding.down.sql backend/internal/testdb/postgres.go backend/internal/git/postgres/onboarded_repository_repository.go backend/internal/git/postgres/onboarded_repository_repository_test.go

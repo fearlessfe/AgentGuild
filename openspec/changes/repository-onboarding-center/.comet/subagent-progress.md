@@ -4,7 +4,7 @@
 
 - Plan task: `Task 2: Persistence and Migration`
 - OpenSpec mapping: `1.1 Design and add tenant-scoped storage for onboarded repositories, including source type, full name, default branch, visibility, and selection state.`
-- Stage: `implementing`
+- Stage: `done`
 - Review mode: `standard`
 - TDD mode: `tdd`
 - Review/fix rounds: `0`
@@ -18,10 +18,19 @@
 
 ## Evidence
 
-- Implementation commit: pending
-- Changed files: pending
-- RED: pending
-- GREEN: pending
+- Implementation commit: `2b47420 feat: persist onboarded repositories`
+- Changed files:
+  - `backend/migrations/000012_repository_onboarding.up.sql`
+  - `backend/migrations/000012_repository_onboarding.down.sql`
+  - `backend/internal/testdb/postgres.go`
+  - `backend/internal/git/postgres/onboarded_repository_repository.go`
+  - `backend/internal/git/postgres/onboarded_repository_repository_test.go`
+- RED:
+  - `cd backend && go test ./internal/git/postgres -run OnboardedRepository -count=1`
+  - Expected build failure for missing `NewOnboardedRepositoryRepository`.
+- GREEN:
+  - `cd backend && go test ./internal/git/postgres -run OnboardedRepository -count=1`
+  - PASS: `ok agentguild.dev/agentguild/backend/internal/git/postgres 4.074s`
 
 ## Reviews
 
