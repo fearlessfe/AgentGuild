@@ -276,6 +276,21 @@
   text-transform: uppercase;
 }
 
+.task-mobile-list {
+  display: none;
+}
+
+.task-mobile-card {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
 /* timeline --------------------------------------------------------------- */
 
 .timeline {

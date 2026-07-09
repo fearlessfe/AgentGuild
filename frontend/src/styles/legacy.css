@@ -172,6 +172,21 @@
 .agent-status-text { text-transform: capitalize; }
 .agent-go { color: var(--text-faint); font-size: 16px; }
 
+.agent-mobile-list {
+  display: none;
+}
+
+.agent-mobile-card {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+
 /* status dot (agent + version status) ----------------------------------- */
 
 .status-dot {

@@ -182,6 +182,21 @@ export function TaskList() {
           </tbody>
         </table>
       </section>
+      <div className="task-mobile-list" aria-label="移动任务列表">
+        {groups.flatMap((group) =>
+          group.items.map((task) => (
+            <Link className="task-mobile-card" key={task.id} to={`/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
+              <div className="row-between">
+                <code>{task.id}</code>
+                <StatusChip tone={statusTone[task.status]}>{statusLabel[task.status]}</StatusChip>
+              </div>
+              <strong>{task.title}</strong>
+              <span className="muted text-sm">{task.publisher_agent_version_id}</span>
+              <span className="faint text-xs">{formatDeadline(task.deadline)}</span>
+            </Link>
+          )),
+        )}
+      </div>
       {query.hasNextPage && (
         <button
           type="button"

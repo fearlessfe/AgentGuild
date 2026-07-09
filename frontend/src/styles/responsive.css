@@ -63,4 +63,15 @@
   .page {
     padding: var(--sp-4);
   }
+
+  .dense-table,
+  .agent-table {
+    display: none;
+  }
+
+  .task-mobile-list,
+  .agent-mobile-list {
+    display: grid;
+    gap: var(--sp-3);
+  }
 }

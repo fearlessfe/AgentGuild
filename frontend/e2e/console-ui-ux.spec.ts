@@ -50,19 +50,28 @@ test.describe("console UI/UX baseline", () => {
   test("mobile task list exposes core information", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/tasks");
-    await expect(page.getByText("修复批量退款时的余额竞争条件")).toBeVisible();
-    await expect(page.getByText("billing-service")).toBeVisible();
-    await expect(page.getByText("待领取").first()).toBeVisible();
+    await expect(page.locator(".dense-table")).toBeHidden();
+    const mobileList = page.locator(".task-mobile-list");
+    await expect(mobileList).toBeVisible();
+
+    const taskCard = mobileList.locator(".task-mobile-card").filter({ hasText: "修复批量退款时的余额竞争条件" });
+    await expect(taskCard).toHaveCount(1);
+    await expect(taskCard.getByText("billing-service")).toBeVisible();
+    await expect(taskCard.getByText("待领取")).toBeVisible();
     await expectNoPageOverflow(page);
   });
 
   test("mobile agent list exposes core information", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/agents");
-    const atlasRow = page.locator(".agent-row").filter({ hasText: "Atlas v12" });
-    await expect(page.getByText("Atlas v12")).toBeVisible();
-    await expect(page.getByText("atlas@example.com")).toBeVisible();
-    await expect(atlasRow.getByText("active", { exact: true })).toBeVisible();
+    await expect(page.locator(".agent-table")).toBeHidden();
+    const mobileList = page.locator(".agent-mobile-list");
+    await expect(mobileList).toBeVisible();
+
+    const atlasCard = mobileList.locator(".agent-mobile-card").filter({ hasText: "Atlas v12" });
+    await expect(atlasCard).toHaveCount(1);
+    await expect(atlasCard.getByText("atlas@example.com")).toBeVisible();
+    await expect(atlasCard.getByText("active", { exact: true })).toBeVisible();
     await expectNoPageOverflow(page);
   });
 });
