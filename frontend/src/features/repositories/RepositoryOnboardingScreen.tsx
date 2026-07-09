@@ -2,7 +2,7 @@ import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import * as client from "../../api/client";
 import type { RepositoryInventoryItem, RepositoryOnboardingSummary, RepositorySourceType } from "../../api/client";
-import { Button, Card, DenseTable, PageHeader, StatusChip, type DenseRow } from "../../ui";
+import { Button, Card, DenseTable, EmptyState, PageHeader, StatusChip, type DenseRow } from "../../ui";
 
 const SOURCE_LABELS: Record<RepositorySourceType, string> = {
   github_app: "GitHub App",
@@ -35,11 +35,14 @@ export function RepositoryOnboardingScreen() {
 
   const onboarded = summary?.onboarded_repositories.items ?? [];
   const appRepositories = summary?.app_repositories.items ?? [];
-  const onboardedNames = useMemo(() => new Set(onboarded.map((repo) => repo.full_name)), [onboarded]);
+  const appRepositoriesError = summary?.app_repositories_error;
+  const showAppRepositoriesEmpty =
+    !loading && summary?.github_app.configured && !appRepositoriesError && appRepositories.length === 0;
+  const onboardedKeys = useMemo(() => new Set(onboarded.map(repositoryInventoryKey)), [onboarded]);
 
   const handleAddAppRepository = async (repo: string) => {
     try {
-      setPendingRepo(repo);
+      setPendingRepo(repositoryKey("github_app", repo));
       const response = await client.addGitHubAppRepository(repo);
       setSummary((current) => appendOnboardedRepository(current, response.data));
     } catch (err) {
@@ -54,7 +57,7 @@ export function RepositoryOnboardingScreen() {
     const repo = publicRepo.trim();
     if (!repo) return;
     try {
-      setPendingRepo(repo);
+      setPendingRepo(repositoryKey("public_github", repo));
       const response = await client.addPublicRepository(repo);
       setSummary((current) => appendOnboardedRepository(current, response.data));
       setPublicRepo("");
@@ -88,9 +91,10 @@ export function RepositoryOnboardingScreen() {
   };
 
   const candidateRows: DenseRow[] = appRepositories.map((repo) => {
-    const alreadyAdded = onboardedNames.has(repo.full_name);
+    const candidateKey = repositoryKey("github_app", repo.full_name);
+    const alreadyAdded = onboardedKeys.has(candidateKey);
     return {
-      key: repo.full_name,
+      key: candidateKey,
       cells: [
         repo.full_name,
         <code>{repo.default_branch}</code>,
@@ -98,7 +102,7 @@ export function RepositoryOnboardingScreen() {
         <Button
           icon={<Plus size={14} strokeWidth={1.8} />}
           variant={alreadyAdded ? "ghost" : "default"}
-          disabled={alreadyAdded || pendingRepo === repo.full_name}
+          disabled={alreadyAdded || pendingRepo === candidateKey}
           onClick={() => handleAddAppRepository(repo.full_name)}
         >
           {alreadyAdded ? "已添加" : "添加"}
@@ -177,12 +181,27 @@ export function RepositoryOnboardingScreen() {
             )}
           </Card>
 
-          <Card title="GitHub App 可见仓库" sub={`${appRepositories.length} 个候选仓库`} pad={false}>
-            <DenseTable
-              columns={["仓库", "默认分支", "可见性", "操作"]}
-              rows={candidateRows}
-              caption="GitHub App 候选仓库列表"
-            />
+          <Card
+            title="GitHub App 可见仓库"
+            sub={`${appRepositories.length} 个候选仓库`}
+            pad={Boolean(appRepositoriesError || showAppRepositoriesEmpty)}
+          >
+            {appRepositoriesError ? (
+              <div role="alert" className="stack-sm">
+                <p className="text-sm">无法读取 GitHub App 可见仓库。</p>
+                <p className="card-sub">{appRepositoriesError}</p>
+              </div>
+            ) : showAppRepositoriesEmpty ? (
+              <EmptyState title="暂无 GitHub App 可见仓库">
+                <p className="card-sub">请确认 GitHub App 已安装到至少一个仓库。</p>
+              </EmptyState>
+            ) : (
+              <DenseTable
+                columns={["仓库", "默认分支", "可见性", "操作"]}
+                rows={candidateRows}
+                caption="GitHub App 候选仓库列表"
+              />
+            )}
           </Card>
         </div>
 
@@ -202,7 +221,11 @@ export function RepositoryOnboardingScreen() {
                 <span className="field-hint">添加仓库访问本身，不会创建 Issue 同步规则。</span>
               </label>
               <div className="row">
-                <Button type="submit" icon={<Plus size={14} strokeWidth={1.8} />} disabled={!publicRepo.trim() || pendingRepo === publicRepo.trim()}>
+                <Button
+                  type="submit"
+                  icon={<Plus size={14} strokeWidth={1.8} />}
+                  disabled={!publicRepo.trim() || pendingRepo === repositoryKey("public_github", publicRepo.trim())}
+                >
                   添加公开仓库
                 </Button>
               </div>
@@ -226,13 +249,21 @@ function sourceLabel(sourceType: RepositoryInventoryItem["source_type"]): string
   return sourceType ? SOURCE_LABELS[sourceType] : "未知来源";
 }
 
+function repositoryKey(sourceType: RepositoryInventoryItem["source_type"], fullName: string): string {
+  return `${sourceType ?? "unknown"}:${fullName}`;
+}
+
+function repositoryInventoryKey(repo: RepositoryInventoryItem): string {
+  return repositoryKey(repo.source_type, repo.full_name);
+}
+
 function appendOnboardedRepository(
   current: RepositoryOnboardingSummary | null,
   repo: RepositoryInventoryItem,
 ): RepositoryOnboardingSummary | null {
   if (!current) return current;
   const existing = current.onboarded_repositories.items.filter(
-    (item) => item.id !== repo.id && item.full_name !== repo.full_name,
+    (item) => item.id !== repo.id && repositoryInventoryKey(item) !== repositoryInventoryKey(repo),
   );
   return {
     ...current,
