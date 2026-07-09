@@ -6,10 +6,10 @@
 
 ## 2. Review Diff Readability
 
-- [ ] 2.1 Update review diff CSS so code line content preserves readable text and avoids character-level wrapping.
-- [ ] 2.2 Add explicit diff-region overflow behavior that does not create page-level horizontal scrolling.
-- [ ] 2.3 Improve mobile review diff behavior by defaulting to the most readable mode or presenting split mode inside an obvious scroll container.
-- [ ] 2.4 Verify line comments and diff mode toggles remain usable after the layout change.
+- [x] 2.1 Update review diff CSS so code line content preserves readable text and avoids character-level wrapping.
+- [x] 2.2 Add explicit diff-region overflow behavior that does not create page-level horizontal scrolling.
+- [x] 2.3 Improve mobile review diff behavior by defaulting to the most readable mode or presenting split mode inside an obvious scroll container.
+- [x] 2.4 Verify line comments and diff mode toggles remain usable after the layout change.
 
 ## 3. Mobile Task And Agent Lists
 

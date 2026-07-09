@@ -139,7 +139,7 @@ git commit -m "test: capture console ui ux regressions"
 - Consumes: `DiffMode`, existing diff table markup, line-comment callbacks.
 - Produces: mobile default Unified mode and readable diff region layout.
 
-- [ ] **Step 1: Add viewport-aware default mode**
+- [x] **Step 1: Add viewport-aware default mode**
 
 In `frontend/src/features/reviews/DiffViewer.tsx`, add a small hook near the top of the file:
 
@@ -164,7 +164,7 @@ to:
 const [mode, setMode] = useState<DiffMode>(initialDiffMode);
 ```
 
-- [ ] **Step 2: Add a scroll container around diff tables**
+- [x] **Step 2: Add a scroll container around diff tables**
 
 Wrap both table branches in a container:
 
@@ -182,7 +182,7 @@ Wrap both table branches in a container:
 </div>
 ```
 
-- [ ] **Step 3: Update diff CSS**
+- [x] **Step 3: Update diff CSS**
 
 In `frontend/src/styles/review.css`, add:
 
@@ -223,7 +223,7 @@ In `frontend/src/styles/review.css`, add:
 
 Remove or replace the existing `.diff-table .line-content pre` rule that uses `white-space: pre-wrap` and `word-break: break-word`.
 
-- [ ] **Step 4: Verify diff behavior**
+- [x] **Step 4: Verify diff behavior**
 
 Run:
 
@@ -233,7 +233,7 @@ cd frontend && npx playwright test e2e/console-ui-ux.spec.ts --grep "review diff
 
 Expected: desktop and mobile diff readability checks pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit review diff readability change**
 
 ```bash
 git add frontend/src/features/reviews/DiffViewer.tsx frontend/src/styles/review.css frontend/e2e/console-ui-ux.spec.ts

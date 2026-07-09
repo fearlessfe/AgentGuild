@@ -7,13 +7,13 @@
 
 ## Current Task
 
-- Plan task: `Task 2: Fix Review Diff Readability`
-- OpenSpec task mapping: `2. Review Diff Readability`
+- Plan task: `Task 3: Add Mobile Task And Agent Cards`
+- OpenSpec task mapping: `3. Mobile Task And Agent Lists`
 - Stage: `ready-to-dispatch`
 - Implementer: pending
 - Base commit: `pending`
-- Report: `.superpowers/sdd/task-2-report.md`
-- Brief: `.superpowers/sdd/task-2-brief.md`
+- Report: `.superpowers/sdd/task-3-report.md`
+- Brief: `.superpowers/sdd/task-3-brief.md`
 - RED evidence: pending
 - GREEN evidence: pending
 - Review/fix rounds: `0`
@@ -21,3 +21,4 @@
 ## Completed Tasks
 
 - Task 1: complete (`59a855e`, RED baseline captured; GREEN not applicable for failing baseline).
+- Task 2: complete (`2223065`, review diff RED/GREEN and build verified).
