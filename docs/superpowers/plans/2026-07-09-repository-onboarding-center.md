@@ -71,7 +71,7 @@ base-ref: 131ef493e502d3254a0ed230e76cdf867792491a
   - Existing `GitHubAppManager.Get` and `GitHubAppManager.IssueSource`.
   - Existing `git.Repository` values from `ListInstallationRepositories`.
 
-- [ ] **Step 1: Write failing service constructor and validation tests**
+- [x] **Step 1: Write failing service constructor and validation tests**
 
 Create tests covering nil dependencies and public repository normalization:
 
@@ -98,11 +98,11 @@ func TestRepositoryOnboardingService_AddPublicRepositoryNormalizesGitHubURL(t *t
 Run: `cd backend && go test ./internal/git/application -run RepositoryOnboarding -count=1`
 Expected: FAIL because the service does not exist.
 
-- [ ] **Step 2: Implement service types and input normalization**
+- [x] **Step 2: Implement service types and input normalization**
 
 Implement source constants `github_app` and `public_github`, normalize `owner/repo` and GitHub URL inputs, and return `invalid("repo")` for invalid shapes such as `owner`, `/owner/repo`, or `https://example.com/owner/repo`.
 
-- [ ] **Step 3: Add App repository selection behavior**
+- [x] **Step 3: Add App repository selection behavior**
 
 Write a failing test that `AddGitHubAppRepository` checks current App installation repositories before persisting:
 
@@ -126,7 +126,7 @@ func TestRepositoryOnboardingService_AddGitHubAppRepositoryRequiresVisibleRepo(t
 Run: `cd backend && go test ./internal/git/application -run RepositoryOnboarding -count=1`
 Expected: FAIL until App repository visibility is enforced.
 
-- [ ] **Step 4: Complete service tests**
+- [x] **Step 4: Complete service tests**
 
 Add tests for:
 - `Summary` returns configured App state, candidate repositories, and onboarded inventory.
@@ -137,7 +137,7 @@ Add tests for:
 Run: `cd backend && go test ./internal/git/application -run RepositoryOnboarding -count=1`
 Expected: PASS.
 
-- [ ] **Step 5: Commit service layer**
+- [x] **Step 5: Commit service layer**
 
 ```bash
 git add backend/internal/git/application/repository_onboarding.go backend/internal/git/application/repository_onboarding_test.go backend/internal/git/application/contracts.go

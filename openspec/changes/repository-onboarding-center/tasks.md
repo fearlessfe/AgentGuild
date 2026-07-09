@@ -1,7 +1,7 @@
 ## 1. Backend Repository Inventory
 
 - [ ] 1.1 Design and add tenant-scoped storage for onboarded repositories, including source type, full name, default branch, visibility, and selection state.
-- [ ] 1.2 Add application service commands/queries for listing onboarded repositories, selecting GitHub App installation repositories, adding public GitHub repositories, and removing onboarded repositories.
+- [x] 1.2 Add application service commands/queries for listing onboarded repositories, selecting GitHub App installation repositories, adding public GitHub repositories, and removing onboarded repositories.
 - [ ] 1.3 Add REST endpoints and OpenAPI definitions for repository onboarding inventory operations.
 - [ ] 1.4 Reuse existing GitHub App repository discovery for App source listing and keep configuration errors distinguishable from repository listing errors.
 
