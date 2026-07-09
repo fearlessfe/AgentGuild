@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -90,7 +90,31 @@ type FetchState = {
   rubric: RubricView;
 };
 
-function mockFetch({ review = reviewFixture, diff = diffFixture, rubric = rubricFixture }: Partial<FetchState> = {}) {
+type MockFetchOverrides = {
+  onCommentPost?: (input: {
+    reviewId: string;
+    body: Record<string, unknown>;
+  }) => Promise<Response> | Response;
+  onDecisionPost?: (input: {
+    reviewId: string;
+    body: Record<string, unknown>;
+  }) => Promise<Response> | Response;
+};
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function mockFetch(
+  { review = reviewFixture, diff = diffFixture, rubric = rubricFixture }: Partial<FetchState> = {},
+  overrides: MockFetchOverrides = {},
+) {
   const state: FetchState = { review, diff, rubric };
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
@@ -111,6 +135,14 @@ function mockFetch({ review = reviewFixture, diff = diffFixture, rubric = rubric
     const commentMatch = url.pathname.match(/^\/api\/v1\/reviews\/([^/]+)\/comments$/);
     if (commentMatch && method === "POST") {
       const body = JSON.parse((init as RequestInit).body as string);
+      if (overrides.onCommentPost) {
+        return Promise.resolve(
+          overrides.onCommentPost({
+            reviewId: decodeURIComponent(commentMatch[1]),
+            body,
+          }),
+        );
+      }
       return Promise.resolve(
         new Response(
           JSON.stringify(
@@ -130,6 +162,14 @@ function mockFetch({ review = reviewFixture, diff = diffFixture, rubric = rubric
     const decisionMatch = url.pathname.match(/^\/api\/v1\/reviews\/([^/]+)\/decision$/);
     if (decisionMatch && method === "POST") {
       const body = JSON.parse((init as RequestInit).body as string);
+      if (overrides.onDecisionPost) {
+        return Promise.resolve(
+          overrides.onDecisionPost({
+            reviewId: decodeURIComponent(decisionMatch[1]),
+            body,
+          }),
+        );
+      }
       return Promise.resolve(
         new Response(
           JSON.stringify(
@@ -404,6 +444,27 @@ describe("ReviewPage", () => {
     ]));
   });
 
+  it("shows a pending label while a decision is being submitted", async () => {
+    const submitDecisionResponse = deferred<Response>();
+    mockFetch({}, { onDecisionPost: () => submitDecisionResponse.promise });
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findByText("审核 rev-1");
+    await screen.findByTestId("rubric-form");
+
+    await userEvent.click(screen.getByRole("button", { name: "通过" }));
+
+    const pendingButtons = await screen.findAllByRole("button", { name: "提交中…" });
+    expect(pendingButtons.length).toBeGreaterThan(0);
+    expect(pendingButtons[0]).toBeDisabled();
+
+    submitDecisionResponse.resolve(
+      new Response(JSON.stringify(envelope({ ...reviewFixture, status: "submitted", final_decision: "accepted" })), { status: 200 }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "提交中…" })).not.toBeInTheDocument());
+  });
+
   it("persists a line comment via POST /v1/reviews/:id/comments", async () => {
     const { spy } = mockFetch();
     renderWithProviders(<ReviewPage />);
@@ -429,6 +490,23 @@ describe("ReviewPage", () => {
     expect(body.text).toBe("边界情况未处理");
     expect(body.request_id).toBeUndefined();
     expect(headers["Idempotency-Key"]).toBeTruthy();
+  });
+
+  it("shows a local alert and keeps the draft when comment submission fails", async () => {
+    mockFetch({}, { onCommentPost: () => Promise.reject(new Error("评论提交失败，请重试")) });
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findAllByText("func Charge(amount int) error {");
+
+    await userEvent.click(screen.getByLabelText("在右侧第 12 行添加评论"));
+    const textarea = screen.getByPlaceholderText("输入评论…");
+    await userEvent.type(textarea, "边界情况未处理");
+    await userEvent.click(screen.getByRole("button", { name: "添加评论" }));
+
+    const form = textarea.closest(".comment-form");
+    expect(form).not.toBeNull();
+    expect(await within(form as HTMLElement).findByRole("alert")).toHaveTextContent("评论提交失败，请重试");
+    expect(textarea).toHaveValue("边界情况未处理");
   });
 
   it("displays hard-gate error when accepting a submission with failed hard gates", async () => {

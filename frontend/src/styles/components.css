@@ -164,6 +164,17 @@
   margin: 0;
 }
 
+.form-error {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--danger-quiet);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* status + api chips ----------------------------------------------------- */
 
 .status-chip {

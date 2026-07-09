@@ -62,7 +62,11 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await mutation.mutateAsync(buildPayload());
+    try {
+      await mutation.mutateAsync(buildPayload());
+    } catch {
+      // Mutation state already captures the error for local recovery UI.
+    }
   }
 
   const createdAgent = mutation.data?.data.agent;
@@ -130,6 +134,11 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
             placeholder="USD"
           />
         </label>
+        {mutation.isError ? (
+          <p className="form-error field-span-2" role="alert">
+            {mutation.error.message}
+          </p>
+        ) : null}
         <div className="agent-form-actions field-span-2">
           <button type="submit" className="primary-action" disabled={mutation.isPending}>
             {mutation.isPending ? "注册中…" : "注册 Agent"}
@@ -140,7 +149,6 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
             </Link>
           ) : null}
         </div>
-        {mutation.isError ? <p className="error">{mutation.error.message}</p> : null}
       </form>
     </section>
   );

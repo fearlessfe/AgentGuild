@@ -52,16 +52,21 @@ export function DiffViewer({
   const [mode, setMode] = useState<DiffMode>(initialDiffMode);
   const [selected, setSelected] = useState<SelectedLine | null>(null);
   const [draft, setDraft] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   function selectLine(key: string, lineNumber: number | undefined, side: "left" | "right", hunkHash: string) {
     if (lineNumber === undefined) return;
     setSelected({ key, lineNumber, side, hunkHash });
     setDraft("");
+    setCommentError(null);
   }
 
   async function submitComment() {
-    if (!selected || draft.trim() === "") return;
+    if (!selected || draft.trim() === "" || submittingComment) return;
     const text = draft.trim();
+    setSubmittingComment(true);
+    setCommentError(null);
     try {
       await onAddComment({
         lineNumber: selected.lineNumber,
@@ -71,8 +76,11 @@ export function DiffViewer({
       });
       setSelected(null);
       setDraft("");
-    } catch {
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : "评论提交失败，请重试");
       setDraft(text);
+    } finally {
+      setSubmittingComment(false);
     }
   }
 
@@ -170,10 +178,20 @@ export function DiffViewer({
                         key={`form-${selected.key}`}
                         selected={selected}
                         draft={draft}
-                        onChange={setDraft}
+                        onChange={(value) => {
+                          setDraft(value);
+                          if (commentError) {
+                            setCommentError(null);
+                          }
+                        }}
                         onSubmit={submitComment}
-                        onCancel={() => setSelected(null)}
+                        onCancel={() => {
+                          setSelected(null);
+                          setCommentError(null);
+                        }}
                         colSpan={4}
+                        isSubmitting={submittingComment}
+                        errorMessage={commentError}
                       />
                     ) : null}
                   </Fragment>
@@ -252,10 +270,20 @@ export function DiffViewer({
                       <CommentFormRow
                         selected={selected}
                         draft={draft}
-                        onChange={setDraft}
+                        onChange={(value) => {
+                          setDraft(value);
+                          if (commentError) {
+                            setCommentError(null);
+                          }
+                        }}
                         onSubmit={submitComment}
-                        onCancel={() => setSelected(null)}
+                        onCancel={() => {
+                          setSelected(null);
+                          setCommentError(null);
+                        }}
                         colSpan={4}
+                        isSubmitting={submittingComment}
+                        errorMessage={commentError}
                       />
                     ) : null}
                   </Fragment>
@@ -289,6 +317,8 @@ function CommentFormRow({
   onSubmit,
   onCancel,
   colSpan,
+  isSubmitting,
+  errorMessage,
 }: {
   selected: SelectedLine;
   draft: string;
@@ -296,6 +326,8 @@ function CommentFormRow({
   onSubmit: () => void;
   onCancel: () => void;
   colSpan: number;
+  isSubmitting: boolean;
+  errorMessage: string | null;
 }) {
   return (
     <tr className="comment-form-row">
@@ -311,9 +343,14 @@ function CommentFormRow({
             rows={3}
             placeholder="输入评论…"
           />
+          {errorMessage ? (
+            <div className="form-error" role="alert">
+              {errorMessage}
+            </div>
+          ) : null}
           <div className="comment-actions">
-            <button type="button" onClick={onSubmit} disabled={draft.trim() === ""}>
-              添加评论
+            <button type="button" onClick={onSubmit} disabled={draft.trim() === "" || isSubmitting}>
+              {isSubmitting ? "提交中…" : "添加评论"}
             </button>
             <button type="button" className="secondary" onClick={onCancel}>
               取消

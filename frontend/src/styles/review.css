@@ -258,7 +258,10 @@
   color: var(--text);
 }
 
-.comment-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.comment-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 @media (max-width: 700px) {
   .diff-table.split {

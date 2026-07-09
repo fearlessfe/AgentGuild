@@ -161,8 +161,6 @@ export function ReviewPage() {
   const review = reviewQuery.data.data;
   const decisionLabel = formatDecision(review.final_decision);
   const isSubmitted = review.status === "submitted";
-  const mutationError = commentMutation.error ?? decisionMutation.error;
-
   function handleAddComment(input: {
     lineNumber: number;
     side: "left" | "right";
@@ -192,12 +190,6 @@ export function ReviewPage() {
         </div>
       </header>
 
-      {mutationError ? (
-        <div className="auth-error" role="alert">
-          {mutationError.message}
-        </div>
-      ) : null}
-
       <div className="split-3">
         <aside className="col scroll review-file-tree">
           <Card title="文件" pad={false}>
@@ -222,6 +214,12 @@ export function ReviewPage() {
         <div className="col scroll">
           <Card title="Rubric 评分">
             <div className="review-decision-panel stack">
+              {decisionMutation.isError ? (
+                <div className="form-error" role="alert">
+                  {decisionMutation.error.message}
+                </div>
+              ) : null}
+
               {rubricQuery.data ? (
                 <RubricForm
                   dimensions={rubricQuery.data.data.dimensions}
@@ -256,7 +254,7 @@ export function ReviewPage() {
                     disabled={decisionMutation.isPending || rubricQuery.isPending}
                     onClick={() => decisionMutation.mutate("accepted")}
                   >
-                    通过
+                    {decisionMutation.isPending ? "提交中…" : "通过"}
                   </button>
                   <button
                     type="button"
@@ -264,7 +262,7 @@ export function ReviewPage() {
                     disabled={decisionMutation.isPending || rubricQuery.isPending}
                     onClick={() => decisionMutation.mutate("revision_requested")}
                   >
-                    退回修改
+                    {decisionMutation.isPending ? "提交中…" : "退回修改"}
                   </button>
                   <button
                     type="button"
@@ -272,7 +270,7 @@ export function ReviewPage() {
                     disabled={decisionMutation.isPending || rubricQuery.isPending}
                     onClick={() => decisionMutation.mutate("rejected")}
                   >
-                    拒绝
+                    {decisionMutation.isPending ? "提交中…" : "拒绝"}
                   </button>
                 </div>
               ) : null}

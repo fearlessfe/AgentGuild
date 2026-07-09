@@ -59,6 +59,21 @@ describe("Agents UI", () => {
     expect(screen.getByText(/过期时间：2026-07-09T01:00:00Z/i)).toBeVisible();
   });
 
+  it("shows a local alert and preserves form fields when registration fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: "名称已存在，请更换后重试" } }), { status: 409 }),
+    );
+
+    renderWithProviders(<AppShell />, { initialEntries: ["/agents/new"] });
+
+    const nameInput = screen.getByLabelText(/名称/i);
+    await userEvent.type(nameInput, "Code Review Bot");
+    await userEvent.click(screen.getByRole("button", { name: /注册 agent/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("名称已存在，请更换后重试");
+    expect(nameInput).toHaveValue("Code Review Bot");
+  });
+
   it("hides suspend and resume controls for revoked agents", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
