@@ -374,7 +374,7 @@ git commit -m "feat: add repository onboarding screen"
 - Consumes: `RepositoryOnboardingScreen`.
 - Produces: authenticated route `/repositories` and rail label `仓库接入`.
 
-- [ ] **Step 1: Write failing navigation tests**
+- [x] **Step 1: Write failing navigation tests**
 
 Add tests that render the app shell or relevant components and assert:
 - `仓库接入` is present in persistent navigation
@@ -384,24 +384,24 @@ Add tests that render the app shell or relevant components and assert:
 Run: `cd frontend && npm test -- --run`
 Expected: FAIL until routes and links are wired.
 
-- [ ] **Step 2: Wire route and rail**
+- [x] **Step 2: Wire route and rail**
 
 Add a `仓库接入` rail item with the lucide `FolderGit2` icon, add module label mapping, import `RepositoryOnboardingScreen`, and add `<Route path="/repositories" element={<RepositoryOnboardingScreen />} />`.
 
-- [ ] **Step 3: Update onboarding overview links**
+- [x] **Step 3: Update onboarding overview links**
 
 Keep GitHub App installation accessible, but make repository setup actions route to `/repositories` so the user enters the two-step module.
 
-- [ ] **Step 4: Refocus sync rules page**
+- [x] **Step 4: Refocus sync rules page**
 
 Remove the public repository form from `SyncRuleScreen`. Keep sync rule listing and rule actions. Add a compact card or `PageHeader` action linking to `/repositories` for repository setup.
 
-- [ ] **Step 5: Run frontend tests**
+- [x] **Step 5: Run frontend tests**
 
 Run: `cd frontend && npm test -- --run`
 Expected: PASS.
 
-- [ ] **Step 6: Commit navigation integration**
+- [x] **Step 6: Commit navigation integration**
 
 ```bash
 git add frontend/src/app/Rail.tsx frontend/src/app/AppShell.tsx frontend/src/features/onboarding/OnboardingScreen.tsx frontend/src/features/sync/SyncRuleScreen.tsx frontend/src/features/sync/SyncRuleScreen.test.tsx
