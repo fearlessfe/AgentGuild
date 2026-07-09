@@ -32,6 +32,6 @@
 
 ## 6. Final Verification
 
-- [ ] 6.1 Run frontend build and unit tests.
-- [ ] 6.2 Run targeted Playwright checks for task, agent, and review routes on desktop and mobile viewports.
-- [ ] 6.3 Capture or inspect screenshots for the changed core routes and adjust layout issues found during visual QA.
+- [x] 6.1 Run frontend build and unit tests.
+- [x] 6.2 Run targeted Playwright checks for task, agent, and review routes on desktop and mobile viewports.
+- [x] 6.3 Capture or inspect screenshots for the changed core routes and adjust layout issues found during visual QA.

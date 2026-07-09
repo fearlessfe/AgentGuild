@@ -9,9 +9,9 @@
 
 - Plan task: `Task 6: Final Verification And Documentation Sync`
 - OpenSpec task mapping: `6. Final Verification`
-- Stage: `ready-to-dispatch`
+- Stage: `final-review`
 - Implementer: pending
-- Base commit: `pending`
+- Base commit: `0649301`
 - Report: `.superpowers/sdd/task-6-report.md`
 - Brief: `.superpowers/sdd/task-6-brief.md`
 - RED evidence: pending
@@ -29,3 +29,4 @@
 - Task 3: complete (`e3e91bb`, mobile list RED/GREEN and build verified).
 - Task 4: complete (`7c06ef6`, plus test fixes `40f881d` and `a43c564`; frontend unit/e2e/build verified).
 - Task 5: complete (`2ccafcf`; frontend focused/unit/e2e/build verified).
+- Task 6: complete (verification report `.superpowers/sdd/task-6-report.md`; screenshots in `/private/tmp/agentguild-console-ui-ux/`; frontend build/unit/e2e and visual QA verified).

@@ -594,7 +594,7 @@ git commit -m "fix: clarify console pending and error states"
 - Consumes: all earlier task outputs.
 - Produces: verified implementation with OpenSpec task checkboxes updated.
 
-- [ ] **Step 1: Run full frontend verification**
+- [x] **Step 1: Run full frontend verification**
 
 Run:
 
@@ -606,7 +606,7 @@ cd frontend && npx playwright test e2e/console-ui-ux.spec.ts
 
 Expected: all commands pass.
 
-- [ ] **Step 2: Inspect screenshots**
+- [x] **Step 2: Inspect screenshots**
 
 Run the dev server in demo mode and inspect `/tasks`, `/agents`, and `/reviews/review-1` at 1440px and 375px widths:
 
@@ -616,11 +616,11 @@ cd frontend && VITE_DEMO_MODE=true npm run dev -- --host 127.0.0.1
 
 Expected: no character-level diff wrapping, mobile cards expose core information, and no page-level horizontal overflow.
 
-- [ ] **Step 3: Mark OpenSpec tasks complete**
+- [x] **Step 3: Mark OpenSpec tasks complete**
 
 After verification, mark all relevant checkboxes in `openspec/changes/improve-console-ui-ux/tasks.md` as complete.
 
-- [ ] **Step 4: Commit verification state**
+- [x] **Step 4: Commit verification state**
 
 ```bash
 git add openspec/changes/improve-console-ui-ux/tasks.md
