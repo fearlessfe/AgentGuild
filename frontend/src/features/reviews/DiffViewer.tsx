@@ -18,6 +18,13 @@ type AddCommentInput = {
   text: string;
 };
 
+function initialDiffMode() {
+  if (typeof window !== "undefined" && window.matchMedia("(max-width: 700px)").matches) {
+    return "unified" as const;
+  }
+  return "split" as const;
+}
+
 function lineMarker(type: DiffLine["type"]): string {
   switch (type) {
     case "add":
@@ -42,7 +49,7 @@ export function DiffViewer({
   comments: LineComment[];
   onAddComment: (input: AddCommentInput) => Promise<unknown>;
 }) {
-  const [mode, setMode] = useState<DiffMode>("split");
+  const [mode, setMode] = useState<DiffMode>(initialDiffMode);
   const [selected, setSelected] = useState<SelectedLine | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -100,162 +107,164 @@ export function DiffViewer({
         </span>
       </div>
 
-      {mode === "unified" ? (
-        <table className="diff-table unified">
-          <tbody>
-            {allLines.map(({ hunkIndex, lineIndex, line, hunk }) => {
-              const keyBase = `${hunkIndex}-${lineIndex}`;
-              const leftKey = `${keyBase}-left`;
-              const rightKey = `${keyBase}-right`;
-              const leftComments = line.old_line ? commentsForLine(comments, line.old_line, "left") : [];
-              const rightComments = line.new_line ? commentsForLine(comments, line.new_line, "right") : [];
-              return (
-                <Fragment key={keyBase}>
-                  <tr className={`diff-line ${line.type}`}>
-                    <td className="line-number old">
-                      {line.old_line !== undefined ? (
-                        <button
-                          type="button"
-                          className={selected?.key === leftKey ? "selected" : undefined}
-                          aria-label={`在左侧第 ${line.old_line} 行添加评论`}
-                          onClick={() => selectLine(leftKey, line.old_line, "left", hunk.hunk_hash)}
-                        >
-                          {line.old_line}
-                        </button>
-                      ) : null}
-                    </td>
-                    <td className="line-number new">
-                      {line.new_line !== undefined ? (
-                        <button
-                          type="button"
-                          className={selected?.key === rightKey ? "selected" : undefined}
-                          aria-label={`在右侧第 ${line.new_line} 行添加评论`}
-                          onClick={() => selectLine(rightKey, line.new_line, "right", hunk.hunk_hash)}
-                        >
-                          {line.new_line}
-                        </button>
-                      ) : null}
-                    </td>
-                    <td className="line-marker" aria-hidden="true">
-                      {lineMarker(line.type)}
-                    </td>
-                    <td className="line-content">
-                      <pre>{line.text}</pre>
-                    </td>
-                  </tr>
-                  {leftComments.length > 0 ? (
-                    <tr className="comment-row">
-                      <td colSpan={4}>
-                        <CommentList items={leftComments} sideLabel="左侧" />
+      <div className="diff-scroll">
+        {mode === "unified" ? (
+          <table className="diff-table unified">
+            <tbody>
+              {allLines.map(({ hunkIndex, lineIndex, line, hunk }) => {
+                const keyBase = `${hunkIndex}-${lineIndex}`;
+                const leftKey = `${keyBase}-left`;
+                const rightKey = `${keyBase}-right`;
+                const leftComments = line.old_line ? commentsForLine(comments, line.old_line, "left") : [];
+                const rightComments = line.new_line ? commentsForLine(comments, line.new_line, "right") : [];
+                return (
+                  <Fragment key={keyBase}>
+                    <tr className={`diff-line ${line.type}`}>
+                      <td className="line-number old">
+                        {line.old_line !== undefined ? (
+                          <button
+                            type="button"
+                            className={selected?.key === leftKey ? "selected" : undefined}
+                            aria-label={`在左侧第 ${line.old_line} 行添加评论`}
+                            onClick={() => selectLine(leftKey, line.old_line, "left", hunk.hunk_hash)}
+                          >
+                            {line.old_line}
+                          </button>
+                        ) : null}
+                      </td>
+                      <td className="line-number new">
+                        {line.new_line !== undefined ? (
+                          <button
+                            type="button"
+                            className={selected?.key === rightKey ? "selected" : undefined}
+                            aria-label={`在右侧第 ${line.new_line} 行添加评论`}
+                            onClick={() => selectLine(rightKey, line.new_line, "right", hunk.hunk_hash)}
+                          >
+                            {line.new_line}
+                          </button>
+                        ) : null}
+                      </td>
+                      <td className="line-marker" aria-hidden="true">
+                        {lineMarker(line.type)}
+                      </td>
+                      <td className="line-content">
+                        <pre>{line.text}</pre>
                       </td>
                     </tr>
-                  ) : null}
-                  {rightComments.length > 0 ? (
-                    <tr className="comment-row">
-                      <td colSpan={4}>
-                        <CommentList items={rightComments} sideLabel="右侧" />
+                    {leftComments.length > 0 ? (
+                      <tr className="comment-row">
+                        <td colSpan={4}>
+                          <CommentList items={leftComments} sideLabel="左侧" />
+                        </td>
+                      </tr>
+                    ) : null}
+                    {rightComments.length > 0 ? (
+                      <tr className="comment-row">
+                        <td colSpan={4}>
+                          <CommentList items={rightComments} sideLabel="右侧" />
+                        </td>
+                      </tr>
+                    ) : null}
+                    {selected && (selected.key === leftKey || selected.key === rightKey) ? (
+                      <CommentFormRow
+                        key={`form-${selected.key}`}
+                        selected={selected}
+                        draft={draft}
+                        onChange={setDraft}
+                        onSubmit={submitComment}
+                        onCancel={() => setSelected(null)}
+                        colSpan={4}
+                      />
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <table className="diff-table split">
+            <thead>
+              <tr>
+                <th className="line-number">旧行</th>
+                <th className="line-content">旧版本</th>
+                <th className="line-number">新行</th>
+                <th className="line-content">新版本</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allLines.map(({ hunkIndex, lineIndex, line, hunk }) => {
+                const keyBase = `${hunkIndex}-${lineIndex}`;
+                const leftKey = `${keyBase}-left`;
+                const rightKey = `${keyBase}-right`;
+                const leftComments = line.old_line ? commentsForLine(comments, line.old_line, "left") : [];
+                const rightComments = line.new_line ? commentsForLine(comments, line.new_line, "right") : [];
+                return (
+                  <Fragment key={keyBase}>
+                    <tr className={`diff-line ${line.type}`}>
+                      <td className="line-number old">
+                        {line.old_line !== undefined ? (
+                          <button
+                            type="button"
+                            className={selected?.key === leftKey ? "selected" : undefined}
+                            aria-label={`在左侧第 ${line.old_line} 行添加评论`}
+                            onClick={() => selectLine(leftKey, line.old_line, "left", hunk.hunk_hash)}
+                          >
+                            {line.old_line}
+                          </button>
+                        ) : null}
+                      </td>
+                      <td className={`line-content old ${line.type === "add" ? "empty" : ""}`}>
+                        {line.type !== "add" ? <pre>{line.text}</pre> : null}
+                      </td>
+                      <td className="line-number new">
+                        {line.new_line !== undefined ? (
+                          <button
+                            type="button"
+                            className={selected?.key === rightKey ? "selected" : undefined}
+                            aria-label={`在右侧第 ${line.new_line} 行添加评论`}
+                            onClick={() => selectLine(rightKey, line.new_line, "right", hunk.hunk_hash)}
+                          >
+                            {line.new_line}
+                          </button>
+                        ) : null}
+                      </td>
+                      <td className={`line-content new ${line.type === "remove" ? "empty" : ""}`}>
+                        {line.type !== "remove" ? <pre>{line.text}</pre> : null}
                       </td>
                     </tr>
-                  ) : null}
-                  {selected && (selected.key === leftKey || selected.key === rightKey) ? (
-                    <CommentFormRow
-                      key={`form-${selected.key}`}
-                      selected={selected}
-                      draft={draft}
-                      onChange={setDraft}
-                      onSubmit={submitComment}
-                      onCancel={() => setSelected(null)}
-                      colSpan={4}
-                    />
-                  ) : null}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      ) : (
-        <table className="diff-table split">
-          <thead>
-            <tr>
-              <th className="line-number">旧行</th>
-              <th className="line-content">旧版本</th>
-              <th className="line-number">新行</th>
-              <th className="line-content">新版本</th>
-            </tr>
-          </thead>
-          <tbody>
-            {allLines.map(({ hunkIndex, lineIndex, line, hunk }) => {
-              const keyBase = `${hunkIndex}-${lineIndex}`;
-              const leftKey = `${keyBase}-left`;
-              const rightKey = `${keyBase}-right`;
-              const leftComments = line.old_line ? commentsForLine(comments, line.old_line, "left") : [];
-              const rightComments = line.new_line ? commentsForLine(comments, line.new_line, "right") : [];
-              return (
-                <Fragment key={keyBase}>
-                  <tr className={`diff-line ${line.type}`}>
-                    <td className="line-number old">
-                      {line.old_line !== undefined ? (
-                        <button
-                          type="button"
-                          className={selected?.key === leftKey ? "selected" : undefined}
-                          aria-label={`在左侧第 ${line.old_line} 行添加评论`}
-                          onClick={() => selectLine(leftKey, line.old_line, "left", hunk.hunk_hash)}
-                        >
-                          {line.old_line}
-                        </button>
-                      ) : null}
-                    </td>
-                    <td className={`line-content old ${line.type === "add" ? "empty" : ""}`}>
-                      {line.type !== "add" ? <pre>{line.text}</pre> : null}
-                    </td>
-                    <td className="line-number new">
-                      {line.new_line !== undefined ? (
-                        <button
-                          type="button"
-                          className={selected?.key === rightKey ? "selected" : undefined}
-                          aria-label={`在右侧第 ${line.new_line} 行添加评论`}
-                          onClick={() => selectLine(rightKey, line.new_line, "right", hunk.hunk_hash)}
-                        >
-                          {line.new_line}
-                        </button>
-                      ) : null}
-                    </td>
-                    <td className={`line-content new ${line.type === "remove" ? "empty" : ""}`}>
-                      {line.type !== "remove" ? <pre>{line.text}</pre> : null}
-                    </td>
-                  </tr>
-                  {leftComments.length > 0 ? (
-                    <tr className="comment-row">
-                      <td colSpan={2}>
-                        <CommentList items={leftComments} sideLabel="左侧" />
-                      </td>
-                      <td colSpan={2} />
-                    </tr>
-                  ) : null}
-                  {rightComments.length > 0 ? (
-                    <tr className="comment-row">
-                      <td colSpan={2} />
-                      <td colSpan={2}>
-                        <CommentList items={rightComments} sideLabel="右侧" />
-                      </td>
-                    </tr>
-                  ) : null}
-                  {selected && (selected.key === leftKey || selected.key === rightKey) ? (
-                    <CommentFormRow
-                      selected={selected}
-                      draft={draft}
-                      onChange={setDraft}
-                      onSubmit={submitComment}
-                      onCancel={() => setSelected(null)}
-                      colSpan={4}
-                    />
-                  ) : null}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+                    {leftComments.length > 0 ? (
+                      <tr className="comment-row">
+                        <td colSpan={2}>
+                          <CommentList items={leftComments} sideLabel="左侧" />
+                        </td>
+                        <td colSpan={2} />
+                      </tr>
+                    ) : null}
+                    {rightComments.length > 0 ? (
+                      <tr className="comment-row">
+                        <td colSpan={2} />
+                        <td colSpan={2}>
+                          <CommentList items={rightComments} sideLabel="右侧" />
+                        </td>
+                      </tr>
+                    ) : null}
+                    {selected && (selected.key === leftKey || selected.key === rightKey) ? (
+                      <CommentFormRow
+                        selected={selected}
+                        draft={draft}
+                        onChange={setDraft}
+                        onSubmit={submitComment}
+                        onCancel={() => setSelected(null)}
+                        colSpan={4}
+                      />
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
