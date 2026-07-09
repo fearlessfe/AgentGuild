@@ -1,3 +1,4 @@
+import { GitBranch, GitMerge } from "lucide-react";
 import { useState, useEffect } from "react";
 import { PageHeader, Card, Button, ProviderCard, StatusChip, ApiNote } from "../../ui";
 import { getGitHubApp, testGitHubApp, deleteGitHubApp, githubManifestUrl, type GitHubAppView } from "../../api/client";
@@ -75,7 +76,7 @@ export function GitIntegrationScreen() {
             </Card>
           ) : isConfigured ? (
             <ProviderCard
-              logo="◐"
+              logo={<GitBranch size={18} strokeWidth={1.8} />}
               name="GitHub"
               note={githubApp?.app_slug ? `已连接 · ${githubApp.app_slug}` : "已连接"}
               permissions={GITHUB_PERMISSIONS}
@@ -127,7 +128,12 @@ export function GitIntegrationScreen() {
               </div>
             </ProviderCard>
           ) : (
-            <ProviderCard logo="◐" name="GitHub" note="未配置" permissions={GITHUB_PERMISSIONS}>
+            <ProviderCard
+              logo={<GitBranch size={18} strokeWidth={1.8} />}
+              name="GitHub"
+              note="未配置"
+              permissions={GITHUB_PERMISSIONS}
+            >
               <div className="stack-sm">
                 <div className="row-between">
                   <span className="card-sub">状态</span>
@@ -142,7 +148,7 @@ export function GitIntegrationScreen() {
           )}
         </div>
         <div className="col">
-          <ProviderCard logo="◑" name="GitLab" note="即将支持" disabled>
+          <ProviderCard logo={<GitMerge size={18} strokeWidth={1.8} />} name="GitLab" note="即将支持" disabled>
             <div className="row-between">
               <span className="card-sub">状态</span>
               <StatusChip tone="neutral">即将支持</StatusChip>

@@ -45,6 +45,33 @@
     display: none;
   }
 
+  .rail-item,
+  .rail-toggle,
+  .icon-btn,
+  .tab,
+  .btn,
+  .primary-action,
+  .secondary-action,
+  .danger-action {
+    min-width: 44px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .tabs {
+    gap: var(--sp-2);
+    overflow-x: auto;
+  }
+
+  .filter select,
+  .filter input,
+  .agent-toolbar select,
+  .field input,
+  .field select,
+  .field textarea {
+    min-height: 44px;
+  }
+
   .split-2,
   .split-2--wide,
   .split-3 {

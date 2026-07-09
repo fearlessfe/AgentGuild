@@ -107,6 +107,10 @@
   font-size: 17px;
 }
 
+.rail-icon svg {
+  display: block;
+}
+
 .rail-item[data-active="true"],
 .rail-item.active {
   background: var(--action-quiet);
@@ -198,6 +202,11 @@
   color: var(--text-muted);
   font-family: inherit;
   font-size: 10px;
+}
+
+.topbar-search svg,
+.icon-btn svg {
+  display: block;
 }
 
 .topbar-icons {

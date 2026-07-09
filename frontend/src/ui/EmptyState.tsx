@@ -1,7 +1,8 @@
+import { CircleDot } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function EmptyState({
-  icon = "◔",
+  icon = <CircleDot size={22} strokeWidth={1.8} />,
   title,
   children,
 }: {

@@ -359,6 +359,11 @@
   font-size: 22px;
 }
 
+.empty-state .es-icon svg,
+.provider-logo svg {
+  display: block;
+}
+
 .empty-state .es-title {
   color: var(--text);
   font-size: 15px;

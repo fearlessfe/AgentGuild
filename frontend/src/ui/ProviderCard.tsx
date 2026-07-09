@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
 
+type ProviderCardProps = {
+  logo: ReactNode;
+  name: ReactNode;
+  note?: ReactNode;
+  permissions?: ReactNode[];
+  disabled?: boolean;
+  children?: ReactNode;
+};
+
 export function ProviderCard({
   logo,
   name,
@@ -7,14 +16,7 @@ export function ProviderCard({
   permissions = [],
   disabled = false,
   children,
-}: {
-  logo: ReactNode;
-  name: ReactNode;
-  note?: ReactNode;
-  permissions?: ReactNode[];
-  disabled?: boolean;
-  children?: ReactNode;
-}) {
+}: ProviderCardProps) {
   return (
     <div className="provider-card" data-disabled={disabled}>
       <div className="provider-head">

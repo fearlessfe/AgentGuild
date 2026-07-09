@@ -1,8 +1,9 @@
+import { SquareKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getExecution, getTask, pollInterval } from "../../api/client";
-import { Card, StatusChip } from "../../ui";
+import { Card, EmptyState, StatusChip } from "../../ui";
 
 type ChipTone = "action" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -111,12 +112,7 @@ export function TaskDetail({ taskId, onClose }: { taskId: string; onClose?: () =
 TaskDetail.Empty = function TaskDetailEmpty() {
   return (
     <Card>
-      <div className="empty-state">
-        <span className="es-icon" aria-hidden="true">
-          ◱
-        </span>
-        <div className="es-title">选择左侧任务查看详情</div>
-      </div>
+      <EmptyState icon={<SquareKanban size={22} strokeWidth={1.8} />} title="选择左侧任务查看详情" />
     </Card>
   );
 };
