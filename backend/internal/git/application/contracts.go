@@ -72,6 +72,32 @@ type Principal struct {
 	RepoScope      []string
 }
 
+// OnboardedRepositoryStore persists tenant-scoped repositories made available
+// for task repository selection.
+type OnboardedRepositoryStore interface {
+	ListOnboardedRepositories(context.Context, string) ([]OnboardedRepositoryRecord, error)
+	UpsertOnboardedRepository(context.Context, *OnboardedRepositoryRecord) error
+	DeleteOnboardedRepository(context.Context, string, string) error
+}
+
+// PublicRepositoryResolver resolves public repository metadata without using a
+// tenant GitHub App installation.
+type PublicRepositoryResolver interface {
+	ResolvePublicRepository(context.Context, string) (git.Repository, error)
+}
+
+// OnboardedRepositoryRecord is the persistent tenant-scoped repository record.
+type OnboardedRepositoryRecord struct {
+	ID            string
+	TenantID      string
+	SourceType    string
+	FullName      string
+	DefaultBranch string
+	Visibility    string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // Envelope wraps a response with transaction-level metadata.
 type Envelope[T any] struct {
 	Data T   `json:"data"`
