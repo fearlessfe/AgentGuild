@@ -13,9 +13,9 @@
 
 ## 3. Mobile Task And Agent Lists
 
-- [ ] 3.1 Adapt the task list for mobile so each item exposes id, title, status, and repository or publisher context without silent clipping.
-- [ ] 3.2 Adapt the agent list for mobile so each item exposes name, status, owner or team context, and navigation affordance without silent clipping.
-- [ ] 3.3 Preserve dense table behavior and existing filtering behavior on desktop.
+- [x] 3.1 Adapt the task list for mobile so each item exposes id, title, status, and repository or publisher context without silent clipping.
+- [x] 3.2 Adapt the agent list for mobile so each item exposes name, status, owner or team context, and navigation affordance without silent clipping.
+- [x] 3.3 Preserve dense table behavior and existing filtering behavior on desktop.
 
 ## 4. Icon And Interaction Baseline
 

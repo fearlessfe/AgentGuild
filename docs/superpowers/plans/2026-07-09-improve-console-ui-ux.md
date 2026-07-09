@@ -254,7 +254,7 @@ git commit -m "fix: keep review diffs readable"
 - Consumes: existing task and agent query/filter state.
 - Produces: `.task-mobile-list`, `.task-mobile-card`, `.agent-mobile-list`, and `.agent-mobile-card`.
 
-- [ ] **Step 1: Render mobile task cards beside the desktop table**
+- [x] **Step 1: Render mobile task cards beside the desktop table**
 
 In `TaskList.tsx`, after the desktop table section, render:
 
@@ -276,7 +276,7 @@ In `TaskList.tsx`, after the desktop table section, render:
 </div>
 ```
 
-- [ ] **Step 2: Render mobile Agent cards beside the desktop table**
+- [x] **Step 2: Render mobile Agent cards beside the desktop table**
 
 In `AgentList.tsx`, after `.agent-table`, render:
 
@@ -298,7 +298,7 @@ In `AgentList.tsx`, after `.agent-table`, render:
 </div>
 ```
 
-- [ ] **Step 3: Add responsive styles**
+- [x] **Step 3: Add responsive styles**
 
 In `frontend/src/styles/components.css`:
 
@@ -353,7 +353,7 @@ In `frontend/src/styles/responsive.css` inside `@media (max-width: 700px)`:
 }
 ```
 
-- [ ] **Step 4: Verify mobile list checks**
+- [x] **Step 4: Verify mobile list checks**
 
 Run:
 
@@ -363,7 +363,7 @@ cd frontend && npx playwright test e2e/console-ui-ux.spec.ts --grep "mobile .* l
 
 Expected: task and Agent mobile list checks pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit mobile workbench cards**
 
 ```bash
 git add frontend/src/features/tasks/TaskList.tsx frontend/src/features/agents/AgentList.tsx frontend/src/styles/components.css frontend/src/styles/legacy.css frontend/src/styles/responsive.css frontend/e2e/console-ui-ux.spec.ts
