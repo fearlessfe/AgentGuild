@@ -37,7 +37,7 @@ base-ref: 116b13b4bea43bba1b3ee9172b6f782d860f9924
 - Consumes: existing demo mode routing and fixtures.
 - Produces: helper functions `expectNoPageOverflow`, `expectReadableDiff`, and route checks used by later tasks.
 
-- [ ] **Step 1: Create the Playwright spec with failing checks**
+- [x] **Step 1: Create the Playwright spec with failing checks**
 
 Create `frontend/e2e/console-ui-ux.spec.ts`:
 
@@ -111,7 +111,7 @@ test.describe("console UI/UX baseline", () => {
 });
 ```
 
-- [ ] **Step 2: Run the targeted spec to capture current failures**
+- [x] **Step 2: Run the targeted spec to capture current failures**
 
 Run:
 
@@ -121,7 +121,7 @@ cd frontend && npx playwright test e2e/console-ui-ux.spec.ts
 
 Expected: at least the diff readability check fails before implementation because the current split diff wraps code into narrow columns.
 
-- [ ] **Step 3: Commit the failing baseline**
+- [x] **Step 3: Commit the failing baseline**
 
 ```bash
 git add frontend/e2e/console-ui-ux.spec.ts

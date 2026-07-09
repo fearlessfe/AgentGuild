@@ -1,8 +1,8 @@
 ## 1. Verification Baseline
 
-- [ ] 1.1 Add or update Playwright helpers to measure mobile page-level horizontal overflow and key control visibility.
-- [ ] 1.2 Add a regression check that captures the current unreadable diff wrapping on desktop and 375px mobile viewports, then make it pass with the implementation.
-- [ ] 1.3 Add mobile checks for task and agent list core information visibility.
+- [x] 1.1 Add or update Playwright helpers to measure mobile page-level horizontal overflow and key control visibility.
+- [x] 1.2 Add a regression check that captures the current unreadable diff wrapping on desktop and 375px mobile viewports, then make it pass with the implementation.
+- [x] 1.3 Add mobile checks for task and agent list core information visibility.
 
 ## 2. Review Diff Readability
 
