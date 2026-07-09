@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -118,8 +118,10 @@ describe("Agents UI", () => {
       </Routes>,
     );
 
-    expect(await screen.findByText("Active Worker")).toBeVisible();
-    expect(screen.getByText("Suspended Worker")).toBeVisible();
+    const desktopAgentList = await screen.findByLabelText("Agent 列表");
+
+    expect(await within(desktopAgentList).findByText("Active Worker")).toBeVisible();
+    expect(within(desktopAgentList).getByText("Suspended Worker")).toBeVisible();
 
     await userEvent.selectOptions(screen.getByRole("combobox", { name: /状态/i }), "suspended");
 
@@ -127,8 +129,8 @@ describe("Agents UI", () => {
       const calls = fetchMock.mock.calls.map((call) => new URL(String(call[0]), "http://localhost"));
       expect(calls.every((url) => !url.searchParams.has("status"))).toBe(true);
     });
-    expect(screen.getByText("Suspended Worker")).toBeVisible();
-    expect(screen.queryByText("Active Worker")).toBeNull();
+    expect(within(desktopAgentList).getByText("Suspended Worker")).toBeVisible();
+    expect(within(desktopAgentList).queryByText("Active Worker")).toBeNull();
   });
 
   it("uses colon action routes for agent status mutations", async () => {
