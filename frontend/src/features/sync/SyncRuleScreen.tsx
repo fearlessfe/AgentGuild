@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
-import type { FormEvent } from "react";
-import { PageHeader, Card, Button, StatusChip, DenseTable } from "../../ui";
+import { PageHeader, Card, Button, ButtonLink, StatusChip, DenseTable } from "../../ui";
 import type { DenseRow } from "../../ui";
 import type { Repository, SyncRule, SyncResult } from "../../api/client";
-import { listRepositories, listSyncRules, createSyncRule, updateSyncRule, deleteSyncRule, runSyncRule } from "../../api/client";
+import { listRepositories, listSyncRules, updateSyncRule, deleteSyncRule, runSyncRule } from "../../api/client";
 import { SyncResultScreen } from "./SyncResultScreen";
 
 export function SyncRuleScreen() {
@@ -13,9 +12,6 @@ export function SyncRuleScreen() {
   const [error, setError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [runningRuleId, setRunningRuleId] = useState<string | null>(null);
-  const [publicRepo, setPublicRepo] = useState("");
-  const [publicLabels, setPublicLabels] = useState("");
-  const [creatingPublicRule, setCreatingPublicRule] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -84,32 +80,6 @@ export function SyncRuleScreen() {
     }
   };
 
-  const handleCreatePublicRule = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const repo = publicRepo.trim();
-    if (!repo) return;
-    try {
-      setCreatingPublicRule(true);
-      const created = await createSyncRule({
-        repo,
-        include_labels: parseLabels(publicLabels),
-        exclude_labels: [],
-        issue_state: "open",
-        task_type: "github_issue",
-        default_priority: "normal",
-        dedupe_strategy: "update",
-        source_auth: "public",
-      });
-      setSyncRules([created.data, ...syncRules]);
-      setPublicRepo("");
-      setPublicLabels("");
-    } catch (err) {
-      alert(`创建公共同步规则失败: ${err instanceof Error ? err.message : "未知错误"}`);
-    } finally {
-      setCreatingPublicRule(false);
-    }
-  };
-
   if (syncResult) {
     return <SyncResultScreen result={syncResult} onClose={() => setSyncResult(null)} />;
   }
@@ -153,8 +123,9 @@ export function SyncRuleScreen() {
   return (
     <div className="stack">
       <PageHeader
-        title="仓库与同步规则"
-        sub="选择要纳入治理的仓库，并用规则驱动 Issue → Task 同步。"
+        title="同步规则"
+        sub="查看已接入仓库的同步状态，并用规则驱动 Issue → Task 同步。"
+        actions={<ButtonLink to="/repositories">仓库接入</ButtonLink>}
       />
       {error && (
         <Card title="错误" sub={error}>
@@ -177,34 +148,6 @@ export function SyncRuleScreen() {
             </Card>
           </div>
           <div className="col">
-            <Card title="公共仓库同步" sub="无需安装 GitHub App">
-              <form className="stack" onSubmit={handleCreatePublicRule}>
-                <label className="field">
-                  <span className="field-label">仓库</span>
-                  <input
-                    value={publicRepo}
-                    onChange={(event) => setPublicRepo(event.target.value)}
-                    placeholder="owner/repo"
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="field">
-                  <span className="field-label">包含标签</span>
-                  <input
-                    value={publicLabels}
-                    onChange={(event) => setPublicLabels(event.target.value)}
-                    placeholder="good first issue, bug"
-                    autoComplete="off"
-                  />
-                  <span className="field-hint">可选，逗号分隔；留空同步 open issue。</span>
-                </label>
-                <div className="row">
-                  <Button type="submit" disabled={creatingPublicRule || publicRepo.trim() === ""}>
-                    {creatingPublicRule ? "创建中..." : "添加公共规则"}
-                  </Button>
-                </div>
-              </form>
-            </Card>
             <Card title="同步规则" sub={`${syncRules.length} 条规则`} pad={false}>
               <DenseTable
                 columns={["仓库", "来源", "状态", "包含标签", "排除标签", "最后同步", "操作"]}
@@ -221,11 +164,4 @@ export function SyncRuleScreen() {
 
 function labels(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value : [];
-}
-
-function parseLabels(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }

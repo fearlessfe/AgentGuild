@@ -19,6 +19,7 @@ import { VersionDetail, VersionTree } from "../features/versions/VersionTree";
 import type { VersionView } from "../features/versions/versions.types";
 import { OnboardingScreen } from "../features/onboarding/OnboardingScreen";
 import { GitIntegrationScreen } from "../features/git/GitIntegrationScreen";
+import { RepositoryOnboardingScreen } from "../features/repositories/RepositoryOnboardingScreen";
 import { SyncRuleScreen } from "../features/sync/SyncRuleScreen";
 import { SyncResultScreen } from "../features/sync/SyncResultScreen";
 import { ExecutionDetailScreen } from "../features/executions/ExecutionDetailScreen";
@@ -34,8 +35,9 @@ import { useRailCollapsed } from "./useRailCollapsed";
 const MODULE_MAP: readonly [string, string][] = [
   ["/onboarding", "首次引导"],
   ["/git-integration", "Git 接入"],
+  ["/repositories", "仓库接入"],
   ["/sync-result", "同步结果"],
-  ["/sync", "仓库与规则"],
+  ["/sync", "同步规则"],
   ["/executions", "执行详情"],
   ["/submissions", "提交验证"],
   ["/reviews", "审核工作台"],
@@ -69,6 +71,7 @@ export function AppShell() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route path="/git-integration" element={<GitIntegrationScreen />} />
+            <Route path="/repositories" element={<RepositoryOnboardingScreen />} />
             <Route path="/sync" element={<SyncRuleScreen />} />
             <Route path="/tasks" element={<Workbench />} />
             <Route path="/tasks/:taskId" element={<Workbench />} />

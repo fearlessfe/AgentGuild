@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  FolderGit2,
   GitBranch,
   GitPullRequest,
   LayoutDashboard,
@@ -21,6 +22,7 @@ type RailItem = { to: string; icon: LucideIcon; label: string };
 
 const RAIL_ITEMS: readonly RailItem[] = [
   { to: "/onboarding", icon: LayoutDashboard, label: "总览" },
+  { to: "/repositories", icon: FolderGit2, label: "仓库接入" },
   { to: "/sync", icon: GitBranch, label: "同步" },
   { to: "/tasks", icon: SquareKanban, label: "任务中心" },
   { to: "/reviews", icon: GitPullRequest, label: "审核" },

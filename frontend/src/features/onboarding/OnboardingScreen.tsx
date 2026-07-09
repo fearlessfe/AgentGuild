@@ -24,6 +24,7 @@ export function OnboardingScreen() {
                 <ButtonLink to="/git-integration" variant="primary">
                   连接 GitHub
                 </ButtonLink>
+                <ButtonLink to="/repositories">设置仓库</ButtonLink>
                 <Button variant="ghost">稍后再说</Button>
               </div>
             </div>
