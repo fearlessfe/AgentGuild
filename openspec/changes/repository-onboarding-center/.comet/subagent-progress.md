@@ -4,10 +4,10 @@
 
 - Plan task: `Task 6: Final Verification and Documentation Sync`
 - OpenSpec mapping: `4.3 Run backend build/tests and frontend build/tests relevant to the changed surface.`
-- Stage: `done`
+- Stage: `final-fix`
 - Review mode: `standard`
 - TDD mode: `tdd`
-- Review/fix rounds: `0`
+- Review/fix rounds: `1`
 
 ## Dispatch
 
@@ -36,5 +36,8 @@
 
 ## Reviews
 
-- Final review: pending after all plan tasks
-- Unresolved feedback: none
+- Final review: important findings from `019f4622-4471-7cf0-9acf-f2e4c710924d` (Einstein)
+- Unresolved feedback:
+  - Show App repository listing error/empty state in onboarding UI.
+  - Key frontend added-state and local merge by `(source_type, full_name)` instead of `full_name` only.
+  - Minor accepted for now: public resolver base URL coupling to `cfg.GitHub.BaseURL`; not blocking this build, record for follow-up configuration hardening.
