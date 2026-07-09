@@ -1,4 +1,14 @@
-import { Bot, CircleDot, GitBranch, GitPullRequest, LayoutDashboard, Settings, SquareKanban } from "lucide-react";
+import {
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  GitBranch,
+  GitPullRequest,
+  LayoutDashboard,
+  Settings,
+  SquareKanban,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
@@ -20,6 +30,8 @@ const RAIL_ITEMS: readonly RailItem[] = [
 type RailProps = { collapsed: boolean; onToggle: () => void };
 
 export function Rail({ collapsed, onToggle }: RailProps) {
+  const ToggleIcon = collapsed ? ChevronRight : ChevronLeft;
+
   return (
     <nav className="rail" data-collapsed={collapsed} aria-label="主导航">
       <div className="rail-head">
@@ -33,7 +45,9 @@ export function Rail({ collapsed, onToggle }: RailProps) {
           aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
           aria-pressed={!collapsed}
         >
-          <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
+          <span aria-hidden="true">
+            <ToggleIcon size={16} strokeWidth={2} />
+          </span>
         </button>
       </div>
       {RAIL_ITEMS.map((item) => {

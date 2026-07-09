@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { GitPullRequest } from "lucide-react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AgentDetail } from "../features/agents/AgentDetail";
 import { AgentList } from "../features/agents/AgentList";
@@ -193,7 +194,7 @@ export function ReviewWorkspace() {
         <div className="card">
           <div className="empty-state">
             <span className="es-icon" aria-hidden="true">
-              ❖
+              <GitPullRequest size={18} strokeWidth={1.8} />
             </span>
             <div className="es-title">选择一次审核查看详情</div>
           </div>

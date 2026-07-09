@@ -1,4 +1,4 @@
-import { SquareKanban } from "lucide-react";
+import { SquareKanban, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -168,7 +168,7 @@ function MobileDrawer({ children, onClose }: { children: React.ReactNode; onClos
     >
       <div className="card-pad">
         <button className="icon-btn drawer-close" onClick={handleClose} aria-label="关闭详情">
-          ×
+          <X size={18} strokeWidth={2} aria-hidden="true" />
         </button>
         {children}
       </div>

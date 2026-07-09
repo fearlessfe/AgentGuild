@@ -1,4 +1,4 @@
-import { GitBranch, GitMerge } from "lucide-react";
+import { GitBranch, GitMerge, RefreshCcw } from "lucide-react";
 import { useState, useEffect } from "react";
 import { PageHeader, Card, Button, ProviderCard, StatusChip, ApiNote } from "../../ui";
 import { getGitHubApp, testGitHubApp, deleteGitHubApp, githubManifestUrl, type GitHubAppView } from "../../api/client";
@@ -118,7 +118,7 @@ export function GitIntegrationScreen() {
                   </div>
                 )}
                 <div className="row">
-                  <Button icon="⤿" onClick={handleTest} disabled={testing}>
+                  <Button icon={<RefreshCcw size={14} strokeWidth={1.8} />} onClick={handleTest} disabled={testing}>
                     {testing ? "检测中..." : "检测连接"}
                   </Button>
                   <Button variant="danger" onClick={handleDelete} disabled={deleting}>

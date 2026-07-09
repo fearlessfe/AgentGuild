@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { AgentStatus, AgentView } from "./agents.types";
 import { listAgents } from "./agents.api";
@@ -105,7 +106,9 @@ export function AgentList() {
             <span className="agent-scopes" title={scopeSummary(agent)}>
               {scopeSummary(agent)}
             </span>
-            <span className="agent-go">›</span>
+            <span className="agent-go" aria-hidden="true">
+              <ChevronRight size={14} strokeWidth={2} />
+            </span>
           </Link>
         ))}
       </div>

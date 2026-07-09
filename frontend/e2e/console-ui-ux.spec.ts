@@ -10,6 +10,27 @@ async function expectNoPageOverflow(page: Page) {
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
 }
 
+async function expectMinHitTargetHeight(page: Page, selector: string, minimumHeight = 44) {
+  const measurements = await page.locator(selector).evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        height: rect.height,
+        width: rect.width,
+        text: node.textContent?.trim() ?? "",
+        ariaLabel: node.getAttribute("aria-label") ?? "",
+      };
+    }),
+  );
+  expect(measurements.length).toBeGreaterThan(0);
+  for (const item of measurements) {
+    expect(
+      item.height,
+      `Expected "${item.ariaLabel || item.text || selector}" to be at least ${minimumHeight}px high, got ${item.width}x${item.height}`,
+    ).toBeGreaterThanOrEqual(minimumHeight);
+  }
+}
+
 async function expectReadableDiff(page: Page) {
   const measurements = await page.locator(".diff-table .line-content pre").evaluateAll((nodes) =>
     nodes
@@ -43,6 +64,10 @@ test.describe("console UI/UX baseline", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/reviews/review-1");
     await expect(page.getByRole("heading", { name: "审核工作台" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Unified" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Split" })).toHaveAttribute("aria-pressed", "false");
+    await expectMinHitTargetHeight(page, ".rail-toggle");
+    await expectMinHitTargetHeight(page, ".diff-toolbar button");
     await expectReadableDiff(page);
     await expectNoPageOverflow(page);
   });

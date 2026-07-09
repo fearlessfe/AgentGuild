@@ -1,3 +1,4 @@
+import { RefreshCcw } from "lucide-react";
 import { PageHeader, Card, Button, CheckRow, ApiNote } from "../../ui";
 import type { CheckState } from "../../ui";
 import { sharedData } from "../shared/mockData";
@@ -21,7 +22,7 @@ export function SubmissionValidationScreen() {
       <PageHeader
         title="提交与验证"
         sub={`${sharedData.taskId} · 验证 attempt 1`}
-        actions={<Button icon="⤿">平台重试</Button>}
+        actions={<Button icon={<RefreshCcw size={14} strokeWidth={1.8} />}>平台重试</Button>}
       />
       <div className="split-2">
         <div className="col">

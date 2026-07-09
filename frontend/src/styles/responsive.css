@@ -63,6 +63,12 @@
     overflow-x: auto;
   }
 
+  .diff-toolbar button {
+    min-height: 44px;
+    padding: 10px 12px;
+    touch-action: manipulation;
+  }
+
   .filter select,
   .filter input,
   .agent-toolbar select,
