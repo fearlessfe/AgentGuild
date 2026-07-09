@@ -26,9 +26,9 @@
 
 ## 5. Feedback States
 
-- [ ] 5.1 Improve loading states for task, agent, and review regions that currently render plain text or sparse placeholders.
-- [ ] 5.2 Ensure review decision actions and comment submission controls communicate pending state and prevent duplicate submission.
-- [ ] 5.3 Review empty and error states for the affected routes and align them with the shared UI primitives.
+- [x] 5.1 Improve loading states for task, agent, and review regions that currently render plain text or sparse placeholders.
+- [x] 5.2 Ensure review decision actions and comment submission controls communicate pending state and prevent duplicate submission.
+- [x] 5.3 Review empty and error states for the affected routes and align them with the shared UI primitives.
 
 ## 6. Final Verification
 

@@ -7,13 +7,13 @@
 
 ## Current Task
 
-- Plan task: `Task 5: Improve Feedback States`
-- OpenSpec task mapping: `5. Feedback States`
+- Plan task: `Task 6: Final Verification And Documentation Sync`
+- OpenSpec task mapping: `6. Final Verification`
 - Stage: `ready-to-dispatch`
 - Implementer: pending
 - Base commit: `pending`
-- Report: `.superpowers/sdd/task-5-report.md`
-- Brief: `.superpowers/sdd/task-5-brief.md`
+- Report: `.superpowers/sdd/task-6-report.md`
+- Brief: `.superpowers/sdd/task-6-brief.md`
 - RED evidence: pending
 - GREEN evidence: pending
 - Review/fix rounds: `1`
@@ -28,3 +28,4 @@
 - Task 2: complete (`2223065`, review diff RED/GREEN and build verified).
 - Task 3: complete (`e3e91bb`, mobile list RED/GREEN and build verified).
 - Task 4: complete (`7c06ef6`, plus test fixes `40f881d` and `a43c564`; frontend unit/e2e/build verified).
+- Task 5: complete (`2ccafcf`; frontend focused/unit/e2e/build verified).

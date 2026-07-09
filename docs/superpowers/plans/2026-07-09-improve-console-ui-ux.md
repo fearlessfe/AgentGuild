@@ -524,7 +524,7 @@ git commit -m "feat: standardize console icons and mobile targets"
 - Consumes: existing TanStack Query `isPending` and mutation state.
 - Produces: clear pending/disabled/recovery UI for review and Agent mutations.
 
-- [ ] **Step 1: Add a shared pending label pattern**
+- [x] **Step 1: Add a shared pending label pattern**
 
 In affected buttons, change button copy during pending states:
 
@@ -534,7 +534,7 @@ In affected buttons, change button copy during pending states:
 
 Apply equivalent copy to revision/reject decision buttons, comment submission, and Agent registration submit.
 
-- [ ] **Step 2: Ensure duplicate submission is blocked**
+- [x] **Step 2: Ensure duplicate submission is blocked**
 
 For review decision buttons, keep or add:
 
@@ -550,7 +550,7 @@ const [submittingComment, setSubmittingComment] = useState(false);
 
 Wrap `submitComment` with `setSubmittingComment(true)` and reset in `finally`.
 
-- [ ] **Step 3: Add visible recovery paths**
+- [x] **Step 3: Add visible recovery paths**
 
 For mutation errors, ensure each affected form renders a local `role="alert"` message with the error and leaves the user's input intact. Use existing `.auth-error` or add a shared `.form-error` style:
 
@@ -565,7 +565,7 @@ For mutation errors, ensure each affected form renders a local `role="alert"` me
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run feedback state tests**
 
 Run:
 
@@ -576,7 +576,7 @@ cd frontend && npx playwright test e2e/console-ui-ux.spec.ts
 
 Expected: tests pass and pending states do not allow duplicate submission.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit feedback state changes**
 
 ```bash
 git add frontend/src/features/reviews/ReviewPage.tsx frontend/src/features/reviews/DiffViewer.tsx frontend/src/features/agents/AgentRegister.tsx frontend/src/styles/components.css frontend/src/styles/review.css
