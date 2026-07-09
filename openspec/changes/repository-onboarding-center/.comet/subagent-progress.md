@@ -13,8 +13,8 @@
 
 - Brief: `.superpowers/sdd/task-3-brief.md`
 - Report: `.superpowers/sdd/task-3-report.md`
-- Base commit: `d2f4726`
-- Implementer: pending
+- Base commit: `b150718`
+- Implementer: `019f45fa-7de4-7503-9dcd-cd802b809f9b` (Bernoulli)
 
 ## Evidence
 
