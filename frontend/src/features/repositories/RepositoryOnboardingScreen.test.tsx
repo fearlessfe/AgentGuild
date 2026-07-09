@@ -64,6 +64,37 @@ describe("RepositoryOnboardingScreen", () => {
     expect(screen.getByRole("button", { name: "打开 Git 接入" })).toBeVisible();
   });
 
+  it("offers direct GitHub App installation when the App was created but not installed", async () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: { ...originalLocation, href: "" },
+    });
+    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
+      data: summaryFixture({
+        github_app: {
+          app_id: 123,
+          app_slug: "agentguild-test",
+          installation_id: 0,
+          configured: true,
+        },
+      }),
+      meta: { server_time: "", resource_version: 0 },
+    });
+    vi.spyOn(client, "githubInstallUrl").mockReturnValue("/api/oauth/github/app/install");
+
+    render(<RepositoryOnboardingScreen />);
+
+    expect(await screen.findByText("已创建，待安装")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "安装 GitHub App" }));
+    expect(window.location.href).toBe("/api/oauth/github/app/install");
+
+    Object.defineProperty(window, "location", {
+      writable: true,
+      value: originalLocation,
+    });
+  });
+
   it("shows an empty state when a configured GitHub App has no visible repositories", async () => {
     vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
       data: summaryFixture({ app_repositories: { items: [] } }),

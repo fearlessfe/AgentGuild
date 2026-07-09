@@ -18,6 +18,7 @@ type GitHubAppManager interface {
 	GitHubAppService
 	IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)
 	Upsert(context.Context, UpsertGitHubApp) error
+	Install(context.Context, string, int64) (GitHubAppView, error)
 	Get(context.Context, string) (GitHubAppView, error)
 	Delete(context.Context, string) error
 }
@@ -25,16 +26,16 @@ type GitHubAppManager interface {
 // CredentialService issues and revokes short-lived, execution-scoped Git
 // credentials through a CredentialIssuer while persisting only metadata.
 type CredentialService struct {
-	store       Store
-	appService  GitHubAppService
-	provider    string
-	newID       func() string
+	store      Store
+	appService GitHubAppService
+	provider   string
+	newID      func() string
 }
 
 // Options configures a CredentialService.
 type Options struct {
-	Provider     string
-	NewID        func() string
+	Provider string
+	NewID    func() string
 }
 
 // NewCredentialService creates a CredentialService.
@@ -100,7 +101,7 @@ type OnboardedRepositoryRecord struct {
 
 // Envelope wraps a response with transaction-level metadata.
 type Envelope[T any] struct {
-	Data T   `json:"data"`
+	Data T    `json:"data"`
 	Meta Meta `json:"meta"`
 }
 
@@ -228,20 +229,20 @@ type ValidationJobView struct {
 
 // SubmissionView is the public shape of a submission.
 type SubmissionView struct {
-	ID              string                    `json:"id"`
-	TenantID        string                    `json:"tenant_id"`
-	TaskID          string                    `json:"task_id"`
-	ExecutionID     string                    `json:"execution_id"`
-	Repo            string                    `json:"repo"`
-	Branch          string                    `json:"branch"`
-	CommitSHA       string                    `json:"commit_sha"`
-	BaseCommitSHA   string                    `json:"base_commit_sha"`
-	Summary         string                    `json:"summary"`
-	Tests           *string                   `json:"tests,omitempty"`
-	Evidence        []byte                    `json:"evidence,omitempty"`
-	DiffFingerprint string                    `json:"diff_fingerprint"`
+	ID              string                     `json:"id"`
+	TenantID        string                     `json:"tenant_id"`
+	TaskID          string                     `json:"task_id"`
+	ExecutionID     string                     `json:"execution_id"`
+	Repo            string                     `json:"repo"`
+	Branch          string                     `json:"branch"`
+	CommitSHA       string                     `json:"commit_sha"`
+	BaseCommitSHA   string                     `json:"base_commit_sha"`
+	Summary         string                     `json:"summary"`
+	Tests           *string                    `json:"tests,omitempty"`
+	Evidence        []byte                     `json:"evidence,omitempty"`
+	DiffFingerprint string                     `json:"diff_fingerprint"`
 	Status          gitdomain.SubmissionStatus `json:"status"`
-	ValidationJobID *string                   `json:"validation_job_id,omitempty"`
-	CreatedAt       time.Time                 `json:"created_at"`
-	UpdatedAt       time.Time                 `json:"updated_at"`
+	ValidationJobID *string                    `json:"validation_job_id,omitempty"`
+	CreatedAt       time.Time                  `json:"created_at"`
+	UpdatedAt       time.Time                  `json:"updated_at"`
 }

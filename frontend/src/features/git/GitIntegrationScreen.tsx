@@ -1,7 +1,7 @@
-import { GitBranch, GitMerge, RefreshCcw } from "lucide-react";
+import { ExternalLink, GitBranch, GitMerge, RefreshCcw } from "lucide-react";
 import { useState, useEffect } from "react";
 import { PageHeader, Card, Button, ProviderCard, StatusChip, ApiNote } from "../../ui";
-import { getGitHubApp, testGitHubApp, deleteGitHubApp, githubManifestUrl, type GitHubAppView } from "../../api/client";
+import { getGitHubApp, testGitHubApp, deleteGitHubApp, githubManifestUrl, githubInstallUrl, type GitHubAppView } from "../../api/client";
 
 const GITHUB_PERMISSIONS = ["Contents — 只读", "Issues — 读写", "Checks — 只读", "Metadata — 只读"];
 
@@ -31,6 +31,10 @@ export function GitIntegrationScreen() {
 
   const handleConnect = () => {
     window.location.href = githubManifestUrl();
+  };
+
+  const handleInstall = () => {
+    window.location.href = githubInstallUrl();
   };
 
   const handleTest = async () => {
@@ -64,6 +68,8 @@ export function GitIntegrationScreen() {
   };
 
   const isConfigured = githubApp?.configured ?? false;
+  const isInstalled = Boolean(githubApp?.installation_id);
+  const canInstall = isConfigured && !isInstalled && Boolean(githubApp?.app_slug);
 
   return (
     <div className="stack">
@@ -78,13 +84,15 @@ export function GitIntegrationScreen() {
             <ProviderCard
               logo={<GitBranch size={18} strokeWidth={1.8} />}
               name="GitHub"
-              note={githubApp?.app_slug ? `已连接 · ${githubApp.app_slug}` : "已连接"}
+              note={githubApp?.app_slug ? `${isInstalled ? "已安装" : "待安装"} · ${githubApp.app_slug}` : "已创建"}
               permissions={GITHUB_PERMISSIONS}
             >
               <div className="stack-sm">
                 <div className="row-between">
                   <span className="card-sub">状态</span>
-                  <StatusChip tone="success">已配置</StatusChip>
+                  <StatusChip tone={isInstalled ? "success" : "warning"}>
+                    {isInstalled ? "已安装" : "已创建，待安装"}
+                  </StatusChip>
                 </div>
                 <div className="field">
                   <label className="field-label">App ID</label>
@@ -95,7 +103,7 @@ export function GitIntegrationScreen() {
                 <div className="field">
                   <label className="field-label">Installation ID</label>
                   <div className="input">
-                    <span>{githubApp?.installation_id}</span>
+                    <span>{isInstalled ? githubApp?.installation_id : "待安装"}</span>
                   </div>
                 </div>
                 <div className="field">
@@ -118,9 +126,19 @@ export function GitIntegrationScreen() {
                   </div>
                 )}
                 <div className="row">
-                  <Button icon={<RefreshCcw size={14} strokeWidth={1.8} />} onClick={handleTest} disabled={testing}>
-                    {testing ? "检测中..." : "检测连接"}
-                  </Button>
+                  {isInstalled ? (
+                    <Button icon={<RefreshCcw size={14} strokeWidth={1.8} />} onClick={handleTest} disabled={testing}>
+                      {testing ? "检测中..." : "检测连接"}
+                    </Button>
+                  ) : canInstall ? (
+                    <Button icon={<ExternalLink size={14} strokeWidth={1.8} />} onClick={handleInstall}>
+                      安装 GitHub App
+                    </Button>
+                  ) : (
+                    <Button icon={<ExternalLink size={14} strokeWidth={1.8} />} onClick={handleConnect}>
+                      重新连接 GitHub
+                    </Button>
+                  )}
                   <Button variant="danger" onClick={handleDelete} disabled={deleting}>
                     {deleting ? "删除中..." : "删除"}
                   </Button>

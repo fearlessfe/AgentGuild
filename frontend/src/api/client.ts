@@ -286,6 +286,7 @@ export const updateSyncRule = (id: string, input: SyncRuleInput) => apiRequest<S
 export const deleteSyncRule = (id: string) => apiRequest<{ deleted: boolean }>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const runSyncRule = (id: string) => apiRequest<SyncResult>(`/v1/sync-rules/${encodeURIComponent(id)}:run`, { method: "POST" });
 export const githubManifestUrl = () => `${base}/oauth/github/app/manifest`;
+export const githubInstallUrl = () => `${base}/oauth/github/app/install`;
 
 const demoTasks: TaskView[] = [
   ["AG-192", "修复批量退款时的余额竞争条件", "open", "billing-service", "TypeScript"],

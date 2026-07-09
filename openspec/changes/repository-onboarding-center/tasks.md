@@ -18,9 +18,11 @@
 - [x] 3.1 Update dashboard or overview actions to point to the repository onboarding module.
 - [x] 3.2 Refocus the sync rules page on automation rules and link repository setup to onboarding.
 - [x] 3.3 Keep existing GitHub App configuration behavior compatible with the new onboarding entry.
+- [x] 3.4 Add Dokploy-style GitHub App install continuation: show created-but-not-installed state, provide install redirect, and preserve App credentials when GitHub returns an installation id.
 
 ## 4. Verification
 
 - [x] 4.1 Add backend tests for repository onboarding service and REST behavior, including tenant isolation and admin-only mutations.
 - [x] 4.2 Add frontend tests for navigation discoverability, App repository selection, and public repository addition.
 - [x] 4.3 Run backend build/tests and frontend build/tests relevant to the changed surface.
+- [x] 4.4 Add regression tests for GitHub App install continuation and installed callback credential preservation.

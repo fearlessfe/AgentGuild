@@ -36,6 +36,10 @@ export function RepositoryOnboardingScreen() {
   const onboarded = summary?.onboarded_repositories.items ?? [];
   const appRepositories = summary?.app_repositories.items ?? [];
   const appRepositoriesError = summary?.app_repositories_error;
+  const githubApp = summary?.github_app;
+  const isGitHubAppConfigured = githubApp?.configured ?? false;
+  const isGitHubAppInstalled = Boolean(githubApp?.installation_id);
+  const canInstallGitHubApp = isGitHubAppConfigured && !isGitHubAppInstalled && Boolean(githubApp?.app_slug);
   const showAppRepositoriesEmpty =
     !loading && summary?.github_app.configured && !appRepositoriesError && appRepositories.length === 0;
   const onboardedKeys = useMemo(() => new Set(onboarded.map(repositoryInventoryKey)), [onboarded]);
@@ -147,7 +151,13 @@ export function RepositoryOnboardingScreen() {
         <div className="col">
           <Card
             title="Step 1 · GitHub App"
-            sub={summary?.github_app.configured ? "已连接，可选择安装仓库" : "未连接，先完成 GitHub App 接入"}
+            sub={
+              isGitHubAppConfigured
+                ? isGitHubAppInstalled
+                  ? "已安装，可选择授权仓库"
+                  : "已创建，继续安装并选择仓库"
+                : "未连接，先完成 GitHub App 接入"
+            }
           >
             {loading ? (
               <p className="text-sm">正在加载 GitHub App 状态...</p>
@@ -155,16 +165,16 @@ export function RepositoryOnboardingScreen() {
               <div className="stack-sm">
                 <div className="row-between">
                   <span className="card-sub">状态</span>
-                  <StatusChip tone={summary?.github_app.configured ? "success" : "neutral"}>
-                    {summary?.github_app.configured ? "已配置" : "未配置"}
+                  <StatusChip tone={isGitHubAppInstalled ? "success" : isGitHubAppConfigured ? "warning" : "neutral"}>
+                    {isGitHubAppInstalled ? "已安装" : isGitHubAppConfigured ? "已创建，待安装" : "未配置"}
                   </StatusChip>
                 </div>
-                {summary?.github_app.configured ? (
+                {isGitHubAppConfigured ? (
                   <>
                     <div className="field">
                       <span className="field-label">App</span>
                       <div className="input">
-                        <span>{summary.github_app.app_slug ?? `App ${summary.github_app.app_id ?? ""}`}</span>
+                        <span>{githubApp?.app_slug ?? `App ${githubApp?.app_id ?? ""}`}</span>
                       </div>
                     </div>
                     <p className="field-hint">私钥材料只保存在服务端，不会回传到前端。</p>
@@ -173,6 +183,14 @@ export function RepositoryOnboardingScreen() {
                   <p className="card-sub">请先在 Git 接入页安装或更新 GitHub App。</p>
                 )}
                 <div className="row">
+                  {canInstallGitHubApp ? (
+                    <Button
+                      icon={<ExternalLink size={14} strokeWidth={1.8} />}
+                      onClick={() => (window.location.href = client.githubInstallUrl())}
+                    >
+                      安装 GitHub App
+                    </Button>
+                  ) : null}
                   <Button icon={<ExternalLink size={14} strokeWidth={1.8} />} onClick={() => (window.location.href = "/git-integration")}>
                     打开 Git 接入
                   </Button>

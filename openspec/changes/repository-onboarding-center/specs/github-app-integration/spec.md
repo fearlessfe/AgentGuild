@@ -26,3 +26,15 @@ The system SHALL expose GitHub App installation repository visibility in a way t
 - **WHEN** an admin opens repository onboarding
 - **THEN** the UI shows the installed App's public details
 - **AND** the UI does not expose stored private key material
+
+#### Scenario: Admin installs an App after manifest creation
+- **GIVEN** a tenant has created a GitHub App but has no installation id
+- **WHEN** an admin opens GitHub App setup or repository onboarding
+- **THEN** the UI shows the App as created but awaiting installation
+- **AND** the UI provides an install action that redirects through a signed server endpoint
+
+#### Scenario: GitHub returns installation details
+- **GIVEN** a tenant has created a GitHub App through the manifest flow
+- **WHEN** GitHub redirects back with an installation id
+- **THEN** the system stores the installation id
+- **AND** the system preserves the existing App private key and public App metadata

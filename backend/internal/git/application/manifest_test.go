@@ -88,6 +88,18 @@ func TestManifestVerifyStateRejectsTampered(t *testing.T) {
 	require.Error(t, svc.VerifyState("", "tenant-1"))
 }
 
+func TestManifestBuildInstallURLIncludesVerifiableState(t *testing.T) {
+	svc := newManifestService(t, newGitHubAppManager(t), "")
+
+	installURL, err := svc.BuildInstallURL("tenant-1", "agentguild-test")
+
+	require.NoError(t, err)
+	require.Contains(t, installURL, "https://github.com/apps/agentguild-test/installations/new?state=")
+	state := strings.TrimPrefix(installURL, "https://github.com/apps/agentguild-test/installations/new?state=")
+	require.NotEmpty(t, state)
+	require.NoError(t, svc.VerifyState(state, "tenant-1"))
+}
+
 func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	ctx := context.Background()
 

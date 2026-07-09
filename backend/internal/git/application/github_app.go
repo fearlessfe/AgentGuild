@@ -116,6 +116,27 @@ func (s *gitHubAppService) Get(ctx context.Context, tenantID string) (GitHubAppV
 	return toGitHubAppView(record), nil
 }
 
+// Install records the GitHub App installation selected on GitHub while
+// preserving the App credentials returned by the manifest conversion.
+func (s *gitHubAppService) Install(ctx context.Context, tenantID string, installationID int64) (GitHubAppView, error) {
+	if tenantID == "" {
+		return GitHubAppView{}, invalid("tenant_id")
+	}
+	if installationID == 0 {
+		return GitHubAppView{}, invalid("installation_id")
+	}
+	record, err := s.repo.GetByTenant(ctx, tenantID)
+	if err != nil {
+		return GitHubAppView{}, err
+	}
+	copy := *record
+	copy.InstallationID = installationID
+	if err := s.repo.Upsert(ctx, &copy); err != nil {
+		return GitHubAppView{}, err
+	}
+	return s.Get(ctx, tenantID)
+}
+
 // Delete removes a tenant's GitHub App configuration.
 func (s *gitHubAppService) Delete(ctx context.Context, tenantID string) error {
 	if tenantID == "" {

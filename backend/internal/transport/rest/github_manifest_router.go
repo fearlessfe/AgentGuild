@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"agentguild.dev/agentguild/backend/internal/git"
-	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 )
 
 // githubManifest builds a GitHub App manifest + signed state for the current
@@ -59,6 +58,23 @@ func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/git-integration?connected=1", http.StatusFound)
 }
 
+// githubAppInstall redirects admins to GitHub's installation picker for an
+// already-created App while carrying a fresh signed state token.
+func (s *Server) githubAppInstall(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r)
+	view, err := s.gitHubAppManager.Get(r.Context(), principal.TenantID)
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	installURL, err := s.manifest.BuildInstallURL(principal.TenantID, view.AppSlug)
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	http.Redirect(w, r, installURL, http.StatusFound)
+}
+
 // githubAppInstalled captures the installation_id from GitHub's setup redirect,
 // verifies state, and re-persists the tenant's App configuration with it.
 func (s *Server) githubAppInstalled(w http.ResponseWriter, r *http.Request) {
@@ -74,19 +90,7 @@ func (s *Server) githubAppInstalled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := s.gitHubAppManager.Get(r.Context(), principal.TenantID)
-	if err != nil {
-		mapDomainError(w, err, principal)
-		return
-	}
-	if err := s.gitHubAppManager.Upsert(r.Context(), gitapp.UpsertGitHubApp{
-		TenantID:       view.TenantID,
-		Provider:       view.Provider,
-		AppID:          view.AppID,
-		InstallationID: installationID,
-		BaseURL:        view.BaseURL,
-		AppSlug:        view.AppSlug,
-	}); err != nil {
+	if _, err := s.gitHubAppManager.Install(r.Context(), principal.TenantID, installationID); err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}

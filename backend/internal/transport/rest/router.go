@@ -235,6 +235,7 @@ func (s *Server) Router() http.Handler {
 	}
 	if s.manifest != nil {
 		r.With(s.requireSession).Get("/oauth/github/app/manifest", s.githubManifest)
+		r.With(s.requireSession).Get("/oauth/github/app/install", s.githubAppInstall)
 		r.With(s.requireSession).Get("/oauth/github/app/callback", s.githubManifestCallback)
 		r.With(s.requireSession).Get("/oauth/github/app/installed", s.githubAppInstalled)
 	}

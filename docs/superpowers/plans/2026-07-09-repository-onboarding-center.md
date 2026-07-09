@@ -470,3 +470,54 @@ Check off completed implementation tasks in `openspec/changes/repository-onboard
 git add openspec/changes/repository-onboarding-center/tasks.md
 git commit -m "chore: mark repository onboarding tasks complete"
 ```
+
+---
+
+### Task 7: Dokploy-style GitHub App Install Continuation
+
+**Reason for increment:** Manual review against Dokploy's GitHub setup flow found the existing implementation only created the GitHub App manifest and did not complete the explicit install/authorize-repositories continuation inside this change.
+
+**Files:**
+- Modify: `backend/internal/git/application/contracts.go`
+- Modify: `backend/internal/git/application/github_app.go`
+- Modify: `backend/internal/git/application/github_app_test.go`
+- Modify: `backend/internal/git/application/manifest.go`
+- Modify: `backend/internal/git/application/manifest_test.go`
+- Modify: `backend/internal/transport/rest/github_manifest_router.go`
+- Modify: `backend/internal/transport/rest/github_manifest_router_test.go`
+- Modify: `backend/internal/transport/rest/router.go`
+- Modify: `frontend/src/api/client.ts`
+- Modify: `frontend/src/features/git/GitIntegrationScreen.tsx`
+- Create: `frontend/src/features/git/GitIntegrationScreen.test.tsx`
+- Modify: `frontend/src/features/repositories/RepositoryOnboardingScreen.tsx`
+- Modify: `frontend/src/features/repositories/RepositoryOnboardingScreen.test.tsx`
+- Modify: `openspec/changes/repository-onboarding-center/specs/github-app-integration/spec.md`
+- Modify: `openspec/changes/repository-onboarding-center/tasks.md`
+
+- [x] **Step 1: Add failing backend tests for installation preservation**
+
+Add tests proving that an installed callback records `installation_id` without clearing the manifest-created private key, App slug, or other saved App metadata.
+
+- [x] **Step 2: Implement GitHub App installation persistence**
+
+Add `GitHubAppManager.Install(ctx, tenantID, installationID)` and route `/oauth/github/app/installed` through it instead of rebuilding an incomplete `UpsertGitHubApp` command.
+
+- [x] **Step 3: Add failing backend tests for install redirect**
+
+Add tests proving `/oauth/github/app/install` redirects to GitHub's App installation picker with a signed state token.
+
+- [x] **Step 4: Implement install redirect endpoint**
+
+Add `ManifestService.BuildInstallURL` and wire `/oauth/github/app/install`.
+
+- [x] **Step 5: Add failing frontend tests for created-but-not-installed state**
+
+Cover both `/git-integration` and `/repositories` so admins can continue installation from either first-step surface.
+
+- [x] **Step 6: Implement frontend install actions**
+
+Expose `githubInstallUrl()`, show `已创建，待安装`, and provide `安装 GitHub App` buttons before showing installed connection checks.
+
+- [x] **Step 7: Run targeted verification**
+
+Run backend and frontend targeted tests covering the installation continuation path.

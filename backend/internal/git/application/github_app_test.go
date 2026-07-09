@@ -80,6 +80,36 @@ func TestGitHubAppUpsertAllowsZeroInstallationID(t *testing.T) {
 	require.True(t, view.Configured)
 }
 
+func TestGitHubAppInstallPreservesAppCredentials(t *testing.T) {
+	ctx := context.Background()
+	manager := newGitHubAppManager(t)
+	key := generateRSAPrivateKeyPEM(t)
+
+	err := manager.Upsert(ctx, application.UpsertGitHubApp{
+		TenantID:      "tenant-1",
+		Provider:      "github",
+		AppID:         1,
+		PrivateKey:    key,
+		BaseURL:       "https://api.github.com",
+		WebhookSecret: "webhook-secret",
+		ClientID:      "client-id",
+		ClientSecret:  "client-secret",
+		AppSlug:       "agentguild-test",
+	})
+	require.NoError(t, err)
+
+	view, err := manager.Install(ctx, "tenant-1", 42)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(42), view.InstallationID)
+	require.Equal(t, "agentguild-test", view.AppSlug)
+
+	reloaded, err := manager.Get(ctx, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, int64(42), reloaded.InstallationID)
+	require.Equal(t, "agentguild-test", reloaded.AppSlug)
+}
+
 func TestGitHubAppUpsertDefaultsProviderAndBaseURL(t *testing.T) {
 	ctx := context.Background()
 	manager := newGitHubAppManager(t)

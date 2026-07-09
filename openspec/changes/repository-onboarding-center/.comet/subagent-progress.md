@@ -2,8 +2,8 @@
 
 ## Current Task
 
-- Plan task: `Task 6: Final Verification and Documentation Sync`
-- OpenSpec mapping: `4.3 Run backend build/tests and frontend build/tests relevant to the changed surface.`
+- Plan task: `Task 7: Dokploy-style GitHub App Install Continuation`
+- OpenSpec mapping: `3.4 Add Dokploy-style GitHub App install continuation: show created-but-not-installed state, provide install redirect, and preserve App credentials when GitHub returns an installation id.`
 - Stage: `done`
 - Review mode: `standard`
 - TDD mode: `tdd`
@@ -51,3 +51,26 @@
   - `cd backend && go build ./...` PASS after final fixes.
   - `cd frontend && npm test -- --run` PASS: 14 files / 69 tests after final fixes.
   - `cd frontend && npm run build` PASS after final fixes.
+
+## Incremental Evidence: Dokploy-style Install Continuation
+
+- RED:
+  - `cd backend && go test ./internal/git/application ./internal/transport/rest -run 'GitHubAppInstall|GitHubManifest_Installed' -count=1`
+    - FAIL: `GitHubAppManager` had no `Install`; installed callback cleared stored private key.
+  - `cd backend && go test ./internal/git/application ./internal/transport/rest -run 'ManifestBuildInstallURL|GitHubManifest_InstallRedirect' -count=1`
+    - FAIL: `BuildInstallURL` missing and `/oauth/github/app/install` returned 404.
+  - `cd frontend && npm test -- --run src/features/git/GitIntegrationScreen.test.tsx`
+    - FAIL: `githubInstallUrl` missing.
+  - `cd frontend && npm test -- --run src/features/repositories/RepositoryOnboardingScreen.test.tsx`
+    - FAIL: repository onboarding Step 1 did not show created-but-not-installed state.
+- GREEN:
+  - `cd backend && go test ./internal/git/application ./internal/transport/rest -run 'GitHubAppInstall|GitHubManifest_Installed|ManifestBuildInstallURL|GitHubManifest_InstallRedirect' -count=1` PASS.
+  - `cd frontend && npm test -- --run src/features/git/GitIntegrationScreen.test.tsx` PASS: 3 tests.
+  - `cd frontend && npm test -- --run src/features/repositories/RepositoryOnboardingScreen.test.tsx` PASS: 7 tests.
+  - `cd backend && go test ./cmd/agentguild-api ./internal/git/application ./internal/transport/rest -count=1` PASS.
+  - `cd backend && go build ./...` PASS.
+  - `cd frontend && npm test -- --run` PASS: 15 files / 72 tests.
+  - `cd frontend && npm run build` PASS.
+  - Compatibility recheck after old no-`app_slug` local configuration was observed:
+    - `cd frontend && npm test -- --run src/features/git/GitIntegrationScreen.test.tsx src/features/repositories/RepositoryOnboardingScreen.test.tsx` PASS: 10 tests.
+    - `cd frontend && npm run build` PASS.

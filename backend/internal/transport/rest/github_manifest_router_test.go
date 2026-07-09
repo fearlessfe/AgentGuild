@@ -57,6 +57,60 @@ func TestGitHubManifest_CallbackBadState(t *testing.T) {
 	}
 }
 
+func TestGitHubManifest_InstallRedirectUsesAppSlug(t *testing.T) {
+	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{
+		"tenant-1": {
+			TenantID:       "tenant-1",
+			Provider:       "github",
+			AppID:          123,
+			PrivateKey:     "PRIVATE KEY",
+			BaseURL:        "https://api.github.com",
+			AppSlug:        "agentguild-test",
+			InstallationID: 0,
+		},
+	}}
+	svc := newManifestService(manager)
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
+
+	res := getWithSession(t, server, "/oauth/github/app/install", sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusFound, res.Code)
+	location := res.Header().Get("Location")
+	require.Contains(t, location, "https://github.com/apps/agentguild-test/installations/new?state=")
+	state := strings.TrimPrefix(location, "https://github.com/apps/agentguild-test/installations/new?state=")
+	require.NoError(t, svc.VerifyState(state, "tenant-1"))
+}
+
+func TestGitHubManifest_InstalledPreservesExistingAppCredentials(t *testing.T) {
+	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{
+		"tenant-1": {
+			TenantID:       "tenant-1",
+			Provider:       "github",
+			AppID:          123,
+			PrivateKey:     "PRIVATE KEY",
+			BaseURL:        "https://api.github.com",
+			WebhookSecret:  "webhook-secret",
+			ClientID:       "client-id",
+			ClientSecret:   "client-secret",
+			AppSlug:        "agentguild-test",
+			InstallationID: 0,
+		},
+	}}
+	svc := newManifestService(manager)
+	_, state, _, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
+
+	res := getWithSession(t, server, "/oauth/github/app/installed?installation_id=456&state="+state, sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusFound, res.Code)
+	require.Equal(t, "/git-integration?installed=1", res.Header().Get("Location"))
+	record := manager.store["tenant-1"]
+	require.Equal(t, int64(456), record.InstallationID)
+	require.Equal(t, "PRIVATE KEY", record.PrivateKey)
+	require.Equal(t, "agentguild-test", record.AppSlug)
+}
+
 func TestGitHubManifest_TestConnectionOK(t *testing.T) {
 	manager := &fakeGitHubAppManager{
 		store: map[string]*gitapp.GitHubAppRecord{},

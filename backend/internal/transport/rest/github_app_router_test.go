@@ -27,9 +27,9 @@ type fakeGitHubAppManager struct {
 }
 
 type githubAppCall struct {
-	method    string
-	tenantID  string
-	payload   any
+	method   string
+	tenantID string
+	payload  any
 }
 
 func (f *fakeGitHubAppManager) Driver(ctx context.Context, tenantID string) (git.Driver, error) {
@@ -79,6 +79,23 @@ func (f *fakeGitHubAppManager) Upsert(ctx context.Context, cmd gitapp.UpsertGitH
 	return nil
 }
 
+func (f *fakeGitHubAppManager) Install(ctx context.Context, tenantID string, installationID int64) (gitapp.GitHubAppView, error) {
+	f.calls = append(f.calls, githubAppCall{method: "Install", tenantID: tenantID, payload: installationID})
+	record, ok := f.store[tenantID]
+	if !ok {
+		return gitapp.GitHubAppView{}, git.ErrGitHubAppNotConfigured
+	}
+	copy := *record
+	copy.InstallationID = installationID
+	now := time.Now().UTC().Truncate(time.Second)
+	if copy.CreatedAt.IsZero() {
+		copy.CreatedAt = now
+	}
+	copy.UpdatedAt = now
+	f.store[tenantID] = &copy
+	return toGitHubAppView(&copy), nil
+}
+
 func (f *fakeGitHubAppManager) Delete(ctx context.Context, tenantID string) error {
 	f.calls = append(f.calls, githubAppCall{method: "Delete", tenantID: tenantID})
 	if f.deleteErr != nil {
@@ -98,6 +115,7 @@ func toGitHubAppView(record *gitapp.GitHubAppRecord) gitapp.GitHubAppView {
 		AppID:          record.AppID,
 		InstallationID: record.InstallationID,
 		BaseURL:        record.BaseURL,
+		AppSlug:        record.AppSlug,
 		Configured:     true,
 		CreatedAt:      record.CreatedAt,
 		UpdatedAt:      record.UpdatedAt,

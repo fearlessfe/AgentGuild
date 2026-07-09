@@ -273,6 +273,10 @@ func (fakeGitHubApps) Upsert(context.Context, application.UpsertGitHubApp) error
 	return nil
 }
 
+func (a fakeGitHubApps) Install(context.Context, string, int64) (application.GitHubAppView, error) {
+	return a.view, nil
+}
+
 func (a fakeGitHubApps) Get(context.Context, string) (application.GitHubAppView, error) {
 	if a.getErr != nil {
 		return application.GitHubAppView{}, a.getErr

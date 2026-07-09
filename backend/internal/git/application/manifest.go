@@ -21,6 +21,8 @@ const manifestRedirectURL = "https://github.com/settings/apps/new"
 // code for App credentials.
 const defaultConversionsBaseURL = "https://api.github.com"
 
+const githubAppInstallBaseURL = "https://github.com/apps"
+
 // stateTTL bounds how long a signed manifest state token stays valid.
 const stateTTL = 15 * time.Minute
 
@@ -133,6 +135,22 @@ func (m *ManifestService) BuildManifest(tenantID string) (string, string, string
 		ExpiresAt: m.now().Add(stateTTL),
 	})
 	return string(body), state, manifestRedirectURL, nil
+}
+
+// BuildInstallURL returns the GitHub URL for installing an already-created App.
+func (m *ManifestService) BuildInstallURL(tenantID, appSlug string) (string, error) {
+	if tenantID == "" {
+		return "", invalid("tenant_id")
+	}
+	appSlug = strings.TrimSpace(appSlug)
+	if appSlug == "" {
+		return "", invalid("app_slug")
+	}
+	state := m.signState(manifestState{
+		TenantID:  tenantID,
+		ExpiresAt: m.now().Add(stateTTL),
+	})
+	return fmt.Sprintf("%s/%s/installations/new?state=%s", githubAppInstallBaseURL, appSlug, state), nil
 }
 
 // VerifyState validates a state token against the given tenant: HMAC must be
