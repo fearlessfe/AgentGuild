@@ -149,6 +149,7 @@ make db-down        # docker compose down
   - `SESSION_COOKIE_SECURE`：cookie secure 标志，默认 `false`
   - `AGENT_RSA_PRIVATE_KEY_PEM` 或 `AGENT_RSA_PRIVATE_KEY_PATH`：用于签发 Agent access token
 - GitHub App（可选；未配置则 git 交付与验证禁用）：
+  - `GITHUB_APP_PUBLIC_BASE_URL`：`WEB_ENABLED=true` 时必填；AgentGuild 的公网 HTTP(S) origin，不包含路径、query 或 fragment（生产示例：`https://agentguild.example.com`）
   - 全局默认：`GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY`、`GITHUB_INSTALLATION_ID`、`GITHUB_BASE_URL`（默认 `https://api.github.com`）
   - 按租户配置：通过 `POST /v1/github-app` 为指定 tenant 设置 `app_id`、`installation_id`、`private_key`、`base_url`
 - 本地管理员登录（开发环境，仅在 `OIDC_TENANT_ID` 为空且 `LOCAL_ADMIN_PASSWORD` 设置时启用）：

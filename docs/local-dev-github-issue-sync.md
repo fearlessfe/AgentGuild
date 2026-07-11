@@ -35,7 +35,7 @@ source .local/env.sh
 |------|------|
 | `DATABASE_URL` | Postgres 连接串 |
 | `LOCAL_ADMIN_PASSWORD` | 本地登录密码 |
-| `GITHUB_APP_PUBLIC_BASE_URL` | GitHub App Callback 公网地址（隧道方案时设置） |
+| `GITHUB_APP_PUBLIC_BASE_URL` | `WEB_ENABLED=true` 时必填；AgentGuild 的公网 HTTP(S) origin，不包含路径、query 或 fragment |
 
 ### 1.4 启动后端
 
@@ -82,6 +82,7 @@ curl -s -c cookies.txt -X POST http://localhost:8080/oauth/local/login \
 2. 将隧道输出的公网 URL（如 `https://xxxx.trycloudflare.com`）写入环境变量并重启后端：
 
    ```bash
+   # 只填 origin，不要附加 /oauth/... 路径、query 或 fragment
    export GITHUB_APP_PUBLIC_BASE_URL=https://xxxx.trycloudflare.com
    cd backend && go run ./cmd/agentguild-api
    ```

@@ -53,6 +53,7 @@ func TestManifestBuildContainsPermissionsAndCallbacks(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(manifestJSON), &manifest))
 	require.NotEmpty(t, manifest.Name)
 	require.False(t, manifest.Public)
+	require.Equal(t, "https://guild.example.com", manifest.URL)
 	require.Equal(t, "https://guild.example.com/oauth/github/app/callback", manifest.RedirectURL)
 	require.Equal(t, "https://guild.example.com/oauth/github/app/installed", manifest.SetupURL)
 	require.Equal(t, "read", manifest.DefaultPermissions["contents"])
