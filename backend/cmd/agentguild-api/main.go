@@ -296,9 +296,8 @@ func costProvider(enabled bool, cfg config.Config) telemetry.TraceCostProvider {
 }
 
 func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVerifier, *identityapp.IdentityService, *auth.OIDCProvider, error) {
-	externalVerifier := auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil)
 	if !cfg.WebEnabled {
-		return externalVerifier, nil, nil, nil
+		return auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil), nil, nil, nil
 	}
 
 	privateKey, err := loadAgentRSAPrivateKey(cfg)
@@ -339,11 +338,21 @@ func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVeri
 			return nil, nil, nil, err
 		}
 	}
-	localVerifier := auth.NewRS256Verifier(&privateKey.PublicKey, auth.TokenVerifierConfig{
+	return buildTokenVerifier(cfg, &privateKey.PublicKey), identityService, oidcProvider, nil
+}
+
+func buildTokenVerifier(cfg config.Config, publicKey *rsa.PublicKey) auth.TokenVerifier {
+	localVerifier := auth.NewRS256Verifier(publicKey, auth.TokenVerifierConfig{
 		Issuer:   cfg.OAuthIssuer,
 		Audience: cfg.OAuthAudience,
 	})
-	return chainedTokenVerifier{verifiers: []auth.TokenVerifier{localVerifier, externalVerifier}}, identityService, oidcProvider, nil
+	if cfg.OAuthJWKSURL == "" {
+		return localVerifier
+	}
+	return chainedTokenVerifier{verifiers: []auth.TokenVerifier{
+		localVerifier,
+		auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil),
+	}}
 }
 
 func loadAgentRSAPrivateKey(cfg config.Config) (*rsa.PrivateKey, error) {

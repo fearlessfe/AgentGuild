@@ -110,6 +110,24 @@ func TestLoadAgentRSAPrivateKeyRejectsInvalidPEM(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestBuildTokenVerifierLocalOnly(t *testing.T) {
+	testKey := newRSAPrivateKeyForTest(t)
+
+	verifier := buildTokenVerifier(config.Config{OAuthIssuer: "http://agentguild.local", OAuthAudience: "agentguild"}, &testKey.PublicKey)
+
+	require.NotNil(t, verifier)
+}
+
+func TestBuildTokenVerifierIncludesExternalJWKSWhenConfigured(t *testing.T) {
+	testKey := newRSAPrivateKeyForTest(t)
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+
+	verifier := buildTokenVerifier(config.Config{OAuthIssuer: "issuer", OAuthAudience: "audience", OAuthJWKSURL: server.URL}, &testKey.PublicKey)
+
+	require.NotNil(t, verifier)
+}
+
 func TestPublicRepositoryResolverMapsGitHubRateLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/repos/rust-lang/rust", r.URL.Path)

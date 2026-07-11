@@ -5,6 +5,8 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +90,65 @@ func TestLoadParsesIdentityRuntimeConfiguration(t *testing.T) {
 	require.True(t, cfg.SessionCookieSecure)
 }
 
+func TestLoadLocalAdminJWKSRequirement(t *testing.T) {
+	privateKey := rsaKeyPath(t)
+	baseEnv := map[string]string{
+		"DATABASE_URL":               "postgres://agentguild:test@localhost/agentguild",
+		"CURSOR_SECRET":              strings.Repeat("s", 32),
+		"SESSION_COOKIE_SECRET":      strings.Repeat("c", 32),
+		"LOCAL_ADMIN_PASSWORD":       "local-password",
+		"OAUTH_ISSUER":               "http://agentguild.local",
+		"OAUTH_AUDIENCE":             "agentguild",
+		"AGENT_RSA_PRIVATE_KEY_PATH": privateKey,
+	}
+
+	tests := []struct {
+		name      string
+		configure func(map[string]string)
+		wantErr   bool
+	}{
+		{
+			name: "accepts empty external JWKS in local admin mode",
+		},
+		{
+			name: "rejects empty external JWKS for non-local web transport",
+			configure: func(env map[string]string) {
+				env["LOCAL_ADMIN_PASSWORD"] = ""
+				env["MCP_ENABLED"] = "false"
+			},
+			wantErr: true,
+		},
+		{
+			name: "rejects empty external JWKS for non-local MCP transport",
+			configure: func(env map[string]string) {
+				env["LOCAL_ADMIN_PASSWORD"] = ""
+				env["WEB_ENABLED"] = "false"
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := make(map[string]string, len(baseEnv))
+			for key, value := range baseEnv {
+				env[key] = value
+			}
+			if tt.configure != nil {
+				tt.configure(env)
+			}
+
+			cfg, err := config.Load(func(key string) string { return env[key] })
+			if tt.wantErr {
+				require.ErrorContains(t, err, "OAUTH_JWKS_URL is required when a transport is enabled")
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, cfg.LocalAdmin.Enabled)
+		})
+	}
+}
+
 func TestLoadParsesGitHubConfiguration(t *testing.T) {
 	env := validEnv()
 	env["GITHUB_APP_ID"] = "42"
@@ -142,4 +203,16 @@ func validEnv() map[string]string {
 		"OIDC_ADMIN_EMAILS":         "admin@example.com",
 		"AGENT_RSA_PRIVATE_KEY_PEM": string(privateKeyPEM),
 	}
+}
+
+func rsaKeyPath(t *testing.T) string {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "agent-private-key.pem")
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	}), 0o600))
+	return path
 }

@@ -146,10 +146,13 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, fmt.Errorf("CURSOR_SECRET must contain at least 32 bytes")
 	}
 	if cfg.WebEnabled || cfg.MCPEnabled {
-		for _, required := range [][2]string{{"OAUTH_ISSUER", cfg.OAuthIssuer}, {"OAUTH_AUDIENCE", cfg.OAuthAudience}, {"OAUTH_JWKS_URL", cfg.OAuthJWKSURL}} {
+		for _, required := range [][2]string{{"OAUTH_ISSUER", cfg.OAuthIssuer}, {"OAUTH_AUDIENCE", cfg.OAuthAudience}} {
 			if required[1] == "" {
 				return Config{}, fmt.Errorf("%s is required when a transport is enabled", required[0])
 			}
+		}
+		if !cfg.LocalAdmin.Enabled && cfg.OAuthJWKSURL == "" {
+			return Config{}, fmt.Errorf("OAUTH_JWKS_URL is required when a transport is enabled")
 		}
 	}
 	if cfg.WebEnabled {
