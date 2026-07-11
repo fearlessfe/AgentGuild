@@ -1,0 +1,15 @@
+{
+  "change": "route-by-onboarding-readiness",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "ffb3dedf75d85767928251c50991c45fd3915f054edb253fb5df695b79decded",
+  "files": [
+    { "path": "openspec/changes/route-by-onboarding-readiness/proposal.md", "sha256": "4aca587765e30d1bab6039346adffd983672de0cbc698aec8dc69894c7a144a7" },
+    { "path": "openspec/changes/route-by-onboarding-readiness/design.md", "sha256": "1bf27d97fa6291b7c2af003a7fa8bd7169aba7b44546bec3308b822fa2bbf0d8" },
+    { "path": "openspec/changes/route-by-onboarding-readiness/tasks.md", "sha256": "9cc33b86be83ae518e0d882e032ca7ef0c06f93f9cace5d6e7985c4b2e2a3bd1" },
+    { "path": "openspec/changes/route-by-onboarding-readiness/specs/console-ui-ux/spec.md", "sha256": "80b18ab12115f6bef285007b3e89495d9ba7f8ac4f4a5160b4a21e5727918213" },
+    { "path": "openspec/changes/route-by-onboarding-readiness/specs/github-app-integration/spec.md", "sha256": "8ca1e468b14158a652958c1a2055f162d33b3f91884d186e8e97f8f66e0e139d" }
+  ]
+}

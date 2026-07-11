@@ -19,7 +19,7 @@ export function LoginPage() {
         setError("密码错误或未启用本地登录");
         return;
       }
-      window.location.href = "/agents";
+      window.location.href = "/";
     } catch {
       setError("登录请求失败");
     }

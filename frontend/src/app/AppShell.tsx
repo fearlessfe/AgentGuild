@@ -29,6 +29,7 @@ import { PageHeader, ButtonLink } from "../ui";
 import { Rail } from "./Rail";
 import { Topbar } from "./Topbar";
 import { useRailCollapsed } from "./useRailCollapsed";
+import { HomeRedirect } from "./HomeRedirect";
 
 /* Maps the current pathname to the module label shown in the topbar. Ordered
    most-specific first. */
@@ -68,6 +69,7 @@ export function AppShell() {
         <Topbar module={moduleLabel(location.pathname)} />
         <main className="page scroll">
           <Routes>
+            <Route path="/" element={<HomeRedirect />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route path="/git-integration" element={<GitIntegrationScreen />} />
@@ -84,7 +86,7 @@ export function AppShell() {
             <Route path="/agents" element={<AgentsWorkspace />} />
             <Route path="/agents/new" element={<AgentRegistrationWorkspace />} />
             <Route path="/agents/:agentId" element={<AgentDetailWorkspace />} />
-            <Route path="*" element={<Navigate to="/tasks" replace />} />
+            <Route path="*" element={<HomeRedirect />} />
           </Routes>
         </main>
       </div>

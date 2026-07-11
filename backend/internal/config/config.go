@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +81,10 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.WebEnabled, err = boolean(get, "WEB_ENABLED", true); err != nil {
+		return Config{}, err
+	}
+	cfg.GitHubAppPublicBaseURL, err = parseGitHubAppPublicBaseURL(cfg.GitHubAppPublicBaseURL, cfg.WebEnabled)
+	if err != nil {
 		return Config{}, err
 	}
 	if cfg.SessionCookieSecure, err = boolean(get, "SESSION_COOKIE_SECURE", false); err != nil {
@@ -193,6 +198,25 @@ func Load(get LookupEnv) (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func parseGitHubAppPublicBaseURL(raw string, required bool) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		if required {
+			return "", fmt.Errorf("GITHUB_APP_PUBLIC_BASE_URL is required when WEB_ENABLED=true")
+		}
+		return "", nil
+	}
+	if strings.ContainsAny(raw, "?#") {
+		return "", fmt.Errorf("GITHUB_APP_PUBLIC_BASE_URL must be an absolute HTTP(S) origin")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return "", fmt.Errorf("GITHUB_APP_PUBLIC_BASE_URL must be an absolute HTTP(S) origin")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 func splitCSV(value string) []string {
