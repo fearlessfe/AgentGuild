@@ -207,6 +207,9 @@ func parseGitHubAppPublicBaseURL(raw string, required bool) (string, error) {
 		}
 		return "", nil
 	}
+	if strings.ContainsAny(raw, "?#") {
+		return "", fmt.Errorf("GITHUB_APP_PUBLIC_BASE_URL must be an absolute HTTP(S) origin")
+	}
 	parsed, err := url.Parse(raw)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
 		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||

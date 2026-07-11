@@ -211,6 +211,8 @@ func TestLoadValidatesGitHubAppPublicBaseURL(t *testing.T) {
 		"/relative", "ftp://agentguild.example.com", "https:///missing-host",
 		"https://user@agentguild.example.com", "https://agentguild.example.com/app",
 		"https://agentguild.example.com?tenant=1", "https://agentguild.example.com#fragment",
+		"https://agentguild.example.com?", "https://agentguild.example.com/?",
+		"https://agentguild.example.com#", "https://agentguild.example.com/#",
 	}
 	for _, value := range tests {
 		t.Run(value, func(t *testing.T) {

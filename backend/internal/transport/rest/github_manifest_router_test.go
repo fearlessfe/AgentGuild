@@ -2,7 +2,10 @@ package rest_test
 
 import (
 	"encoding/json"
+	"html"
 	"net/http"
+	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -42,6 +45,33 @@ func TestGitHubManifest_BuildForm(t *testing.T) {
 	}
 	// state must be present in the response somewhere.
 	require.Contains(t, body+res.Header().Get("Location"), "state")
+}
+
+func TestGitHubManifest_BuildFormIgnoresConflictingForwardedHeaders(t *testing.T) {
+	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{}}
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(newManifestService(manager)))
+	req := httptest.NewRequest(http.MethodGet, "/oauth/github/app/manifest", nil)
+	req.Host = "attacker.example"
+	req.Header.Set("X-Forwarded-Host", "forwarded-attacker.example")
+	req.Header.Set("X-Forwarded-Proto", "http")
+	req.Header.Set("X-Forwarded-Port", "8080")
+	req.AddCookie(sessionCookie(t, "owner-1", false))
+	res := httptest.NewRecorder()
+
+	server.ServeHTTP(res, req)
+
+	require.Equal(t, http.StatusOK, res.Code)
+	match := regexp.MustCompile(`name="manifest" value="([^"]+)"`).FindStringSubmatch(res.Body.String())
+	require.Len(t, match, 2)
+	var manifest struct {
+		URL         string `json:"url"`
+		RedirectURL string `json:"redirect_url"`
+		SetupURL    string `json:"setup_url"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(html.UnescapeString(match[1])), &manifest))
+	require.Equal(t, "https://agentguild.example", manifest.URL)
+	require.Equal(t, "https://agentguild.example/oauth/github/app/callback", manifest.RedirectURL)
+	require.Equal(t, "https://agentguild.example/oauth/github/app/installed", manifest.SetupURL)
 }
 
 func TestGitHubManifest_CallbackBadState(t *testing.T) {

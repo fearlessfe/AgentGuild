@@ -75,10 +75,14 @@ describe("HomeRedirect", () => {
     await waitFor(() => expect(screen.getByLabelText("location")).toHaveTextContent("/onboarding"));
   });
 
-  it("does not rewrite the explicit agents route", () => {
-    renderRoutes("/agents");
-    expect(screen.getByLabelText("location")).toHaveTextContent("/agents");
-    expect(screen.getByText("Agents page")).toBeInTheDocument();
+  it.each([
+    ["/agents", "Agents page"],
+    ["/tasks", "Tasks page"],
+    ["/onboarding", "Onboarding page"],
+  ])("does not rewrite the explicit %s route", (path, pageText) => {
+    renderRoutes(path);
+    expect(screen.getByLabelText("location")).toHaveTextContent(path);
+    expect(screen.getByText(pageText)).toBeInTheDocument();
     expect(mockedGetRepositoryOnboarding).not.toHaveBeenCalled();
   });
 });
