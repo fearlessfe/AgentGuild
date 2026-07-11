@@ -1,10 +1,14 @@
 ---
-status: proposed
+status: approved
 change: agent-task-lifecycle
 related-design: docs/superpowers/specs/2026-07-02-agent-task-lifecycle-design.md
 ---
 
 # AgentGuild Production Compose 设计
+
+> 2026-07-11 决策：首个可交付版本默认使用本地管理员登录，不要求外部
+> OIDC。前端 Nginx 是唯一宿主机入口；后端与 PostgreSQL 不映射宿主机
+> 端口。外部 OIDC 仍作为后续可选部署配置保留，不属于本次实现范围。
 
 ## 1. 目标与边界
 
@@ -16,7 +20,11 @@ docker compose up --build
 
 该命令构建前端与后端镜像，执行数据库迁移，并启动 PostgreSQL、AgentGuild API 和只读 React Web。部署面向单机或由外部负载均衡承载的容器主机；TLS 在 Compose 外终止。
 
-身份认证使用外部 OIDC Provider。浏览器采用 Authorization Code + PKCE，不把客户端密钥、访问令牌或固定 Bearer Token 编译进前端镜像。Langfuse 继续作为可选外部依赖，不在本 Compose 内部署。
+身份认证默认使用项目已有的本地管理员登录。操作者在 `.env` 中设置至少
+12 字符的 `LOCAL_ADMIN_PASSWORD`，浏览器通过 `/oauth/local/login` 建立
+HttpOnly session。仓库不提供可直接用于部署的默认密码，也不把密码、访问
+令牌或固定 Bearer Token 编译进前端镜像。Langfuse 继续作为可选外部依赖，
+不在本 Compose 内部署。
 
 本设计不引入 Keycloak、Caddy、集群编排、自动证书、数据库备份或高可用 PostgreSQL。
 
@@ -28,7 +36,6 @@ Browser
   ▼
 frontend :8080 (Nginx)
   ├─ /, /assets/*       → React SPA
-  ├─ /config.js         → 运行时 OIDC/应用配置
   ├─ /v1/*              → backend:8080
   └─ /mcp               → backend:8080
                            │
@@ -65,16 +72,9 @@ Compose 定义四个服务：
 
 `frontend/Dockerfile` 使用 Node 构建 React 产物，再复制到 Nginx 非开发镜像。构建过程不得接收访问令牌或 OIDC client secret。
 
-Nginx 启动脚本根据环境变量生成 `/usr/share/nginx/html/config.js`。允许注入的浏览器公开配置仅包括：
-
-- OIDC authority
-- public client ID
-- redirect URI
-- post-logout URI
-- scope 与 audience
-- API base path
-
-OIDC 客户端使用 `oidc-client-ts`，Token 只保存在当前 tab 的 `sessionStorage`；API 客户端按请求读取有效 access token。未认证时显示登录入口，不请求受保护资源。
+前端使用已有本地管理员登录界面，通过同源 `/oauth/local/login` 请求建立
+session；后续 API 请求携带 session cookie。镜像构建过程不接收认证 secret。
+外部 OIDC 运行时配置与 PKCE 支持不在本次 Compose 实现范围内。
 
 ## 4. 网络与路由
 
@@ -106,13 +106,12 @@ OIDC 客户端使用 `oidc-client-ts`，Token 只保存在当前 tab 的 `sessio
 
 - `POSTGRES_PASSWORD`
 - `CURSOR_SECRET`（至少 32 bytes）
-- `OAUTH_ISSUER`
-- `OAUTH_AUDIENCE`
-- `OAUTH_JWKS_URL`
-- `OIDC_AUTHORITY`
-- `OIDC_CLIENT_ID`
+- `SESSION_COOKIE_SECRET`（至少 32 bytes）
+- `LOCAL_ADMIN_PASSWORD`（至少 12 字符）
 
-OIDC SPA client 必须是 public client，启用 PKCE，redirect URI 与实际外部地址完全一致。Langfuse 启用时额外要求其 base URL、public key 和 secret key。
+默认租户、owner 与邮箱可通过 `LOCAL_ADMIN_TENANT_ID`、
+`LOCAL_ADMIN_OWNER_ID`、`LOCAL_ADMIN_OWNER_EMAIL` 覆盖。Langfuse 启用时
+额外要求其 base URL、public key 和 secret key。
 
 Compose 变量仅用于本地/单机部署便利。生产系统可以用 Docker secrets 或部署平台 secret 注入覆盖 `.env`，但 Secret 不能成为 Docker build argument 或写入镜像层。
 
@@ -132,8 +131,7 @@ docker compose down
 
 - PostgreSQL 不健康：migrate/backend 不启动。
 - 迁移失败：backend 不启动，日志指出失败版本。
-- OIDC 配置缺失：backend 或 frontend fail fast，不以无认证模式降级。
-- 外部 OIDC/JWKS 暂时不可用：静态页面可加载，但登录或 API 鉴权明确失败。
+- 本地管理员密码或 session secret 缺失/不合法：backend fail fast。
 - Langfuse 禁用：不启动成本同步重试循环；核心任务生命周期继续运行。
 - SIGTERM：后端先停止接收请求，取消 worker，等待 worker 退出，再关闭数据库池。
 
@@ -150,14 +148,14 @@ docker compose down
 - 迁移服务首次启动成功，第二次启动不重复执行已应用版本。
 - 缺少必填配置时 Compose/entrypoint 明确失败。
 - Nginx SPA fallback、`/v1` 与 `/mcp` 代理规则测试通过。
-- OIDC runtime config 不包含 secret；PKCE 登录回调与 token 注入使用模拟 Provider 测试。
+- 本地管理员登录成功后可通过同源代理访问受保护 API；密码错误返回 401。
 - 后端 `/healthz`、worker shutdown、Langfuse disabled 行为测试通过。
 
 ### 端到端验收
 
-1. 使用测试 OIDC 配置执行 `docker compose up --build --wait`。
+1. 从 `.env.example` 创建测试配置，设置本地管理员密码与随机 secret，执行 `docker compose up --build --wait`。
 2. `postgres`、`backend`、`frontend` 均 healthy，`migrate` 以 0 退出。
-3. 浏览器通过 PKCE 登录后可以读取 `/tasks`，网络请求走同源 `/v1`。
+3. 浏览器通过本地管理员密码登录后可以读取 `/tasks`，网络请求走同源 `/v1`。
 4. 未登录请求返回 401，页面显示登录入口而不是嵌入 Token。
 5. 执行 `docker compose down` 后再次启动，数据和 migration version 保留。
 
@@ -173,11 +171,8 @@ backend/cmd/agentguild-api/main.go
 backend/cmd/agentguild-api/main_test.go
 frontend/Dockerfile
 frontend/nginx.conf
-frontend/docker-entrypoint.d/40-runtime-config.sh
-frontend/src/auth/*
+frontend/src/features/auth/*
 frontend/src/api/client.ts
-frontend/src/main.tsx
-frontend/src/runtime-config.ts
 frontend/src/**/*.test.tsx
 ```
 
