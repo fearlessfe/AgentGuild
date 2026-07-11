@@ -101,6 +101,10 @@ type oidcProvider interface {
 
 type socketRemoteAddrContextKey struct{}
 
+type healthChecker interface {
+	Ping(context.Context) error
+}
+
 // Server 暴露任务生命周期、Submission、代码评审、版本管理与经验治理的 REST API。
 type Server struct {
 	svc                  applicationService
@@ -124,6 +128,7 @@ type Server struct {
 	syncRules            *syncapp.RuleService
 	syncEngine           SyncEngine
 	repositoryOnboarding repositoryOnboardingService
+	healthChecker        healthChecker
 }
 
 // WithLocalAdmin 挂载本地管理员 fallback 登录接口。
@@ -162,6 +167,11 @@ type Option func(*Server)
 // WithRateLimiter 替换默认的无限流实现。
 func WithRateLimiter(l RateLimiter) Option {
 	return func(s *Server) { s.limiter = l }
+}
+
+// WithHealthChecker 挂载无需认证的数据库就绪检查。
+func WithHealthChecker(checker healthChecker) Option {
+	return func(s *Server) { s.healthChecker = checker }
 }
 
 // WithIdentityService 挂载 Agent 身份管理与自服务 REST API。
@@ -228,6 +238,7 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(jsonResponse)
+	r.Get("/healthz", s.healthz)
 
 	if s.oidc != nil {
 		r.Get("/oauth/oidc/login", s.oidcLogin)
@@ -374,6 +385,20 @@ func (s *Server) Router() http.Handler {
 		}
 	})
 	return r
+}
+
+func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
+	if s.healthChecker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.healthChecker.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
 func captureSocketRemoteAddr(next http.Handler) http.Handler {

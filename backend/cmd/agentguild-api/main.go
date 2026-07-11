@@ -166,6 +166,7 @@ func run() error {
 	reputationSvc := application.NewReputationQueryService(postgres.NewStore(pool))
 
 	restOptions = append(restOptions,
+		resttransport.WithHealthChecker(pool),
 		resttransport.WithReviewService(reviewSvc),
 		resttransport.WithRubricService(reviewSvc),
 		resttransport.WithReputationService(reputationSvc),

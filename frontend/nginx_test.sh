@@ -16,13 +16,20 @@ grep -F 'add_header Cache-Control "no-store" always;' "$config" >/dev/null || fa
 
 for header in \
   'proxy_set_header X-Request-ID $request_id;' \
-  'proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+  'proxy_set_header X-Forwarded-For $remote_addr;' \
   'proxy_set_header X-Forwarded-Host $host;' \
   'proxy_set_header X-Forwarded-Proto $scheme;' \
   'proxy_set_header Authorization $http_authorization;'
 do
   grep -F "$header" "$config" >/dev/null || fail "missing forwarded header: $header"
 done
+
+if grep -F '$proxy_add_x_forwarded_for' "$config" >/dev/null; then
+  fail "client-supplied X-Forwarded-For must not enter the trusted proxy chain"
+fi
+
+forwarded_for_count="$(grep -Fc 'proxy_set_header X-Forwarded-For $remote_addr;' "$config" || true)"
+[ "$forwarded_for_count" -eq 3 ] || fail "every proxied location must overwrite X-Forwarded-For"
 
 grep -F 'location /api/' "$config" >/dev/null || fail "/api/ proxy is missing"
 grep -F 'proxy_pass http://backend:8080/;' "$config" >/dev/null || fail "/api/ does not remove its prefix"
