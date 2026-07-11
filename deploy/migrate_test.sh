@@ -107,13 +107,25 @@ for config in \
   'MIGRATION_CONNECT_ATTEMPTS=0' \
   'MIGRATION_CONNECT_ATTEMPTS=61' \
   'MIGRATION_CONNECT_ATTEMPTS=invalid' \
+  'MIGRATION_CONNECT_ATTEMPTS=99999999999999999999999999999999999999999999999999' \
   'MIGRATION_CONNECT_DELAY_SECONDS=31' \
-  'MIGRATION_CONNECT_DELAY_SECONDS=invalid'; do
+  'MIGRATION_CONNECT_DELAY_SECONDS=invalid' \
+  'MIGRATION_CONNECT_DELAY_SECONDS=99999999999999999999999999999999999999999999999999'; do
+  rm -f "$test_dir/psql-attempts"
   if env $config TEST_MIGRATION_FILE=/migrations/000001_valid.up.sql \
     TEST_PSQL_ATTEMPTS_FILE="$test_dir/psql-attempts" \
     TEST_PSQL_INPUT_FILE="$test_dir/psql-input" DATABASE_URL=postgres://contract-test \
     PATH="$test_dir/bin:$PATH" sh "$repo_root/deploy/migrate.sh" >"$test_dir/output" 2>&1; then
     echo "migration runner accepted invalid retry config: $config" >&2
+    exit 1
+  fi
+  if ! grep -q 'must be an integer from' "$test_dir/output"; then
+    echo "migration runner did not report invalid retry config before numeric evaluation: $config" >&2
+    cat "$test_dir/output" >&2
+    exit 1
+  fi
+  if [ -f "$test_dir/psql-attempts" ]; then
+    echo "migration runner invoked psql for invalid retry config: $config" >&2
     exit 1
   fi
 done

@@ -38,19 +38,13 @@ max_migration_connect_delay_seconds=30
 migration_connect_attempts=${MIGRATION_CONNECT_ATTEMPTS:-30}
 migration_connect_delay_seconds=${MIGRATION_CONNECT_DELAY_SECONDS:-2}
 case $migration_connect_attempts in
-  ''|*[!0-9]*|0) echo "MIGRATION_CONNECT_ATTEMPTS must be an integer from 1 to $max_migration_connect_attempts" >&2; exit 1 ;;
+  [1-9]|[1-5][0-9]|60) ;;
+  *) echo "MIGRATION_CONNECT_ATTEMPTS must be an integer from 1 to $max_migration_connect_attempts" >&2; exit 1 ;;
 esac
 case $migration_connect_delay_seconds in
-  ''|*[!0-9]*) echo "MIGRATION_CONNECT_DELAY_SECONDS must be an integer from 0 to $max_migration_connect_delay_seconds" >&2; exit 1 ;;
+  [0-9]|[1-2][0-9]|30) ;;
+  *) echo "MIGRATION_CONNECT_DELAY_SECONDS must be an integer from 0 to $max_migration_connect_delay_seconds" >&2; exit 1 ;;
 esac
-if [ "$migration_connect_attempts" -gt "$max_migration_connect_attempts" ]; then
-  echo "MIGRATION_CONNECT_ATTEMPTS must be an integer from 1 to $max_migration_connect_attempts" >&2
-  exit 1
-fi
-if [ "$migration_connect_delay_seconds" -gt "$max_migration_connect_delay_seconds" ]; then
-  echo "MIGRATION_CONNECT_DELAY_SECONDS must be an integer from 0 to $max_migration_connect_delay_seconds" >&2
-  exit 1
-fi
 
 sql_file=$(mktemp)
 trap 'rm -f "$sql_file"' EXIT HUP INT TERM
