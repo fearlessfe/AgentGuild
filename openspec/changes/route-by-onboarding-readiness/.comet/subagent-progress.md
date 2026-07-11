@@ -6,12 +6,12 @@
 
 ## Current task
 
-- Plan task: `Task 2: 证明 manifest 地址只来自显式配置并更新部署文档`
-- OpenSpec task: `1.2 补充 manifest 测试，证明 callback/setup URL 只使用配置值且不受请求头影响，并同步更新部署文档中的必填变量说明。`
+- Plan task: `Task 3: 实现统一的前端 onboarding 就绪入口`
+- OpenSpec task: `2.1 先补充入口路由测试，覆盖已就绪、未安装、无已接入仓库和请求失败场景，确认测试按预期失败；2.2 实现共享入口判定组件，将根路径、登录成功和未知路由统一接入判定，同时保留 Agents 等显式路由。`
 - Stage: `done`
 - Review/fix round: `0/1`
-- Commit: `5f5524d66d9caf31d1e31a3cde57c748bafc3146`
-- Changed files: `backend/internal/git/application/manifest_test.go`, `docs/local-dev-github-issue-sync.md`, `AGENTS.md`
-- RED evidence: not applicable unless production behavior changes; this task adds regression coverage for an existing structural boundary.
-- GREEN evidence: `go test ./internal/git/application -run TestManifestBuildContainsPermissionsAndCallbacks -count=1` and `go test ./internal/config ./internal/git/application -count=1` passed.
+- Commit: `d0a097f`
+- Changed files: `frontend/src/app/HomeRedirect.tsx`, `frontend/src/app/HomeRedirect.test.tsx`, `frontend/src/app/AppShell.tsx`, `frontend/src/features/auth/LoginPage.tsx`, `frontend/src/features/auth/LoginPage.test.tsx`
+- RED evidence: `npm test -- --run src/app/HomeRedirect.test.tsx` failed because `HomeRedirect` did not exist.
+- GREEN evidence: `npm test -- --run src/app/HomeRedirect.test.tsx src/features/auth/LoginPage.test.tsx` passed 12 tests; `npm run build` passed.
 - Final review: pending

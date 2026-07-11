@@ -200,7 +200,7 @@ git commit -m "test: lock GitHub manifest to configured origin"
 - Consumes: `getRepositoryOnboarding(): Promise<Envelope<RepositoryOnboardingSummary>>`。
 - Produces: `onboardingDestination(summary: RepositoryOnboardingSummary): "/tasks" | "/onboarding"` 与 `HomeRedirect` 组件。
 
-- [ ] **Step 1: 写纯判定与路由失败测试**
+- [x] **Step 1: 写纯判定与路由失败测试**
 
 `HomeRedirect.test.tsx` 使用 `vi.mock("../api/client", ...)` mock `getRepositoryOnboarding`，用独立 `QueryClientProvider` 和 `MemoryRouter` 渲染组件。至少包含：
 
@@ -222,13 +222,13 @@ it.each([
 
 并加入异步错误用例，mock rejection 后断言 location 为 `/onboarding`。
 
-- [ ] **Step 2: 运行新测试并确认 RED**
+- [x] **Step 2: 运行新测试并确认 RED**
 
 Run: `cd frontend && npm test -- --run src/app/HomeRedirect.test.tsx`
 
 Expected: FAIL，模块或导出尚不存在。
 
-- [ ] **Step 3: 实现 `HomeRedirect.tsx`**
+- [x] **Step 3: 实现 `HomeRedirect.tsx`**
 
 ```tsx
 import { useQuery } from "@tanstack/react-query";
@@ -251,7 +251,7 @@ export function HomeRedirect() {
 }
 ```
 
-- [ ] **Step 4: 接入路由与登录跳转**
+- [x] **Step 4: 接入路由与登录跳转**
 
 在 `AppShell.tsx` import `HomeRedirect`，并改为：
 
@@ -268,13 +268,13 @@ window.location.href = "/";
 
 同步修改 `LoginPage.test.tsx` 的期望为 `/`。
 
-- [ ] **Step 5: 运行前端定向测试并确认 GREEN**
+- [x] **Step 5: 运行前端定向测试并确认 GREEN**
 
 Run: `cd frontend && npm test -- --run src/app/HomeRedirect.test.tsx src/features/auth/LoginPage.test.tsx`
 
 Expected: PASS。
 
-- [ ] **Step 6: 勾选任务并提交**
+- [x] **Step 6: 勾选任务并提交**
 
 将 `tasks.md` 的 2.1、2.2 勾选，然后：
 
