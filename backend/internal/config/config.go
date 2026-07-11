@@ -100,10 +100,10 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	localPassword := get("LOCAL_ADMIN_PASSWORD")
-	cfg.LocalAdmin.Enabled = cfg.WebEnabled && cfg.OIDCTenantID == "" && localPassword != ""
-	if cfg.LocalAdmin.Enabled && len(localPassword) < 12 {
+	if localPassword != "" && len(localPassword) < 12 {
 		return Config{}, fmt.Errorf("LOCAL_ADMIN_PASSWORD must be at least 12 characters")
 	}
+	cfg.LocalAdmin.Enabled = cfg.WebEnabled && cfg.OIDCTenantID == "" && localPassword != ""
 	if cfg.ReaperInterval, err = duration(get, "REAPER_INTERVAL", 5*time.Second); err != nil {
 		return Config{}, err
 	}

@@ -157,6 +157,16 @@ func TestLoadLocalAdminJWKSRequirement(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsShortLocalAdminPasswordForMCPOnlyTransport(t *testing.T) {
+	env := validEnv()
+	env["WEB_ENABLED"] = "false"
+	env["MCP_ENABLED"] = "true"
+	env["LOCAL_ADMIN_PASSWORD"] = "short"
+
+	_, err := config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "LOCAL_ADMIN_PASSWORD must be at least 12 characters")
+}
+
 func TestLoadParsesGitHubConfiguration(t *testing.T) {
 	env := validEnv()
 	env["GITHUB_APP_ID"] = "42"
