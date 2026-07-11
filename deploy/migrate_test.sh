@@ -35,16 +35,40 @@ printf '%s\n' "${TEST_MIGRATION_FILE:?}"
 EOF
 cat >"$test_dir/bin/psql" <<'EOF'
 #!/bin/sh
-cat >/dev/null
+attempts_file=${TEST_PSQL_ATTEMPTS_FILE:?}
+attempts=0
+[ ! -f "$attempts_file" ] || attempts=$(cat "$attempts_file")
+attempts=$((attempts + 1))
+printf '%s\n' "$attempts" >"$attempts_file"
+if [ "$attempts" -lt "${TEST_PSQL_SUCCEEDS_ON_ATTEMPT:-1}" ]; then
+  exit 2
+fi
+cat >"${TEST_PSQL_INPUT_FILE:?}"
 EOF
 chmod +x "$test_dir/bin/find" "$test_dir/bin/psql"
 
 run_migrate() {
-  TEST_MIGRATION_FILE=$1 DATABASE_URL=postgres://contract-test \
+  rm -f "$test_dir/psql-attempts"
+  TEST_MIGRATION_FILE=$1 TEST_PSQL_ATTEMPTS_FILE="$test_dir/psql-attempts" \
+    TEST_PSQL_INPUT_FILE="$test_dir/psql-input" \
+    TEST_PSQL_SUCCEEDS_ON_ATTEMPT=${TEST_PSQL_SUCCEEDS_ON_ATTEMPT:-1} \
+    MIGRATION_CONNECT_RETRIES=${MIGRATION_CONNECT_RETRIES:-1} \
+    MIGRATION_CONNECT_RETRY_DELAY=0 DATABASE_URL=postgres://contract-test \
     PATH="$test_dir/bin:$PATH" sh "$repo_root/deploy/migrate.sh"
 }
 
 run_migrate /migrations/000001_valid.up.sql
+grep -q '^\\echo '\''migration 000001 already applied'\''' "$test_dir/psql-input" || {
+  echo "migration runner did not emit a literal psql echo command" >&2
+  exit 1
+}
+
+TEST_PSQL_SUCCEEDS_ON_ATTEMPT=3 MIGRATION_CONNECT_RETRIES=3 \
+  run_migrate /migrations/000001_valid.up.sql
+[ "$(cat "$test_dir/psql-attempts")" -eq 3 ] || {
+  echo "migration runner did not retry a transient database connection failure" >&2
+  exit 1
+}
 
 for invalid in \
   00001_too-short.up.sql \

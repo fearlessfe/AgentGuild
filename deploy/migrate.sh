@@ -31,6 +31,18 @@ if [ -n "$duplicates" ]; then
   exit 1
 fi
 
+migration_connect_retries=${MIGRATION_CONNECT_RETRIES:-30}
+migration_connect_retry_delay=${MIGRATION_CONNECT_RETRY_DELAY:-2}
+case $migration_connect_retries in
+  ''|*[!0-9]*|0) echo "MIGRATION_CONNECT_RETRIES must be a positive integer" >&2; exit 1 ;;
+esac
+case $migration_connect_retry_delay in
+  ''|*[!0-9]*) echo "MIGRATION_CONNECT_RETRY_DELAY must be a non-negative integer" >&2; exit 1 ;;
+esac
+
+sql_file=$(mktemp)
+trap 'rm -f "$sql_file"' EXIT HUP INT TERM
+
 {
   cat <<'SQL'
 SELECT pg_advisory_lock(hashtext('agentguild-schema-migrations'));
@@ -45,7 +57,7 @@ SQL
     version=${name%%_*}
     printf "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '%s') AS migration_applied \\gset\n" "$version"
     printf '\\if :migration_applied\n'
-    printf "\\echo 'migration %s already applied'\n" "$version"
+    printf '%s\n' "\\echo 'migration $version already applied'"
     printf '\\else\nBEGIN;\n'
     printf '\\i %s\n' "$file"
     printf "INSERT INTO schema_migrations (version) VALUES ('%s');\n" "$version"
@@ -55,4 +67,21 @@ SQL
   cat <<'SQL'
 SELECT pg_advisory_unlock(hashtext('agentguild-schema-migrations'));
 SQL
-} | psql "$DATABASE_URL" -v ON_ERROR_STOP=1
+} >"$sql_file"
+
+attempt=1
+while :; do
+  if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <"$sql_file"; then
+    exit 0
+  else
+    status=$?
+  fi
+
+  if [ "$status" -ne 2 ] || [ "$attempt" -ge "$migration_connect_retries" ]; then
+    exit "$status"
+  fi
+
+  echo "database unavailable; retrying migration connection ($attempt/$migration_connect_retries)" >&2
+  attempt=$((attempt + 1))
+  sleep "$migration_connect_retry_delay"
+done
