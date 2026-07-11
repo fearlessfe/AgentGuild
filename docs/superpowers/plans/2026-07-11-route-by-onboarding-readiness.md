@@ -292,19 +292,19 @@ git commit -m "feat: route default entry by onboarding readiness"
 - Consumes: 前三项任务的提交与 OpenSpec delta specs。
 - Produces: 全部构建/测试证据和完成的任务清单。
 
-- [ ] **Step 1: 运行后端构建与相关测试**
+- [x] **Step 1: 运行后端构建与相关测试**
 
 Run: `cd backend && go build ./... && go test ./internal/config ./internal/git/application -count=1`
 
 Expected: exit 0，所有测试 PASS。
 
-- [ ] **Step 2: 运行前端构建与全量单元测试**
+- [x] **Step 2: 运行前端构建与全量单元测试**
 
 Run: `cd frontend && npm run build && npm test -- --run`
 
 Expected: exit 0，Vitest 零失败。
 
-- [ ] **Step 3: 运行 OpenSpec 严格校验和仓库验证**
+- [x] **Step 3: 运行 OpenSpec 严格校验和仓库验证**
 
 Run: `openspec validate route-by-onboarding-readiness --strict`
 
@@ -314,11 +314,11 @@ Run: `scripts/comet-verify.sh`
 
 Expected: exit 0。
 
-- [ ] **Step 4: 按验收场景核对实现**
+- [x] **Step 4: 按验收场景核对实现**
 
 逐条确认：ready → `/tasks`；App 未配置/未安装/无仓库/请求失败 → `/onboarding`；显式 `/agents` 保留；Web 缺失或非法 origin 启动配置失败；manifest 只使用配置 origin。
 
-- [ ] **Step 5: 完成任务清单并提交验证元数据**
+- [x] **Step 5: 完成任务清单并提交验证元数据**
 
 将 `tasks.md` 的 3.1 勾选，然后：
 
