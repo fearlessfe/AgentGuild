@@ -100,6 +100,7 @@ func TestLoadLocalAdminJWKSRequirement(t *testing.T) {
 		"OAUTH_ISSUER":               "http://agentguild.local",
 		"OAUTH_AUDIENCE":             "agentguild",
 		"AGENT_RSA_PRIVATE_KEY_PATH": privateKey,
+		"GITHUB_APP_PUBLIC_BASE_URL": "https://agentguild.example.com",
 	}
 
 	tests := []struct {
@@ -193,6 +194,42 @@ func TestLoadRejectsInvalidGitHubAppID(t *testing.T) {
 	require.ErrorContains(t, err, "GITHUB_APP_ID")
 }
 
+func TestLoadRequiresGitHubAppPublicBaseURLWhenWebEnabled(t *testing.T) {
+	env := validEnv()
+	delete(env, "GITHUB_APP_PUBLIC_BASE_URL")
+
+	_, err := config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "GITHUB_APP_PUBLIC_BASE_URL is required when WEB_ENABLED=true")
+
+	env["WEB_ENABLED"] = "false"
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+}
+
+func TestLoadValidatesGitHubAppPublicBaseURL(t *testing.T) {
+	tests := []string{
+		"/relative", "ftp://agentguild.example.com", "https:///missing-host",
+		"https://user@agentguild.example.com", "https://agentguild.example.com/app",
+		"https://agentguild.example.com?tenant=1", "https://agentguild.example.com#fragment",
+	}
+	for _, value := range tests {
+		t.Run(value, func(t *testing.T) {
+			env := validEnv()
+			env["GITHUB_APP_PUBLIC_BASE_URL"] = value
+			_, err := config.Load(func(key string) string { return env[key] })
+			require.ErrorContains(t, err, "GITHUB_APP_PUBLIC_BASE_URL must be an absolute HTTP(S) origin")
+		})
+	}
+}
+
+func TestLoadNormalizesGitHubAppPublicBaseURL(t *testing.T) {
+	env := validEnv()
+	env["GITHUB_APP_PUBLIC_BASE_URL"] = "https://agentguild.example.com/"
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "https://agentguild.example.com", cfg.GitHubAppPublicBaseURL)
+}
+
 func validEnv() map[string]string {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -203,23 +240,24 @@ func validEnv() map[string]string {
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	})
 	return map[string]string{
-		"DATABASE_URL":              "postgres://agentguild:test@localhost/agentguild",
-		"CURSOR_SECRET":             strings.Repeat("s", 32),
-		"OAUTH_ISSUER":              "https://issuer.example",
-		"OAUTH_AUDIENCE":            "agentguild",
-		"OAUTH_JWKS_URL":            "https://issuer.example/.well-known/jwks.json",
-		"SESSION_COOKIE_SECRET":     strings.Repeat("c", 32),
-		"OIDC_TENANT_ID":            "tenant-1",
-		"OIDC_ISSUER":               "https://issuer.example",
-		"OIDC_CLIENT_ID":            "client-1",
-		"OIDC_CLIENT_SECRET":        "secret-1",
-		"OIDC_REDIRECT_URI":         "https://issuer.example/callback",
-		"OIDC_AUTH_URL":             "https://issuer.example/oauth/authorize",
-		"OIDC_TOKEN_URL":            "https://issuer.example/oauth/token",
-		"OIDC_JWKS_URL":             "https://issuer.example/.well-known/openid-jwks.json",
-		"OIDC_ADMIN_CLAIM":          "agentguild_admin",
-		"OIDC_ADMIN_EMAILS":         "admin@example.com",
-		"AGENT_RSA_PRIVATE_KEY_PEM": string(privateKeyPEM),
+		"DATABASE_URL":               "postgres://agentguild:test@localhost/agentguild",
+		"CURSOR_SECRET":              strings.Repeat("s", 32),
+		"OAUTH_ISSUER":               "https://issuer.example",
+		"OAUTH_AUDIENCE":             "agentguild",
+		"OAUTH_JWKS_URL":             "https://issuer.example/.well-known/jwks.json",
+		"SESSION_COOKIE_SECRET":      strings.Repeat("c", 32),
+		"OIDC_TENANT_ID":             "tenant-1",
+		"OIDC_ISSUER":                "https://issuer.example",
+		"OIDC_CLIENT_ID":             "client-1",
+		"OIDC_CLIENT_SECRET":         "secret-1",
+		"OIDC_REDIRECT_URI":          "https://issuer.example/callback",
+		"OIDC_AUTH_URL":              "https://issuer.example/oauth/authorize",
+		"OIDC_TOKEN_URL":             "https://issuer.example/oauth/token",
+		"OIDC_JWKS_URL":              "https://issuer.example/.well-known/openid-jwks.json",
+		"OIDC_ADMIN_CLAIM":           "agentguild_admin",
+		"OIDC_ADMIN_EMAILS":          "admin@example.com",
+		"AGENT_RSA_PRIVATE_KEY_PEM":  string(privateKeyPEM),
+		"GITHUB_APP_PUBLIC_BASE_URL": "https://agentguild.example.com",
 	}
 }
 
