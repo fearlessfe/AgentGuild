@@ -1,6 +1,6 @@
 # Docker Compose 部署
 
-Compose 栈包含 PostgreSQL、一次性数据库迁移、后端和前端。只有前端端口会发布到宿主机；数据库和后端仅在 Compose 内部网络中可访问。Agent RSA 私钥和数据库数据分别保存在命名卷 `agentguild-keys` 与 `postgres-data` 中。
+Compose 栈包含 PostgreSQL、一次性数据库迁移、后端和前端。所有服务均不向宿主机发布端口；前端仅在 Compose 网络内暴露 `8080`，数据库和后端同样只在内部网络中可访问。Agent RSA 私钥和数据库数据分别保存在命名卷 `agentguild-keys` 与 `postgres-data` 中。
 
 ## 配置并启动
 
@@ -20,7 +20,7 @@ cp .env.example .env
 docker compose up --build --wait
 ```
 
-浏览器访问 `http://localhost:8080/login`。如果修改了 `APP_PORT`，请相应替换 URL 中的端口。页面使用 `.env` 中的 `LOCAL_ADMIN_PASSWORD` 登录。
+部署平台网关或同一 Docker 网络中的反向代理应将流量转发到 `frontend:8080`。Compose 不再提供宿主机直连地址；页面使用 `.env` 中的 `LOCAL_ADMIN_PASSWORD` 登录。
 
 ## 运维命令
 

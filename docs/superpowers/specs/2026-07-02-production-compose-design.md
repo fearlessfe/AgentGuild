@@ -8,7 +8,8 @@ related-design: docs/superpowers/specs/2026-07-02-agent-task-lifecycle-design.md
 
 > 2026-07-11 决策：首个可交付版本默认使用本地管理员登录，不要求外部
 > OIDC。前端 Nginx 是唯一宿主机入口；后端与 PostgreSQL 不映射宿主机
-> 端口。外部 OIDC 仍作为后续可选部署配置保留，不属于本次实现范围。
+> 端口。前端仅在 Docker 网络内暴露 `8080`，由部署平台网关或同网络反向
+> 代理接入。外部 OIDC 仍作为后续可选部署配置保留，不属于本次实现范围。
 
 ## 1. 目标与边界
 
@@ -52,7 +53,7 @@ Compose 定义四个服务：
 | `postgres` | PostgreSQL 18.4 与持久卷 | 默认不暴露 |
 | `migrate` | 持有迁移锁、执行未应用 SQL、退出 | 不暴露 |
 | `backend` | REST、MCP、reaper、outbox | 不暴露 |
-| `frontend` | 静态资源、运行时配置、同源反向代理 | `${APP_PORT:-8080}` |
+| `frontend` | 静态资源、运行时配置、同源反向代理 | 不暴露；Docker 网络内 `8080` |
 
 `backend` 必须等待 `migrate` 成功；`frontend` 必须等待 `backend` healthy。迁移或后端健康检查失败时，依赖服务不得伪装为正常启动。
 

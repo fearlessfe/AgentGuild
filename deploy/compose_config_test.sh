@@ -54,9 +54,9 @@ services=$(jq -r '.services | keys | sort | join(",")' "$config")
 [ "$services" = 'backend,frontend,migrate,postgres' ] || fail "unexpected services: $services"
 
 published=$(jq '[.services[] | .ports // [] | .[]] | length' "$config")
-[ "$published" -eq 1 ] || fail "expected exactly one published port, got $published"
-jq -e '.services.frontend.ports | length == 1 and .[0].target == 8080 and .[0].published == "18080"' "$config" >/dev/null \
-  || fail "frontend must publish APP_PORT to container port 8080"
+[ "$published" -eq 0 ] || fail "expected no published host ports, got $published"
+jq -e '.services.frontend.ports == null and (.services.frontend.expose | index("8080") != null)' "$config" >/dev/null \
+  || fail "frontend must expose container port 8080 without publishing it"
 jq -e '.services.postgres.ports == null and .services.backend.ports == null and .services.migrate.ports == null' "$config" >/dev/null \
   || fail "postgres, migrate, and backend must not publish ports"
 
@@ -88,4 +88,4 @@ jq -e '.services.backend.environment.SESSION_COOKIE_SECURE == "true"' "$secure_c
 jq -e '.services.backend.volumes[] | select(.target == "/var/lib/agentguild" and .source == "agentguild-keys" and .read_only != true)' "$config" >/dev/null \
   || fail "backend must have a writable agentguild-keys mount"
 
-echo "PASS: compose contract (one published port, owned by frontend)"
+echo "PASS: compose contract (no host ports; frontend exposes 8080 internally)"
