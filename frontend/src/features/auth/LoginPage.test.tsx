@@ -47,7 +47,7 @@ describe("LoginPage", () => {
         credentials: "same-origin",
       })
     );
-    await vi.waitFor(() => expect(window.location.href).toBe("/agents"));
+    await vi.waitFor(() => expect(window.location.href).toBe("/"));
   });
 
   it("shows error when local password is wrong", async () => {
