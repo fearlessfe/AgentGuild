@@ -1,17 +1,9 @@
 import { useState } from "react";
-import { Card, Button, ApiNote } from "../../ui";
+import { Card, Button } from "../../ui";
 
 export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-
-  const handleOIDCLogin = () => {
-    if (import.meta.env.VITE_DEMO_MODE === "true") {
-      window.location.href = "/agents";
-      return;
-    }
-    window.location.href = "/oauth/oidc/login";
-  };
 
   const handleLocalLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,14 +37,8 @@ export function LoginPage() {
         </div>
       </div>
       <div className="auth-card">
-        <Card title="登录" sub="使用企业身份登录以进入治理工作台">
+        <Card title="本地管理登录" sub="使用本地管理员密码进入治理工作台">
           <form className="stack" onSubmit={handleLocalLogin}>
-            <Button type="button" variant="primary" block lg icon="⛨" onClick={handleOIDCLogin}>
-              使用企业 OIDC 登录
-            </Button>
-            <div className="auth-divider">
-              <span>本地开发登录</span>
-            </div>
             <div className="field">
               <label className="field-label" htmlFor="local-password">
                 密码
@@ -70,13 +56,11 @@ export function LoginPage() {
                 {error}
               </div>
             ) : null}
-            <Button type="submit" block>
-              本地登录
+            <Button type="submit" variant="primary" block lg>
+              登录管理后台
             </Button>
-            <p className="field-hint">本地登录仅在服务端启用时显示。</p>
           </form>
         </Card>
-        <ApiNote status="available">OIDC 登录/回调与 local login 路由均存在；local login 仍需补入 OpenAPI。</ApiNote>
       </div>
     </div>
   );
