@@ -10,7 +10,7 @@ Compose 栈包含 PostgreSQL、一次性数据库迁移、后端和前端。只�
 cp .env.example .env
 ```
 
-编辑 `.env`，替换每一个 `REPLACE_ME` 占位值。数据库密码应使用不含 URI 保留字符的随机值；`CURSOR_SECRET` 和 `SESSION_COOKIE_SECRET` 分别使用至少 32 字节的独立随机秘密；本地管理员密码至少 12 个字符。不要提交 `.env`。
+编辑 `.env`，必须为其中四个空白的秘密变量填写新值后才能启动；Compose 的 `${VAR:?}` 校验会拒绝任何仍为空的必填值。数据库密码应使用不含 URI 保留字符的长随机值；`CURSOR_SECRET` 和 `SESSION_COOKIE_SECRET` 分别使用至少 32 字节的独立随机秘密；本地管理员密码至少 12 个字符。示例文件不提供任何可部署的已知秘密，也不要提交填写后的 `.env`。
 
 构建并等待所有长期运行服务健康：
 

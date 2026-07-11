@@ -10,14 +10,41 @@ command -v docker >/dev/null 2>&1 || fail "docker is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
 
 config=$(mktemp)
-trap 'rm -f "$config"' EXIT HUP INT TERM
+env_file=$(mktemp)
+empty_env_file=$(mktemp)
+trap 'rm -f "$config" "$env_file" "$empty_env_file"' EXIT HUP INT TERM
 
-POSTGRES_PASSWORD='contract-database-password' \
-CURSOR_SECRET='contract-cursor-secret-at-least-32-bytes' \
-SESSION_COOKIE_SECRET='contract-session-secret-at-least-32-bytes' \
-LOCAL_ADMIN_PASSWORD='contract-local-password' \
-APP_PORT=18080 \
-  docker compose config --format json >"$config"
+for variable in POSTGRES_PASSWORD CURSOR_SECRET SESSION_COOKIE_SECRET LOCAL_ADMIN_PASSWORD; do
+  value=$(sed -n "s/^${variable}=//p" .env.example)
+  [ -z "$value" ] || fail ".env.example must leave $variable empty"
+done
+
+cat >"$env_file" <<'EOF'
+POSTGRES_PASSWORD=contract-database-password
+CURSOR_SECRET=contract-cursor-secret-at-least-32-bytes
+SESSION_COOKIE_SECRET=contract-session-secret-at-least-32-bytes
+LOCAL_ADMIN_PASSWORD=contract-local-password
+OAUTH_ISSUER=http://contract-issuer.local
+OAUTH_AUDIENCE=contract-audience
+APP_PORT=18080
+EOF
+
+OAUTH_ISSUER='http://ambient-issuer.invalid' \
+OAUTH_AUDIENCE='ambient-audience' \
+  env -i HOME="${HOME:-}" PATH="$PATH" \
+  docker compose --env-file "$env_file" config --format json >"$config"
+
+cat >"$empty_env_file" <<'EOF'
+POSTGRES_PASSWORD=
+CURSOR_SECRET=
+SESSION_COOKIE_SECRET=
+LOCAL_ADMIN_PASSWORD=
+EOF
+
+if env -i HOME="${HOME:-}" PATH="$PATH" \
+  docker compose --env-file "$empty_env_file" config --format json >/dev/null 2>&1; then
+  fail "compose config must reject empty required secrets"
+fi
 
 services=$(jq -r '.services | keys | sort | join(",")' "$config")
 [ "$services" = 'backend,frontend,migrate,postgres' ] || fail "unexpected services: $services"
@@ -44,8 +71,8 @@ jq -e '.services.frontend.healthcheck != null' "$config" >/dev/null \
 
 jq -e '.services.backend.environment.DATABASE_URL == "postgres://agentguild:contract-database-password@postgres:5432/agentguild?sslmode=disable"' "$config" >/dev/null \
   || fail "backend DATABASE_URL is not wired to postgres"
-jq -e '.services.backend.environment.OAUTH_ISSUER == "http://agentguild.local" and .services.backend.environment.OAUTH_AUDIENCE == "agentguild"' "$config" >/dev/null \
-  || fail "local OAuth issuer/audience defaults are missing"
+jq -e '.services.backend.environment.OAUTH_ISSUER == "http://contract-issuer.local" and .services.backend.environment.OAUTH_AUDIENCE == "contract-audience"' "$config" >/dev/null \
+  || fail "controlled OAuth issuer/audience are not preserved"
 jq -e '.services.backend.environment.WEB_ENABLED == "true" and .services.backend.environment.MCP_ENABLED == "true"' "$config" >/dev/null \
   || fail "web and MCP transports must be enabled"
 jq -e '.services.backend.volumes[] | select(.target == "/var/lib/agentguild" and .source == "agentguild-keys" and .read_only != true)' "$config" >/dev/null \
