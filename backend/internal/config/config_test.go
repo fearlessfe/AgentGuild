@@ -126,6 +126,14 @@ func TestLoadLocalAdminJWKSRequirement(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "rejects empty external JWKS for MCP-only transport despite local admin password",
+			configure: func(env map[string]string) {
+				env["WEB_ENABLED"] = "false"
+				env["MCP_ENABLED"] = "true"
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

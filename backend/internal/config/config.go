@@ -100,7 +100,7 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	localPassword := get("LOCAL_ADMIN_PASSWORD")
-	cfg.LocalAdmin.Enabled = cfg.OIDCTenantID == "" && localPassword != ""
+	cfg.LocalAdmin.Enabled = cfg.WebEnabled && cfg.OIDCTenantID == "" && localPassword != ""
 	if cfg.LocalAdmin.Enabled && len(localPassword) < 12 {
 		return Config{}, fmt.Errorf("LOCAL_ADMIN_PASSWORD must be at least 12 characters")
 	}
