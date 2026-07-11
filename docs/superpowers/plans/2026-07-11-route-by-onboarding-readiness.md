@@ -35,7 +35,7 @@ base-ref: 1f1949c6611036a0c1a16a1ff5cc565b058f85ee
 - Consumes: `config.Load(get LookupEnv) (Config, error)` 与 `Config.GitHubAppPublicBaseURL`。
 - Produces: `parseGitHubAppPublicBaseURL(raw string, required bool) (string, error)`；Web 模式下 `Config.GitHubAppPublicBaseURL` 始终为规范化 origin。
 
-- [ ] **Step 1: 在 `validEnv` 中加入合法默认值，并写缺失与规范化失败测试**
+- [x] **Step 1: 在 `validEnv` 中加入合法默认值，并写缺失与规范化失败测试**
 
 ```go
 func TestLoadRequiresGitHubAppPublicBaseURLWhenWebEnabled(t *testing.T) {
@@ -81,13 +81,13 @@ func TestLoadNormalizesGitHubAppPublicBaseURL(t *testing.T) {
 "GITHUB_APP_PUBLIC_BASE_URL": "https://agentguild.example.com",
 ```
 
-- [ ] **Step 2: 运行配置测试并确认 RED**
+- [x] **Step 2: 运行配置测试并确认 RED**
 
 Run: `cd backend && go test ./internal/config -run 'TestLoad(Requires|Validates|Normalizes)GitHubAppPublicBaseURL' -count=1`
 
 Expected: FAIL；缺失值仍被接受或非法值未被拒绝。
 
-- [ ] **Step 3: 在 `config.go` 实现最小解析并接入 `Load`**
+- [x] **Step 3: 在 `config.go` 实现最小解析并接入 `Load`**
 
 新增 `net/url` import，并在 transport flags 解析完成后调用：
 
@@ -118,13 +118,13 @@ func parseGitHubAppPublicBaseURL(raw string, required bool) (string, error) {
 }
 ```
 
-- [ ] **Step 4: 格式化并确认 GREEN**
+- [x] **Step 4: 格式化并确认 GREEN**
 
 Run: `cd backend && gofmt -w internal/config/config.go internal/config/config_test.go && go test ./internal/config -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 5: 更新 OpenSpec task 并提交**
+- [x] **Step 5: 更新 OpenSpec task 并提交**
 
 将 `tasks.md` 的 1.1 勾选为完成，然后：
 
