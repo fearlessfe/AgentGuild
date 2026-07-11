@@ -13,7 +13,7 @@ fi
 
 for file in $files; do
   name=$(basename "$file")
-  matched=$(expr "$name" : '[0-9][0-9][0-9][0-9][0-9][0-9]_[^/][^/]*\.up\.sql$') || matched=0
+  matched=$(expr "$name" : '[0-9][0-9][0-9][0-9][0-9][0-9]_[a-z0-9][a-z0-9_-]*\.up\.sql$') || matched=0
   if [ "$matched" -ne "${#name}" ]; then
     echo "invalid migration filename: $name" >&2
     exit 1
@@ -31,14 +31,26 @@ if [ -n "$duplicates" ]; then
   exit 1
 fi
 
-migration_connect_retries=${MIGRATION_CONNECT_RETRIES:-30}
-migration_connect_retry_delay=${MIGRATION_CONNECT_RETRY_DELAY:-2}
-case $migration_connect_retries in
-  ''|*[!0-9]*|0) echo "MIGRATION_CONNECT_RETRIES must be a positive integer" >&2; exit 1 ;;
+# Keep operator mistakes bounded: at most 60 connection attempts and 30 seconds
+# between attempts (a worst-case configured retry window of about 30 minutes).
+max_migration_connect_attempts=60
+max_migration_connect_delay_seconds=30
+migration_connect_attempts=${MIGRATION_CONNECT_ATTEMPTS:-30}
+migration_connect_delay_seconds=${MIGRATION_CONNECT_DELAY_SECONDS:-2}
+case $migration_connect_attempts in
+  ''|*[!0-9]*|0) echo "MIGRATION_CONNECT_ATTEMPTS must be an integer from 1 to $max_migration_connect_attempts" >&2; exit 1 ;;
 esac
-case $migration_connect_retry_delay in
-  ''|*[!0-9]*) echo "MIGRATION_CONNECT_RETRY_DELAY must be a non-negative integer" >&2; exit 1 ;;
+case $migration_connect_delay_seconds in
+  ''|*[!0-9]*) echo "MIGRATION_CONNECT_DELAY_SECONDS must be an integer from 0 to $max_migration_connect_delay_seconds" >&2; exit 1 ;;
 esac
+if [ "$migration_connect_attempts" -gt "$max_migration_connect_attempts" ]; then
+  echo "MIGRATION_CONNECT_ATTEMPTS must be an integer from 1 to $max_migration_connect_attempts" >&2
+  exit 1
+fi
+if [ "$migration_connect_delay_seconds" -gt "$max_migration_connect_delay_seconds" ]; then
+  echo "MIGRATION_CONNECT_DELAY_SECONDS must be an integer from 0 to $max_migration_connect_delay_seconds" >&2
+  exit 1
+fi
 
 sql_file=$(mktemp)
 trap 'rm -f "$sql_file"' EXIT HUP INT TERM
@@ -77,11 +89,11 @@ while :; do
     status=$?
   fi
 
-  if [ "$status" -ne 2 ] || [ "$attempt" -ge "$migration_connect_retries" ]; then
+  if [ "$status" -ne 2 ] || [ "$attempt" -ge "$migration_connect_attempts" ]; then
     exit "$status"
   fi
 
-  echo "database unavailable; retrying migration connection ($attempt/$migration_connect_retries)" >&2
+  echo "database unavailable; retrying migration connection ($attempt/$migration_connect_attempts)" >&2
   attempt=$((attempt + 1))
-  sleep "$migration_connect_retry_delay"
+  sleep "$migration_connect_delay_seconds"
 done
