@@ -11,6 +11,15 @@ if [ -z "$files" ]; then
   exit 1
 fi
 
+for file in $files; do
+  name=$(basename "$file")
+  matched=$(expr "$name" : '[0-9][0-9][0-9][0-9][0-9][0-9]_[^/][^/]*\.up\.sql$') || matched=0
+  if [ "$matched" -ne "${#name}" ]; then
+    echo "invalid migration filename: $name" >&2
+    exit 1
+  fi
+done
+
 prefixes=$(
   for file in $files; do
     basename "$file" | sed 's/_.*//'

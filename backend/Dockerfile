@@ -15,12 +15,14 @@ RUN apk add --no-cache ca-certificates openssl \
 COPY --from=build /out/agentguild-api /usr/local/bin/agentguild-api
 COPY --chmod=0755 deploy/backend-entrypoint.sh /usr/local/bin/backend-entrypoint
 
+ENV AGENT_RSA_PRIVATE_KEY_PATH=/var/lib/agentguild/agent-rsa.pem
 USER agentguild
 ENTRYPOINT ["/usr/local/bin/backend-entrypoint"]
 
 FROM postgres:18.4-alpine AS migrate
 
-COPY backend/migrations/ /migrations/
-COPY --chmod=0755 deploy/migrate.sh /usr/local/bin/migrate
+COPY --chown=postgres:postgres backend/migrations/ /migrations/
+COPY --chown=postgres:postgres --chmod=0555 deploy/migrate.sh /usr/local/bin/migrate
 
+USER postgres
 ENTRYPOINT ["/usr/local/bin/migrate"]

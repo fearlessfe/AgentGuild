@@ -25,4 +25,46 @@ fi
 sh -n "$repo_root/deploy/backend-entrypoint.sh"
 sh -n "$repo_root/deploy/migrate.sh"
 
+test_dir=$(mktemp -d)
+trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
+mkdir "$test_dir/bin"
+
+cat >"$test_dir/bin/find" <<'EOF'
+#!/bin/sh
+printf '%s\n' "${TEST_MIGRATION_FILE:?}"
+EOF
+cat >"$test_dir/bin/psql" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+EOF
+chmod +x "$test_dir/bin/find" "$test_dir/bin/psql"
+
+run_migrate() {
+  TEST_MIGRATION_FILE=$1 DATABASE_URL=postgres://contract-test \
+    PATH="$test_dir/bin:$PATH" sh "$repo_root/deploy/migrate.sh"
+}
+
+run_migrate /migrations/000001_valid.up.sql
+
+for invalid in \
+  00001_too-short.up.sql \
+  0000001_too-long.up.sql \
+  abcdef_not-numeric.up.sql \
+  000001_.up.sql \
+  000001_missing-suffix.sql; do
+  if run_migrate "/migrations/$invalid" >"$test_dir/output" 2>&1; then
+    echo "migration runner accepted invalid basename: $invalid" >&2
+    exit 1
+  fi
+  if ! grep -q 'invalid migration filename' "$test_dir/output"; then
+    echo "migration runner did not report invalid basename: $invalid" >&2
+    cat "$test_dir/output" >&2
+    exit 1
+  fi
+done
+
+grep -q '^ENV AGENT_RSA_PRIVATE_KEY_PATH=/var/lib/agentguild/agent-rsa.pem$' \
+  "$repo_root/backend/Dockerfile"
+grep -q '^USER postgres$' "$repo_root/backend/Dockerfile"
+
 echo "migration container contracts passed"
