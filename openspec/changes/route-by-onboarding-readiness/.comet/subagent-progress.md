@@ -6,12 +6,12 @@
 
 ## Current task
 
-- Plan task: `Task 1: 严格校验并规范化 GitHub App 公网 origin`
-- OpenSpec task: `1.1 先补充配置单元测试，覆盖 Web 模式缺失、非法及合法 GITHUB_APP_PUBLIC_BASE_URL，确认测试按预期失败后实现严格解析与规范化。`
+- Plan task: `Task 2: 证明 manifest 地址只来自显式配置并更新部署文档`
+- OpenSpec task: `1.2 补充 manifest 测试，证明 callback/setup URL 只使用配置值且不受请求头影响，并同步更新部署文档中的必填变量说明。`
 - Stage: `done`
 - Review/fix round: `0/1`
-- Commit: `b75dc980b52cae11a4e3c6353c5506dd19388692`
-- Changed files: `backend/internal/config/config.go`, `backend/internal/config/config_test.go`
-- RED evidence: `go test ./internal/config -run 'TestLoad(Requires|Validates|Normalizes)GitHubAppPublicBaseURL' -count=1` failed because missing/invalid values were accepted and the trailing slash was not normalized.
-- GREEN evidence: `GOCACHE=/tmp/agentguild-go-cache go test ./internal/config -count=1` passed.
+- Commit: `5f5524d66d9caf31d1e31a3cde57c748bafc3146`
+- Changed files: `backend/internal/git/application/manifest_test.go`, `docs/local-dev-github-issue-sync.md`, `AGENTS.md`
+- RED evidence: not applicable unless production behavior changes; this task adds regression coverage for an existing structural boundary.
+- GREEN evidence: `go test ./internal/git/application -run TestManifestBuildContainsPermissionsAndCallbacks -count=1` and `go test ./internal/config ./internal/git/application -count=1` passed.
 - Final review: pending

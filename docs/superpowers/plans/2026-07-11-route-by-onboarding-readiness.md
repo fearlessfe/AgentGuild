@@ -144,7 +144,7 @@ git commit -m "feat: require GitHub App public origin"
 - Consumes: `ManifestService.BuildManifest(tenantID) (manifestJSON, state, redirectURL string, err error)`。
 - Produces: 回归测试证明 `url`、`redirect_url`、`setup_url` 使用配置 origin；部署文档把变量标为 Web 必填。
 
-- [ ] **Step 1: 强化 manifest JSON 测试**
+- [x] **Step 1: 强化 manifest JSON 测试**
 
 在现有 `TestManifestBuildContainsPermissionsAndCallbacks` 的 manifest 结构解析后加入：
 
@@ -156,13 +156,13 @@ require.Equal(t, "https://guild.example.com/oauth/github/app/installed", manifes
 
 该层没有 `*http.Request` 输入；测试通过配置一个与任意请求 Host 无关的固定 origin，即可锁定请求头无法影响输出的结构性边界。
 
-- [ ] **Step 2: 运行 manifest 测试**
+- [x] **Step 2: 运行 manifest 测试**
 
 Run: `cd backend && go test ./internal/git/application -run TestManifestBuildContainsPermissionsAndCallbacks -count=1`
 
 Expected: PASS；现有实现已经只使用配置值，此步骤建立回归覆盖，不需要为了制造 RED 修改生产代码。
 
-- [ ] **Step 3: 更新部署说明**
+- [x] **Step 3: 更新部署说明**
 
 在 `docs/local-dev-github-issue-sync.md` 的环境变量表和启动示例中明确：
 
@@ -172,7 +172,7 @@ GITHUB_APP_PUBLIC_BASE_URL | WEB_ENABLED=true 时必填；AgentGuild 的公网 H
 
 并在仓库维护的环境变量总览中同步相同约束与 HTTPS 生产示例。
 
-- [ ] **Step 4: 运行相关测试并提交**
+- [x] **Step 4: 运行相关测试并提交**
 
 Run: `cd backend && go test ./internal/config ./internal/git/application -count=1`
 
