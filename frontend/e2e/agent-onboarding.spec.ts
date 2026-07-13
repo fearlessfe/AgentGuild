@@ -40,9 +40,13 @@ test("registration reveals one-time token and agent detail hides unsupported con
 test("selects an installed app, searches locally, and adds app and public repositories", async ({ page }) => {
   await page.goto("/repositories");
 
-  await page.getByRole("combobox").selectOption("gha-beta");
-  await page.getByRole("combobox", { name: "授权仓库" }).fill("data");
-  await page.getByRole("option", { name: "acme/data-api" }).click();
+  await page.getByRole("combobox", { name: "GitHub App", exact: true }).selectOption("gha-beta");
+  const repositorySelector = page.getByRole("combobox", { name: "授权仓库" });
+  await repositorySelector.fill("data");
+  await expect(page.getByRole("option", { name: "acme/data-api", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "acme/frontend", exact: true })).toHaveCount(0);
+  await repositorySelector.press("ArrowDown");
+  await repositorySelector.press("Enter");
   await page.getByRole("button", { name: "添加仓库", exact: true }).click();
 
   const onboardedTable = page.getByRole("table", { name: "已接入仓库列表" });
@@ -57,6 +61,7 @@ test("selects an installed app, searches locally, and adds app and public reposi
 test("git integration shows both automatic GitHub App labels", async ({ page }) => {
   await page.goto("/git-integration");
 
-  await expect(page.getByText("alpha · acme-corp")).toBeVisible();
-  await expect(page.getByText("beta · acme-labs")).toBeVisible();
+  const githubAppList = page.getByRole("list", { name: "GitHub App 列表", exact: true });
+  await expect(githubAppList.getByRole("heading", { name: "alpha · acme-corp", exact: true })).toBeVisible();
+  await expect(githubAppList.getByRole("heading", { name: "beta · acme-labs", exact: true })).toBeVisible();
 });

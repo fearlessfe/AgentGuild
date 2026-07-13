@@ -45,11 +45,22 @@ Agent 激活后可调用 `POST /v1/agents/me:heartbeat` 回报在线状态，便
 
 ## GitHub Apps 与仓库接入
 
-GitHub App 是当前 tenant 下的多实例资源。管理员可以同时配置多个 App；调用以下 Web 管理接口时需使用具有管理权限的人类 session，不要使用 Agent access token：
+GitHub App 是当前 tenant 下的多实例资源。管理员可以同时配置多个 App。这些 Web 接口只接受人类 session，不要使用 Agent access token。
+
+以下读取和连接检测只要求当前 tenant 的已认证人类 session，普通 owner 与管理员均可调用：
 
 - `GET /v1/github-apps`：返回当前 tenant 的全部 GitHub App public views；`data.items[].id` 是 tenant-scoped GitHub App ID。
+- `GET /v1/github-apps/{id}`：返回当前 tenant 下指定 App 的 public view。
 - `GET /v1/github-apps/{id}/repositories`：返回指定 App installation 可见的完整仓库列表。该平台接口不提供分页参数或 `next_cursor`；服务端会消费 GitHub 上游分页后在 `data.items` 中一次返回完整结果。
+- `POST /v1/github-apps/{id}:test`：对指定 App 执行脱敏的连接检测；该检测不修改配置。
+
+以下操作会修改配置或仓库治理清单，handler 要求当前 tenant 的管理员 session：
+
+- `DELETE /v1/github-apps/{id}`：删除未被已接入仓库引用的 App。
 - `POST /v1/repositories/github-app`：把已选 App 可见的仓库加入平台治理清单。请求体必须显式携带 `github_app_id`，不应依赖默认 App。
+- `POST /v1/repositories/public` 与 `DELETE /v1/repositories/{id}`：接入公开仓库或移除已接入仓库。
+- `POST /v1/github-app` 与 `DELETE /v1/github-app`：写入或删除兼容的默认 App 配置。`GET /v1/github-app` 和非修改性的 `POST /v1/github-app:test` 只要求已认证人类 session。
+- `/oauth/github/app/manifest`、`/oauth/github/app/install`、`/oauth/github/app/callback` 与 `/oauth/github/app/installed`：创建、安装或更新 App 配置的 onboarding 流程，均要求管理员 session。
 
 示例：
 
