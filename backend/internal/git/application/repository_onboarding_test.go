@@ -94,7 +94,78 @@ func TestRepositoryOnboardingService_AddGitHubAppRepositoryRequiresVisibleRepo(t
 	)
 	require.NoError(t, err)
 
-	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "acme/missing")
+	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-1", "acme/missing")
+
+	require.Error(t, err)
+	require.Equal(t, "not_found", domain.CodeOf(err))
+}
+
+func TestRepositoryOnboardingService_ListGitHubAppRepositoriesUsesSelectedApp(t *testing.T) {
+	svc, err := application.NewRepositoryOnboardingService(
+		newMemoryOnboardedRepositoryStore(),
+		fakeGitHubApps{
+			allowedAppID: "gha-2",
+			repos:        []git.Repository{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}},
+		},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	items, err := svc.ListGitHubAppRepositories(context.Background(), adminPrincipal("tenant-1"), "gha-2")
+
+	require.NoError(t, err)
+	require.Equal(t, []application.RepositoryCandidateView{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}}, items)
+}
+
+func TestRepositoryOnboardingService_AddGitHubAppRepositoryBindsSelectedApp(t *testing.T) {
+	store := newMemoryOnboardedRepositoryStore()
+	svc, err := application.NewRepositoryOnboardingService(
+		store,
+		fakeGitHubApps{
+			allowedAppID: "gha-2",
+			repos:        []git.Repository{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}},
+		},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	view, err := svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-2", "acme/api")
+
+	require.NoError(t, err)
+	require.Equal(t, "gha-2", view.GitHubAppID)
+	require.Equal(t, "gha-2", store.records[0].GitHubAppID)
+}
+
+func TestRepositoryOnboardingService_AddRepositoryRejectsDuplicateAcrossApps(t *testing.T) {
+	store := newMemoryOnboardedRepositoryStore()
+	svc, err := application.NewRepositoryOnboardingService(
+		store,
+		fakeGitHubApps{repos: []git.Repository{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}}},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-1", "acme/api")
+	require.NoError(t, err)
+	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-2", "acme/api")
+
+	require.Error(t, err)
+	require.Equal(t, "state_conflict", domain.CodeOf(err))
+}
+
+func TestRepositoryOnboardingService_ForeignAppIsNotFound(t *testing.T) {
+	svc, err := application.NewRepositoryOnboardingService(
+		newMemoryOnboardedRepositoryStore(),
+		fakeGitHubApps{allowedAppID: "gha-owned"},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	_, err = svc.ListGitHubAppRepositories(context.Background(), adminPrincipal("tenant-1"), "gha-foreign")
 
 	require.Error(t, err)
 	require.Equal(t, "not_found", domain.CodeOf(err))
@@ -114,7 +185,7 @@ func TestRepositoryOnboardingService_MutationsRequireAdmin(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, "forbidden", domain.CodeOf(err))
 
-	_, err = svc.AddGitHubAppRepository(context.Background(), principal, "acme/api")
+	_, err = svc.AddGitHubAppRepository(context.Background(), principal, "gha-1", "acme/api")
 	require.Error(t, err)
 	require.Equal(t, "forbidden", domain.CodeOf(err))
 
@@ -265,10 +336,11 @@ func (r fakePublicRepositoryResolver) ResolvePublicRepository(_ context.Context,
 }
 
 type fakeGitHubApps struct {
-	view    application.GitHubAppView
-	getErr  error
-	repos   []git.Repository
-	listErr error
+	view         application.GitHubAppView
+	getErr       error
+	repos        []git.Repository
+	listErr      error
+	allowedAppID string
 }
 
 func (fakeGitHubApps) Driver(context.Context, string) (git.Driver, error) {
@@ -283,7 +355,10 @@ func (a fakeGitHubApps) IssueSource(context.Context, string) (git.IssueSource, e
 	return fakeIssueSource{repos: a.repos, err: a.listErr}, nil
 }
 
-func (a fakeGitHubApps) IssueSourceForApp(context.Context, string, string) (git.IssueSource, error) {
+func (a fakeGitHubApps) IssueSourceForApp(_ context.Context, _, appID string) (git.IssueSource, error) {
+	if a.allowedAppID != "" && appID != a.allowedAppID {
+		return nil, git.ErrGitHubAppNotConfigured
+	}
 	return fakeIssueSource{repos: a.repos, err: a.listErr}, nil
 }
 

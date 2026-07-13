@@ -95,7 +95,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AddRepositoryRequest'
+              $ref: '#/components/schemas/AddGitHubAppRepositoryRequest'
       responses:
         '201':
           description: 仓库已加入 onboarding 列表
@@ -109,6 +109,33 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps/{id}/repositories:
+    get:
+      operationId: listGitHubAppRepositories
+      summary: 获取指定 GitHub App installation 可见仓库
+      description: 返回当前 tenant 下指定 App installation 的完整仓库列表；外部 tenant 的 App ID 返回 NOT_FOUND。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 指定 App installation 可见的完整仓库列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRepositoryItems'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -868,6 +895,9 @@ components:
           enum:
             - github_app
             - public_github
+        github_app_id:
+          type: string
+          description: GitHub App 来源仓库绑定的 tenant-scoped App ID；public 仓库中为空
         full_name:
           type: string
           example: agentguild/agentguild
@@ -915,6 +945,21 @@ components:
           description: GitHub 仓库 full name 或 https://github.com/{owner}/{repo} URL
           example: agentguild/agentguild
 
+    AddGitHubAppRepositoryRequest:
+      type: object
+      required:
+        - github_app_id
+        - repo
+      properties:
+        github_app_id:
+          type: string
+          description: 当前 tenant 下已选择的 GitHub App ID
+          example: gha-2
+        repo:
+          type: string
+          description: 该 App installation 授权仓库的精确 full name
+          example: agentguild/agentguild
+
     DeleteResult:
       type: object
       properties:
@@ -934,6 +979,14 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/RepositoryItem'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeRepositoryItems:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RepositoryItems'
         meta:
           $ref: '#/components/schemas/Meta'
 

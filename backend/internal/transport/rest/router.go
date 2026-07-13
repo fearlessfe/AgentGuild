@@ -89,7 +89,8 @@ type experienceService interface {
 
 type repositoryOnboardingService interface {
 	Summary(ctx context.Context, principal gitapp.Principal) (gitapp.RepositoryOnboardingSummary, error)
-	AddGitHubAppRepository(ctx context.Context, principal gitapp.Principal, fullName string) (gitapp.OnboardedRepositoryView, error)
+	ListGitHubAppRepositories(ctx context.Context, principal gitapp.Principal, appID string) ([]gitapp.RepositoryCandidateView, error)
+	AddGitHubAppRepository(ctx context.Context, principal gitapp.Principal, appID, fullName string) (gitapp.OnboardedRepositoryView, error)
 	AddPublicRepository(ctx context.Context, principal gitapp.Principal, input string) (gitapp.OnboardedRepositoryView, error)
 	Remove(ctx context.Context, principal gitapp.Principal, id string) error
 }
@@ -379,6 +380,7 @@ func (s *Server) Router() http.Handler {
 		}
 		if s.repositoryOnboarding != nil {
 			r.With(s.requireSession, s.rateLimit).Get("/repository-onboarding", s.getRepositoryOnboarding)
+			r.With(s.requireSession, s.rateLimit).Get("/github-apps/{id}/repositories", s.listGitHubAppRepositories)
 			r.With(s.requireSession, s.rateLimit).Post("/repositories/github-app", s.addGitHubAppRepository)
 			r.With(s.requireSession, s.rateLimit).Post("/repositories/public", s.addPublicRepository)
 			r.With(s.requireSession, s.rateLimit).Delete("/repositories/{id}", s.deleteOnboardedRepository)

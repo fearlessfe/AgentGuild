@@ -68,6 +68,10 @@ func (f *fakeGitHubAppManager) IssueSourceForApp(ctx context.Context, tenantID, 
 	if f.issueSourceErr != nil {
 		return nil, f.issueSourceErr
 	}
+	record, ok := f.store[tenantID]
+	if !ok || record.ID != appID {
+		return nil, git.ErrGitHubAppNotConfigured
+	}
 	if f.issueSource != nil {
 		return f.issueSource, nil
 	}

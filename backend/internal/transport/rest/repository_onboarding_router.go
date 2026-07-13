@@ -23,6 +23,7 @@ type repositoryItemsView struct {
 type repositoryItemView struct {
 	ID            string     `json:"id,omitempty"`
 	SourceType    string     `json:"source_type,omitempty"`
+	GitHubAppID   string     `json:"github_app_id,omitempty"`
 	FullName      string     `json:"full_name"`
 	DefaultBranch string     `json:"default_branch"`
 	Visibility    string     `json:"visibility"`
@@ -31,7 +32,18 @@ type repositoryItemView struct {
 }
 
 type addRepositoryBody struct {
-	Repo string `json:"repo"`
+	GitHubAppID string `json:"github_app_id"`
+	Repo        string `json:"repo"`
+}
+
+func (s *Server) listGitHubAppRepositories(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r)
+	items, err := s.repositoryOnboarding.ListGitHubAppRepositories(r.Context(), repositoryOnboardingPrincipal(principal), chi.URLParam(r, "id"))
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeEnvelope(w, http.StatusOK, repositoryItemsView{Items: toRepositoryCandidateItemViews(items)})
 }
 
 func (s *Server) getRepositoryOnboarding(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +65,7 @@ func (s *Server) addGitHubAppRepository(w http.ResponseWriter, r *http.Request) 
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	view, err := s.repositoryOnboarding.AddGitHubAppRepository(r.Context(), repositoryOnboardingPrincipal(principal), body.Repo)
+	view, err := s.repositoryOnboarding.AddGitHubAppRepository(r.Context(), repositoryOnboardingPrincipal(principal), body.GitHubAppID, body.Repo)
 	if err != nil {
 		mapDomainError(w, err, principal)
 		return
@@ -136,6 +148,7 @@ func toOnboardedRepositoryItemView(item gitapp.OnboardedRepositoryView) reposito
 	view := repositoryItemView{
 		ID:            item.ID,
 		SourceType:    item.SourceType,
+		GitHubAppID:   item.GitHubAppID,
 		FullName:      item.FullName,
 		DefaultBranch: item.DefaultBranch,
 		Visibility:    item.Visibility,

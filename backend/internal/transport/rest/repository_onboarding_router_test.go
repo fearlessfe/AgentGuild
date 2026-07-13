@@ -110,6 +110,7 @@ func TestRepositoryOnboardingPublicAddRequiresAdminSession(t *testing.T) {
 func TestRepositoryOnboardingGitHubAppAddRequiresAdminSession(t *testing.T) {
 	svc := newRepositoryOnboardingService(t)
 	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{
+		ID:             "gha-2",
 		TenantID:       "tenant-1",
 		Provider:       "github",
 		AppID:          123,
@@ -124,10 +125,10 @@ func TestRepositoryOnboardingGitHubAppAddRequiresAdminSession(t *testing.T) {
 	}}}
 	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
 
-	unauthorized := postJSON(t, server, "/v1/repositories/github-app", `{"repo":"agentguild/agentguild"}`, "token-publisher")
+	unauthorized := postJSON(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, "token-publisher")
 	require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
 
-	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"repo":"agentguild/agentguild"}`, sessionCookie(t, "admin-1", true))
+	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusCreated, created.Code)
 	var body struct {
@@ -136,8 +137,41 @@ func TestRepositoryOnboardingGitHubAppAddRequiresAdminSession(t *testing.T) {
 	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &body))
 	require.Equal(t, "repo-1", body.Data.ID)
 	require.Equal(t, gitapp.RepositorySourceGitHubApp, body.Data.SourceType)
+	require.Equal(t, "gha-2", body.Data.GitHubAppID)
 	require.Equal(t, "agentguild/agentguild", body.Data.FullName)
+	require.Equal(t, "gha-2", svc.store.records["tenant-1"]["repo-1"].GitHubAppID)
 	require.NotContains(t, created.Body.String(), "secret-key")
+}
+
+func TestGitHubAppRepositoriesUsesSelectedApp(t *testing.T) {
+	svc := newRepositoryOnboardingService(t)
+	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{ID: "gha-2", TenantID: "tenant-1", Provider: "github", AppID: 123, InstallationID: 456, PrivateKey: "secret-key", BaseURL: "https://api.github.com"}
+	svc.apps.issueSource = &fakeSyncIssueSource{repos: []git.Repository{{FullName: "agentguild/agentguild", DefaultBranch: "main", Visibility: "private"}}}
+	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
+
+	res := getWithSession(t, server, "/v1/github-apps/gha-2/repositories", sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusOK, res.Code)
+	var body struct {
+		Data struct {
+			Items []repositoryItemBody `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
+	require.Equal(t, []repositoryItemBody{{FullName: "agentguild/agentguild", DefaultBranch: "main", Visibility: "private"}}, body.Data.Items)
+	require.Contains(t, svc.apps.calls, githubAppCall{method: "IssueSourceForApp", tenantID: "tenant-1", payload: "gha-2"})
+}
+
+func TestGitHubAppRepositoriesHidesForeignApp(t *testing.T) {
+	svc := newRepositoryOnboardingService(t)
+	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{ID: "gha-owned", TenantID: "tenant-1", Provider: "github", AppID: 123, InstallationID: 456, PrivateKey: "secret-key", BaseURL: "https://api.github.com"}
+	svc.apps.issueSource = &fakeSyncIssueSource{repos: []git.Repository{{FullName: "secret/private", DefaultBranch: "main", Visibility: "private"}}}
+	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
+
+	res := getWithSession(t, server, "/v1/github-apps/gha-foreign/repositories", sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusNotFound, res.Code)
+	require.NotContains(t, res.Body.String(), "secret/private")
 }
 
 func TestRepositoryOnboardingDeleteRequiresAdminSession(t *testing.T) {
@@ -187,7 +221,7 @@ func TestRepositoryOnboardingMutationsRejectNonAdminSession(t *testing.T) {
 			return postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, cookie)
 		}},
 		{name: "app add", do: func() *httptest.ResponseRecorder {
-			return postJSONWithSession(t, server, "/v1/repositories/github-app", `{"repo":"agentguild/agentguild"}`, cookie)
+			return postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-1","repo":"agentguild/agentguild"}`, cookie)
 		}},
 		{name: "delete", do: func() *httptest.ResponseRecorder {
 			return deleteWithSession(t, server, "/v1/repositories/repo-1", cookie)
@@ -205,6 +239,7 @@ func TestRepositoryOnboardingMutationsRejectNonAdminSession(t *testing.T) {
 type repositoryItemBody struct {
 	ID            string `json:"id,omitempty"`
 	SourceType    string `json:"source_type,omitempty"`
+	GitHubAppID   string `json:"github_app_id,omitempty"`
 	FullName      string `json:"full_name"`
 	DefaultBranch string `json:"default_branch"`
 	Visibility    string `json:"visibility"`
