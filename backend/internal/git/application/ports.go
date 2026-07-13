@@ -19,6 +19,7 @@ type GitHubAppRepository interface {
 	GetByID(context.Context, string, string) (*GitHubAppRecord, error)
 	GetDefault(context.Context, string) (*GitHubAppRecord, error)
 	Delete(context.Context, string, string) error
+	DeleteAndPromoteDefault(context.Context, string, string) error
 }
 
 var _ ExecutionNotifier = (*NopExecutionNotifier)(nil)

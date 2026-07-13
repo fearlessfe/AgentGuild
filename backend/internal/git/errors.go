@@ -15,4 +15,5 @@ var (
 	ErrSubmissionNotFound        = &domain.Error{Code: "not_found", Message: "submission not found"}
 	ErrValidationJobNotFound     = &domain.Error{Code: "not_found", Message: "validation job not found"}
 	ErrGitHubAppNotConfigured    = &domain.Error{Code: "not_configured", Message: "GitHub App is not configured for this tenant"}
+	ErrGitHubAppInUse            = &domain.Error{Code: "state_conflict", Message: "GitHub App is still referenced by an onboarded repository"}
 )

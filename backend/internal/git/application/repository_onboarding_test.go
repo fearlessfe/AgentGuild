@@ -275,7 +275,15 @@ func (fakeGitHubApps) Driver(context.Context, string) (git.Driver, error) {
 	return nil, nil
 }
 
+func (fakeGitHubApps) DriverForApp(context.Context, string, string) (git.Driver, error) {
+	return nil, nil
+}
+
 func (a fakeGitHubApps) IssueSource(context.Context, string) (git.IssueSource, error) {
+	return fakeIssueSource{repos: a.repos, err: a.listErr}, nil
+}
+
+func (a fakeGitHubApps) IssueSourceForApp(context.Context, string, string) (git.IssueSource, error) {
 	return fakeIssueSource{repos: a.repos, err: a.listErr}, nil
 }
 
@@ -287,6 +295,10 @@ func (a fakeGitHubApps) Install(context.Context, string, int64) (application.Git
 	return a.view, nil
 }
 
+func (a fakeGitHubApps) InstallByID(context.Context, string, string, int64, string) (application.GitHubAppView, error) {
+	return a.view, nil
+}
+
 func (a fakeGitHubApps) Get(context.Context, string) (application.GitHubAppView, error) {
 	if a.getErr != nil {
 		return application.GitHubAppView{}, a.getErr
@@ -294,7 +306,22 @@ func (a fakeGitHubApps) Get(context.Context, string) (application.GitHubAppView,
 	return a.view, nil
 }
 
+func (a fakeGitHubApps) GetByID(ctx context.Context, tenantID, _ string) (application.GitHubAppView, error) {
+	return a.Get(ctx, tenantID)
+}
+
+func (a fakeGitHubApps) List(context.Context, string) ([]application.GitHubAppView, error) {
+	if a.getErr != nil {
+		return nil, a.getErr
+	}
+	return []application.GitHubAppView{a.view}, nil
+}
+
 func (fakeGitHubApps) Delete(context.Context, string) error {
+	return nil
+}
+
+func (fakeGitHubApps) DeleteByID(context.Context, string, string) error {
 	return nil
 }
 

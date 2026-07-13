@@ -17,10 +17,16 @@ type GitHubAppService interface {
 type GitHubAppManager interface {
 	GitHubAppService
 	IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)
+	IssueSourceForApp(ctx context.Context, tenantID, appID string) (git.IssueSource, error)
 	Upsert(context.Context, UpsertGitHubApp) error
 	Install(context.Context, string, int64) (GitHubAppView, error)
+	InstallByID(context.Context, string, string, int64, string) (GitHubAppView, error)
 	Get(context.Context, string) (GitHubAppView, error)
+	GetByID(context.Context, string, string) (GitHubAppView, error)
+	List(context.Context, string) ([]GitHubAppView, error)
 	Delete(context.Context, string) error
+	DeleteByID(context.Context, string, string) error
+	DriverForApp(context.Context, string, string) (git.Driver, error)
 }
 
 // CredentialService issues and revokes short-lived, execution-scoped Git

@@ -168,4 +168,58 @@ func (r *githubAppRepository) Delete(ctx context.Context, tenantID, id string) e
 	return nil
 }
 
+func (r *githubAppRepository) DeleteAndPromoteDefault(ctx context.Context, tenantID, id string) error {
+	var found, bound, deleted bool
+	err := r.q.QueryRow(ctx, `
+		WITH target AS MATERIALIZED (
+			SELECT is_default
+			FROM github_apps
+			WHERE tenant_id = $1 AND id = $2
+			FOR UPDATE
+		), binding AS MATERIALIZED (
+			SELECT 1
+			FROM onboarded_repositories
+			WHERE tenant_id = $1 AND github_app_id = $2
+			LIMIT 1
+		), deleted AS (
+			DELETE FROM github_apps
+			WHERE tenant_id = $1 AND id = $2
+				AND EXISTS (SELECT 1 FROM target)
+				AND NOT EXISTS (SELECT 1 FROM binding)
+			RETURNING is_default
+		), promoted AS (
+			UPDATE github_apps
+			SET is_default = true, updated_at = clock_timestamp()
+			WHERE tenant_id = $1
+				AND id = (
+					SELECT id
+					FROM github_apps
+					WHERE tenant_id = $1 AND id <> $2
+					ORDER BY created_at, id
+					LIMIT 1
+				)
+				AND EXISTS (SELECT 1 FROM deleted WHERE is_default)
+			RETURNING id
+		)
+		SELECT
+			EXISTS (SELECT 1 FROM target),
+			EXISTS (SELECT 1 FROM binding),
+			EXISTS (SELECT 1 FROM deleted)
+		FROM (SELECT count(*) FROM promoted) AS ensure_promoted_runs`, tenantID, id,
+	).Scan(&found, &bound, &deleted)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return git.ErrGitHubAppNotConfigured
+	}
+	if bound {
+		return git.ErrGitHubAppInUse
+	}
+	if !deleted {
+		return git.ErrGitHubAppInUse
+	}
+	return nil
+}
+
 var _ application.GitHubAppRepository = (*githubAppRepository)(nil)
