@@ -2,7 +2,9 @@ package application_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -176,6 +178,7 @@ func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	require.Equal(t, int64(123), record.AppID)
 	require.Equal(t, "gha-manifest", record.ID)
 	require.Equal(t, int64(0), record.InstallationID)
+	require.Equal(t, server.URL, record.BaseURL)
 	require.Equal(t, "my-app", record.AppSlug)
 	require.Contains(t, record.PrivateKey, "BEGIN RSA PRIVATE KEY")
 	require.Equal(t, "cid", record.ClientID)
@@ -192,6 +195,58 @@ func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(blob), "BEGIN RSA PRIVATE KEY")
 	require.NotContains(t, string(blob), "private_key")
+}
+
+func TestManifestParallelStatesPersistCredentialsByGitHubAppID(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/app-manifests/code-1/conversions":
+			_, _ = w.Write([]byte(`{"id":101,"slug":"first-app","pem":"first-private-key","client_id":"first-client","client_secret":"first-client-secret","webhook_secret":"first-webhook-secret"}`))
+		case "/app-manifests/code-2/conversions":
+			_, _ = w.Write([]byte(`{"id":202,"slug":"second-app","pem":"second-private-key","client_id":"second-client","client_secret":"second-client-secret","webhook_secret":"second-webhook-secret"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	repo := newMemoryGitHubAppRepo()
+	manager, err := application.NewGitHubAppManager(repo)
+	require.NoError(t, err)
+	svc := newManifestServiceWithIDs(t, manager, server.URL, "gha-1", "gha-2")
+
+	_, firstState, _, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+	_, secondState, _, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+	first, err := svc.VerifyState(firstState, "tenant-1")
+	require.NoError(t, err)
+	second, err := svc.VerifyState(secondState, "tenant-1")
+	require.NoError(t, err)
+
+	_, err = svc.ExchangeCode(ctx, "tenant-1", first.GitHubAppID, "code-1")
+	require.NoError(t, err)
+	_, err = svc.ExchangeCode(ctx, "tenant-1", second.GitHubAppID, "code-2")
+	require.NoError(t, err)
+
+	firstRecord, err := repo.GetByID(ctx, "tenant-1", "gha-1")
+	require.NoError(t, err)
+	secondRecord, err := repo.GetByID(ctx, "tenant-1", "gha-2")
+	require.NoError(t, err)
+	require.Equal(t, int64(101), firstRecord.AppID)
+	require.Equal(t, int64(202), secondRecord.AppID)
+	require.Equal(t, "first-app", firstRecord.AppSlug)
+	require.Equal(t, "second-app", secondRecord.AppSlug)
+	require.Equal(t, server.URL, firstRecord.BaseURL)
+	require.Equal(t, server.URL, secondRecord.BaseURL)
+	require.Equal(t, credentialDigest("first-private-key", "first-client", "first-client-secret", "first-webhook-secret"), credentialDigest(firstRecord.PrivateKey, firstRecord.ClientID, firstRecord.ClientSecret, firstRecord.WebhookSecret))
+	require.Equal(t, credentialDigest("second-private-key", "second-client", "second-client-secret", "second-webhook-secret"), credentialDigest(secondRecord.PrivateKey, secondRecord.ClientID, secondRecord.ClientSecret, secondRecord.WebhookSecret))
+}
+
+func credentialDigest(privateKey, clientID, clientSecret, webhookSecret string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(privateKey+"\x00"+clientID+"\x00"+clientSecret+"\x00"+webhookSecret)))
 }
 
 func TestManifestInstallFetchesAccountWithoutExposingCredentials(t *testing.T) {

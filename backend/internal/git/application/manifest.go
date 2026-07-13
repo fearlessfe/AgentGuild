@@ -224,7 +224,7 @@ func (m *ManifestService) ExchangeCode(ctx context.Context, tenantID, githubAppI
 		AppID:          conversion.ID,
 		InstallationID: 0,
 		PrivateKey:     conversion.PEM,
-		BaseURL:        defaultConversionsBaseURL,
+		BaseURL:        m.conversionsBaseURL,
 		WebhookSecret:  conversion.WebhookSecret,
 		ClientID:       conversion.ClientID,
 		ClientSecret:   conversion.ClientSecret,
