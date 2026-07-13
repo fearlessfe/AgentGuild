@@ -111,8 +111,104 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps:
+    get:
+      operationId: listGitHubApps
+      summary: 列出当前租户的 GitHub Apps
+      description: 返回当前 tenant 的全部 GitHub App public views，不包含任何密钥材料。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 当前租户的 GitHub Apps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeGitHubAppItems'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Tenant-scoped GitHub App ID
+        schema:
+          type: string
+    get:
+      operationId: getGitHubApp
+      summary: 获取指定 GitHub App
+      description: 仅返回当前 tenant 下指定 App 的公开信息；外部 tenant 的 App ID 返回 NOT_FOUND。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: GitHub App public view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeGitHubApp'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    delete:
+      operationId: deleteGitHubApp
+      summary: 删除指定 GitHub App
+      description: 管理员操作。仅允许删除未被 onboarded 仓库引用的 App；删除默认 App 时原子提升替代默认 App。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: GitHub App 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps/{id}:test:
+    post:
+      operationId: testGitHubApp
+      summary: 检测指定 GitHub App 连接
+      description: 使用当前 tenant 下选定 App 的 installation 列出仓库，并仅返回成功状态、仓库数量及脱敏错误。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Tenant-scoped GitHub App ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 连接检测结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeGitHubAppConnectionTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -171,6 +267,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -862,6 +960,9 @@ components:
       type: object
       description: GitHub App public view；不会包含 private_key、webhook_secret 或 client_secret。
       properties:
+        id:
+          type: string
+          description: Tenant-scoped GitHub App ID
         tenant_id:
           type: string
         provider:
@@ -876,6 +977,12 @@ components:
           type: string
         app_slug:
           type: string
+        installation_account_login:
+          type: string
+          description: GitHub installation account login returned by GitHub
+        is_default:
+          type: boolean
+          description: Whether singular compatibility routes select this App
         configured:
           type: boolean
         created_at:
@@ -884,6 +991,31 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    GitHubAppItems:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitHubAppPublicView'
+
+    GitHubAppConnectionTest:
+      type: object
+      required:
+        - ok
+        - repo_count
+      properties:
+        ok:
+          type: boolean
+        repo_count:
+          type: integer
+          minimum: 0
+        error:
+          type: string
+          description: Stable, redacted error message when ok is false
 
     RepositoryItem:
       type: object
@@ -973,6 +1105,30 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/RepositoryOnboardingSummary'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeGitHubApp:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GitHubAppPublicView'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeGitHubAppItems:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GitHubAppItems'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeGitHubAppConnectionTest:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GitHubAppConnectionTest'
         meta:
           $ref: '#/components/schemas/Meta'
 

@@ -367,6 +367,10 @@ func (s *Server) Router() http.Handler {
 			r.With(s.requireSession, s.rateLimit).Post("/github-app", s.upsertGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Delete("/github-app", s.deleteGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Post("/github-app:test", s.testGitHubApp)
+			r.With(s.requireSession, s.rateLimit).Get("/github-apps", s.listGitHubApps)
+			r.With(s.requireSession, s.rateLimit).Get("/github-apps/{id}", s.getGitHubAppByID)
+			r.With(s.requireSession, s.rateLimit).Delete("/github-apps/{id}", s.deleteGitHubAppByID)
+			r.With(s.requireSession, s.rateLimit).Post("/github-apps/{id}:test", s.testGitHubAppByID)
 		}
 		if s.syncRules != nil {
 			r.With(s.requireSession, s.rateLimit).Get("/sync-rules", s.listSyncRules)

@@ -17,6 +17,9 @@ import (
 // GitHub's apps/new page.
 func (s *Server) githubManifest(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	manifest, state, redirectURL, err := s.manifest.BuildManifest(principal.TenantID)
 	if err != nil {
 		mapDomainError(w, err, principal)
@@ -45,6 +48,9 @@ func (s *Server) githubManifest(w http.ResponseWriter, r *http.Request) {
 // code for App credentials, persists them, and redirects to the frontend.
 func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 
@@ -64,6 +70,9 @@ func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) 
 // already-created App while carrying a fresh signed state token.
 func (s *Server) githubAppInstall(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	githubAppID := r.URL.Query().Get("github_app_id")
 	var view gitapp.GitHubAppView
 	var err error
@@ -88,6 +97,9 @@ func (s *Server) githubAppInstall(w http.ResponseWriter, r *http.Request) {
 // verifies state, and re-persists the tenant's App configuration with it.
 func (s *Server) githubAppInstalled(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	state := r.URL.Query().Get("state")
 	installationID, err := strconv.ParseInt(r.URL.Query().Get("installation_id"), 10, 64)
 	if err != nil || installationID == 0 {
@@ -114,19 +126,21 @@ func (s *Server) testGitHubApp(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
 
 	source, err := s.gitHubAppManager.IssueSource(r.Context(), principal.TenantID)
+	writeJSON(w, http.StatusOK, map[string]any{"data": testGitHubConnection(r, source, err)})
+}
+
+func testGitHubConnection(r *http.Request, source git.IssueSource, err error) map[string]any {
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"data": connectionTestResult(err)})
-		return
+		return connectionTestResult(err)
 	}
 	repos, err := source.ListInstallationRepositories(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"data": connectionTestResult(err)})
-		return
+		return connectionTestResult(err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+	return map[string]any{
 		"ok":         true,
 		"repo_count": len(repos),
-	}})
+	}
 }
 
 // connectionTestResult maps an error to the failure payload, mapping the

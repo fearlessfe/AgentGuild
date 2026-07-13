@@ -18,6 +18,8 @@ import (
 type fakeGitHubAppManager struct {
 	calls                  []githubAppCall
 	store                  map[string]*gitapp.GitHubAppRecord
+	listViews              map[string][]gitapp.GitHubAppView
+	byID                   map[string]*gitapp.GitHubAppRecord
 	getErr                 error
 	upsertErr              error
 	deleteErr              error
@@ -92,6 +94,9 @@ func (f *fakeGitHubAppManager) Get(ctx context.Context, tenantID string) (gitapp
 
 func (f *fakeGitHubAppManager) GetByID(ctx context.Context, tenantID, appID string) (gitapp.GitHubAppView, error) {
 	f.calls = append(f.calls, githubAppCall{method: "GetByID", tenantID: tenantID, payload: appID})
+	if record, ok := f.byID[tenantID+"/"+appID]; ok {
+		return toGitHubAppView(record), nil
+	}
 	record, ok := f.store[tenantID]
 	if !ok || record.ID != appID {
 		return gitapp.GitHubAppView{}, git.ErrGitHubAppNotConfigured
@@ -101,6 +106,9 @@ func (f *fakeGitHubAppManager) GetByID(ctx context.Context, tenantID, appID stri
 
 func (f *fakeGitHubAppManager) List(ctx context.Context, tenantID string) ([]gitapp.GitHubAppView, error) {
 	f.calls = append(f.calls, githubAppCall{method: "List", tenantID: tenantID})
+	if views, ok := f.listViews[tenantID]; ok {
+		return append([]gitapp.GitHubAppView(nil), views...), nil
+	}
 	record, ok := f.store[tenantID]
 	if !ok {
 		return []gitapp.GitHubAppView{}, nil
@@ -184,6 +192,10 @@ func (f *fakeGitHubAppManager) DeleteByID(ctx context.Context, tenantID, appID s
 	f.calls = append(f.calls, githubAppCall{method: "DeleteByID", tenantID: tenantID, payload: appID})
 	if f.deleteErr != nil {
 		return f.deleteErr
+	}
+	if _, ok := f.byID[tenantID+"/"+appID]; ok {
+		delete(f.byID, tenantID+"/"+appID)
+		return nil
 	}
 	record, ok := f.store[tenantID]
 	if !ok || record.ID != appID {
@@ -270,7 +282,7 @@ func TestGitHubApp_Create(t *testing.T) {
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager))
 	body := `{"app_id":1,"installation_id":2,"private_key":"private-key","base_url":"https://github.example.com/api/v3","provider":"github"}`
 
-	res := postJSONWithSession(t, server, "/v1/github-app", body, sessionCookie(t, "owner-1", false))
+	res := postJSONWithSession(t, server, "/v1/github-app", body, sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusOK, res.Code)
 	var view gitapp.GitHubAppView
@@ -310,7 +322,7 @@ func TestGitHubApp_Update(t *testing.T) {
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager))
 	body := `{"app_id":99,"installation_id":88,"private_key":"new-key","base_url":"https://api.github.com","provider":"github"}`
 
-	res := postJSONWithSession(t, server, "/v1/github-app", body, sessionCookie(t, "owner-1", false))
+	res := postJSONWithSession(t, server, "/v1/github-app", body, sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusOK, res.Code)
 	var view gitapp.GitHubAppView
@@ -338,7 +350,7 @@ func TestGitHubApp_Delete(t *testing.T) {
 	}
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager))
 
-	res := deleteWithSession(t, server, "/v1/github-app", sessionCookie(t, "owner-1", false))
+	res := deleteWithSession(t, server, "/v1/github-app", sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusOK, res.Code)
 	var body struct {

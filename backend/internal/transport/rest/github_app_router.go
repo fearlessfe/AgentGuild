@@ -18,6 +18,9 @@ func (s *Server) getGitHubApp(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) upsertGitHubApp(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	var body struct {
 		AppID          int64  `json:"app_id"`
 		InstallationID int64  `json:"installation_id"`
@@ -49,6 +52,9 @@ func (s *Server) upsertGitHubApp(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteGitHubApp(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	if err := s.gitHubAppManager.Delete(r.Context(), principal.TenantID); err != nil {
 		mapDomainError(w, err, principal)
 		return

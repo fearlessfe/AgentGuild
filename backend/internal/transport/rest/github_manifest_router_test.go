@@ -28,7 +28,7 @@ func TestGitHubManifest_BuildForm(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/manifest", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/manifest", sessionCookie(t, "admin-1", true))
 
 	body := res.Body.String()
 	switch res.Code {
@@ -55,7 +55,7 @@ func TestGitHubManifest_BuildFormIgnoresConflictingForwardedHeaders(t *testing.T
 	req.Header.Set("X-Forwarded-Host", "forwarded-attacker.example")
 	req.Header.Set("X-Forwarded-Proto", "http")
 	req.Header.Set("X-Forwarded-Port", "8080")
-	req.AddCookie(sessionCookie(t, "owner-1", false))
+	req.AddCookie(sessionCookie(t, "admin-1", true))
 	res := httptest.NewRecorder()
 
 	server.ServeHTTP(res, req)
@@ -79,7 +79,7 @@ func TestGitHubManifest_CallbackBadState(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/callback?state=bad&code=x", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/callback?state=bad&code=x", sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusBadRequest, res.Code)
 	for _, call := range manager.calls {
@@ -103,7 +103,7 @@ func TestGitHubAppInstallRedirectUsesScopedApp(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/install?github_app_id=gha-2", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/install?github_app_id=gha-2", sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusFound, res.Code)
 	location := res.Header().Get("Location")
@@ -124,7 +124,7 @@ func TestGitHubAppInstallLegacyRedirectUsesDeterministicDefault(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/install", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/install", sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusFound, res.Code)
 	state := strings.TrimPrefix(res.Header().Get("Location"), "https://github.com/apps/agentguild-default/installations/new?state=")
@@ -155,7 +155,7 @@ func TestGitHubAppInstalledUsesSignedAppAndPreservesExistingCredentials(t *testi
 	state := strings.TrimPrefix(installURL, "https://github.com/apps/agentguild-test/installations/new?state=")
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/installed?installation_id=456&github_app_id=untrusted&state="+state, sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/installed?installation_id=456&github_app_id=untrusted&state="+state, sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusFound, res.Code)
 	require.Equal(t, "/git-integration?installed=1", res.Header().Get("Location"))
@@ -255,4 +255,23 @@ func TestGitHubManifest_RequiresSession(t *testing.T) {
 		res := postJSON(t, server, "/v1/github-app:test", `{}`, "token-publisher")
 		require.Equal(t, http.StatusUnauthorized, res.Code)
 	})
+}
+
+func TestGitHubManifestConfigurationFlowsRequireAdmin(t *testing.T) {
+	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{
+		"tenant-1": {ID: "gha-default", TenantID: "tenant-1", AppSlug: "agentguild-test", IsDefault: true},
+	}}
+	svc := newManifestService(manager)
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
+	cookie := sessionCookie(t, "owner-1", false)
+
+	manifest := getWithSession(t, server, "/oauth/github/app/manifest", cookie)
+	install := getWithSession(t, server, "/oauth/github/app/install", cookie)
+	callback := getWithSession(t, server, "/oauth/github/app/callback?state=bad&code=x", cookie)
+	installed := getWithSession(t, server, "/oauth/github/app/installed?installation_id=1&state=bad", cookie)
+
+	for _, res := range []*httptest.ResponseRecorder{manifest, install, callback, installed} {
+		require.Equal(t, http.StatusForbidden, res.Code)
+		require.Contains(t, res.Body.String(), "admin session is required")
+	}
 }
