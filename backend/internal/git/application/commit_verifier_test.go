@@ -41,6 +41,28 @@ func TestVerifyCommitPassesWhenAllChecksSucceed(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestCommitVerifierUsesRepositoryBoundDriver(t *testing.T) {
+	fixture := newVerifierFixture(t)
+	fixture.driver.commits = map[string]git.Commit{
+		"head-sha": {SHA: "head-sha"}, "agentguild/exec-1": {SHA: "head-sha"},
+	}
+	fixture.driver.ancestors = map[ancestorKey]bool{
+		{base: "base-sha", head: "head-sha"}: true,
+		{base: "head-sha", head: "head-sha"}: true,
+	}
+
+	err := fixture.verifier.Verify(context.Background(), application.VerifyCommit{
+		TenantID: "tenant-1", ExecutionID: "exec-1", Repo: "acme/api",
+		Branch: "agentguild/exec-1", CommitSHA: "head-sha", BaseCommitSHA: "base-sha",
+	})
+	require.NoError(t, err)
+	_, err = fixture.verifier.ChangedFiles(context.Background(), "tenant-1", "acme/api", "base-sha", "head-sha")
+	require.NoError(t, err)
+	_, err = fixture.verifier.IsCommitReachable(context.Background(), "tenant-1", "acme/api", "agentguild/exec-1", "head-sha")
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenant-1/acme/api", "tenant-1/acme/api", "tenant-1/acme/api"}, fixture.resolver.driverCalls)
+}
+
 func TestVerifyCommitRequiresFields(t *testing.T) {
 	fixture := newVerifierFixture(t)
 	base := application.VerifyCommit{
@@ -367,6 +389,7 @@ func TestVerifyCommitPropagatesDriverErrors(t *testing.T) {
 type verifierFixture struct {
 	verifier    *application.CommitVerifier
 	driver      *fakeDriver
+	resolver    *fakeAppService
 	submissions *fakeSubmissionRepository
 }
 
@@ -374,9 +397,11 @@ func newVerifierFixture(t *testing.T) *verifierFixture {
 	t.Helper()
 	d := &fakeDriver{commits: map[string]git.Commit{}}
 	s := &fakeSubmissionRepository{}
+	r := &fakeAppService{driver: d}
 	return &verifierFixture{
-		verifier:    application.NewCommitVerifier(d, s),
+		verifier:    application.NewCommitVerifier(r, s),
 		driver:      d,
+		resolver:    r,
 		submissions: s,
 	}
 }
@@ -395,10 +420,6 @@ type fakeDriver struct {
 	ancestorErr error
 	branchErr   error
 	compareErr  error
-}
-
-func (f *fakeDriver) Driver(_ context.Context, _ string) (git.Driver, error) {
-	return f, nil
 }
 
 func (f *fakeDriver) CreateCredential(_ context.Context, _, _, _ string) (git.Credential, error) {

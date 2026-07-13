@@ -46,7 +46,6 @@ import (
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
 	syncapp "agentguild.dev/agentguild/backend/internal/sync/application"
-	syncdomain "agentguild.dev/agentguild/backend/internal/sync/domain"
 	syncpostgres "agentguild.dev/agentguild/backend/internal/sync/postgres"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
 	mcptransport "agentguild.dev/agentguild/backend/internal/transport/mcp"
@@ -109,11 +108,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		sources := syncIssueSourceProvider{
-			app:    gitAppManager,
-			public: githubapi.NewPublicIssueSource("", nil),
-		}
-		syncEngine = syncapp.NewEngine(ruleRepo, mapRepo, syncTaskSink{service: service, pool: pool}, sources, syncapp.EngineOptions{
+		syncEngine = syncapp.NewEngine(ruleRepo, mapRepo, syncTaskSink{service: service, pool: pool}, gitRuntime.repositoryResolver, syncapp.EngineOptions{
 			DefaultDeadline: cfg.SyncDefaultDeadline,
 		})
 		if cfg.WebEnabled {
@@ -548,40 +543,13 @@ func (s syncTaskSink) TaskStatus(ctx context.Context, tenantID, taskID string) (
 
 var _ syncapp.TaskSink = (*syncTaskSink)(nil)
 
-type syncAppIssueSource interface {
-	IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error)
-}
-
-type syncIssueSourceProvider struct {
-	app    syncAppIssueSource
-	public git.IssueSource
-}
-
-func (p syncIssueSourceProvider) IssueSource(ctx context.Context, tenantID, sourceAuth string) (git.IssueSource, error) {
-	switch sourceAuth {
-	case "", syncdomain.SourceAuthApp:
-		if p.app == nil {
-			return nil, git.ErrGitHubAppNotConfigured
-		}
-		return p.app.IssueSource(ctx, tenantID)
-	case syncdomain.SourceAuthPublic:
-		if p.public == nil {
-			return nil, git.ErrUnauthorized
-		}
-		return p.public, nil
-	default:
-		return nil, &syncdomain.Error{Code: "invalid_argument", Message: "source_auth is invalid", Field: "source_auth"}
-	}
-}
-
-var _ syncapp.IssueSourceProvider = (*syncIssueSourceProvider)(nil)
-
 // gitRuntime holds the git delivery and validation services initialized for
 // this process. It is nil when GitHub App configuration is not provided.
 type gitRuntime struct {
-	credentialService *gitapp.CredentialService
-	submissionService *gitapp.SubmissionService
-	validationWorker  *gitworker.ValidationWorker
+	credentialService  *gitapp.CredentialService
+	submissionService  *gitapp.SubmissionService
+	validationWorker   *gitworker.ValidationWorker
+	repositoryResolver gitapp.RepositoryGitResolver
 }
 
 func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, gitapp.GitHubAppManager, *gitapp.RepositoryOnboardingService, error) {
@@ -590,6 +558,15 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 	gitAppManager, err := gitapp.NewGitHubAppManager(gitAppRepo)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build github app service: %w", err)
+	}
+	onboardedRepositoryStore := gitpostgres.NewOnboardedRepositoryRepository(pool)
+	repositoryResolver, err := gitapp.NewRepositoryGitResolver(
+		onboardedRepositoryStore,
+		gitAppManager,
+		githubapi.NewPublicIssueSource("", nil),
+	)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build repository git resolver: %w", err)
 	}
 
 	ctx := context.Background()
@@ -619,14 +596,14 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		}
 	}
 
-	credentialService, err := gitapp.NewCredentialService(gitStore, gitAppManager, gitapp.Options{
+	credentialService, err := gitapp.NewCredentialService(gitStore, repositoryResolver, gitapp.Options{
 		Provider: "github",
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build credential service: %w", err)
 	}
 
-	verifier := gitapp.NewCommitVerifier(gitAppManager, &submissionRepoAdapter{store: gitStore})
+	verifier := gitapp.NewCommitVerifier(repositoryResolver, &submissionRepoAdapter{store: gitStore})
 	notifier := application.NewCoreExecutionNotifier(service)
 	submissionService, err := gitapp.NewSubmissionService(gitStore, verifier, notifier, nil)
 	if err != nil {
@@ -634,7 +611,7 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 	}
 
 	repositoryOnboarding, err := gitapp.NewRepositoryOnboardingService(
-		gitpostgres.NewOnboardedRepositoryRepository(pool),
+		onboardedRepositoryStore,
 		gitAppManager,
 		newPublicRepositoryResolver(cfg.GitHub.BaseURL),
 		nil,
@@ -654,9 +631,10 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 	)
 
 	return &gitRuntime{
-		credentialService: credentialService,
-		submissionService: submissionService,
-		validationWorker:  validationWorker,
+		credentialService:  credentialService,
+		submissionService:  submissionService,
+		validationWorker:   validationWorker,
+		repositoryResolver: repositoryResolver,
 	}, gitAppManager, repositoryOnboarding, nil
 }
 

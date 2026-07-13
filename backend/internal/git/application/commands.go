@@ -107,7 +107,7 @@ func (s *CredentialService) IssueCredential(ctx context.Context, principal Princ
 		// Only call the external issuer after a placeholder record has been
 		// persisted. This prevents a live token from being created without any
 		// corresponding metadata row.
-		driver, err := s.appService.Driver(ctx, principal.TenantID)
+		driver, err := s.resolver.Driver(ctx, principal.TenantID, cmd.Repo)
 		if err != nil {
 			return err
 		}

@@ -14,19 +14,19 @@ import (
 // exists, is reachable from the expected base and branch, and only touches
 // allowed paths.
 type CommitVerifier struct {
-	appService  GitHubAppService
+	resolver    RepositoryGitResolver
 	submissions SubmissionRepository
 }
 
-// NewCommitVerifier creates a CommitVerifier backed by the supplied GitHub App
-// service and submission repository. The GitHub Driver is resolved per-tenant at
-// verification time.
-func NewCommitVerifier(appService GitHubAppService, repo SubmissionRepository) *CommitVerifier {
-	return &CommitVerifier{appService: appService, submissions: repo}
+// NewCommitVerifier creates a CommitVerifier backed by the repository-scoped
+// resolver and submission repository. The Git driver is resolved from the
+// tenant/repository binding at verification time.
+func NewCommitVerifier(resolver RepositoryGitResolver, repo SubmissionRepository) *CommitVerifier {
+	return &CommitVerifier{resolver: resolver, submissions: repo}
 }
 
-func (v *CommitVerifier) driver(ctx context.Context, tenantID string) (git.Driver, error) {
-	return v.appService.Driver(ctx, tenantID)
+func (v *CommitVerifier) driver(ctx context.Context, tenantID, repo string) (git.Driver, error) {
+	return v.resolver.Driver(ctx, tenantID, repo)
 }
 
 // VerifyCommit carries the inputs required to validate a commit.
@@ -100,7 +100,7 @@ func (v *CommitVerifier) Verify(ctx context.Context, cmd VerifyCommit) error {
 	}
 
 	// 1. Commit exists.
-	driver, err := v.driver(ctx, cmd.TenantID)
+	driver, err := v.driver(ctx, cmd.TenantID, cmd.Repo)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (v *CommitVerifier) Verify(ctx context.Context, cmd VerifyCommit) error {
 	}
 
 	// 3. Commit appears on the expected branch.
-	if err := v.verifyBranch(ctx, cmd); err != nil {
+	if err := v.verifyBranch(ctx, driver, cmd); err != nil {
 		return err
 	}
 
@@ -174,7 +174,7 @@ func validateVerifyCommit(cmd VerifyCommit) error {
 
 // ChangedFiles returns the files changed between base and head.
 func (v *CommitVerifier) ChangedFiles(ctx context.Context, tenantID, repo, base, head string) ([]git.ChangedFile, error) {
-	driver, err := v.driver(ctx, tenantID)
+	driver, err := v.driver(ctx, tenantID, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func (v *CommitVerifier) ChangedFiles(ctx context.Context, tenantID, repo, base,
 // current branch head. A false result means the branch was force-pushed or the
 // commit was removed.
 func (v *CommitVerifier) IsCommitReachable(ctx context.Context, tenantID, repo, branch, commitSHA string) (bool, error) {
-	driver, err := v.driver(ctx, tenantID)
+	driver, err := v.driver(ctx, tenantID, repo)
 	if err != nil {
 		return false, err
 	}
@@ -196,11 +196,7 @@ func (v *CommitVerifier) IsCommitReachable(ctx context.Context, tenantID, repo, 
 	return driver.IsAncestor(ctx, repo, commitSHA, branchHead.SHA)
 }
 
-func (v *CommitVerifier) verifyBranch(ctx context.Context, cmd VerifyCommit) error {
-	driver, err := v.driver(ctx, cmd.TenantID)
-	if err != nil {
-		return err
-	}
+func (v *CommitVerifier) verifyBranch(ctx context.Context, driver git.Driver, cmd VerifyCommit) error {
 	branchHead, err := driver.GetCommit(ctx, cmd.Repo, cmd.Branch)
 	if err != nil {
 		if errors.Is(err, git.ErrRepoNotFound) {

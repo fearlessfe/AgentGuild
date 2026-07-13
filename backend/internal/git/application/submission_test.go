@@ -28,7 +28,7 @@ func TestCreateSubmissionRequiresFields(t *testing.T) {
 	base := newSubmissionCmd()
 
 	cases := []struct {
-		field string
+		field  string
 		mutate func(*application.CreateSubmission)
 	}{
 		{"execution_id", func(c *application.CreateSubmission) { c.ExecutionID = "" }},
@@ -193,11 +193,11 @@ func TestGetSubmissionTenantIsolation(t *testing.T) {
 }
 
 type submissionFixture struct {
-	svc     *application.SubmissionService
-	store   *memoryStore
-	driver  *fakeDriver
+	svc      *application.SubmissionService
+	store    *memoryStore
+	driver   *fakeDriver
 	verifier *application.CommitVerifier
-	now     time.Time
+	now      time.Time
 }
 
 func newSubmissionFixture(t *testing.T) *submissionFixture {
@@ -220,7 +220,7 @@ func newSubmissionFixtureWithNotifier(t *testing.T, notifier application.Executi
 		},
 		compareFiles: []git.ChangedFile{{Filename: "src/main.go", Status: "modified"}},
 	}
-	verifier := application.NewCommitVerifier(driver, &fakeSubmissionRepository{})
+	verifier := application.NewCommitVerifier(&fakeAppService{driver: driver}, &fakeSubmissionRepository{})
 	svc, err := application.NewSubmissionService(store, verifier, notifier, sequenceIDs("sub-1"))
 	require.NoError(t, err)
 	return &submissionFixture{svc: svc, store: store, driver: driver, verifier: verifier, now: now}

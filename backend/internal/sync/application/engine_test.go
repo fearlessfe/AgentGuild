@@ -60,6 +60,21 @@ func TestEngineCreatesSystemTaskForMatchingOpenIssue(t *testing.T) {
 	}
 }
 
+func TestEnginePassesRepositoryToIssueSourceProvider(t *testing.T) {
+	ctx := context.Background()
+	rule := mustRule(t, "rule-1", "tenant-1", "acme/api", nil, nil, "open", syncdomain.DedupeUpdate)
+	sources := &recordingSources{source: &gittest.StubIssueSource{}}
+	engine := NewEngine(newFakeRuleRepo(rule), newFakeMapRepo(), newFakeTaskSink(), sources, EngineOptions{})
+
+	_, err := engine.RunRule(ctx, "tenant-1", "rule-1")
+	if err != nil {
+		t.Fatalf("RunRule returned error: %v", err)
+	}
+	if len(sources.calls) != 1 || sources.calls[0] != "tenant-1/acme/api/app" {
+		t.Fatalf("IssueSource calls = %v, want tenant-1/acme/api/app", sources.calls)
+	}
+}
+
 func TestEngineSkipsIssueWithExcludedLabel(t *testing.T) {
 	ctx := context.Background()
 	rule := mustRule(t, "rule-1", "tenant-1", "acme/api", []string{"bug"}, []string{"wontfix"}, "open", syncdomain.DedupeUpdate)
@@ -512,7 +527,7 @@ func (s *fakeTaskSink) TaskStatus(ctx context.Context, tenantID, taskID string) 
 
 type fakeSources map[string]git.IssueSource
 
-func (s fakeSources) IssueSource(ctx context.Context, tenantID, sourceAuth string) (git.IssueSource, error) {
+func (s fakeSources) IssueSource(ctx context.Context, tenantID, repo, sourceAuth string) (git.IssueSource, error) {
 	key := tenantID
 	if sourceAuth == syncdomain.SourceAuthPublic {
 		key = syncdomain.SourceAuthPublic
@@ -527,6 +542,16 @@ func (s fakeSources) IssueSource(ctx context.Context, tenantID, sourceAuth strin
 		return nil, syncdomain.ErrNotFound
 	}
 	return source, nil
+}
+
+type recordingSources struct {
+	source git.IssueSource
+	calls  []string
+}
+
+func (s *recordingSources) IssueSource(_ context.Context, tenantID, repo, sourceAuth string) (git.IssueSource, error) {
+	s.calls = append(s.calls, tenantID+"/"+repo+"/"+sourceAuth)
+	return s.source, nil
 }
 
 type recordingIssueSource struct {

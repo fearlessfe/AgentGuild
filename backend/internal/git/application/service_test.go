@@ -60,6 +60,21 @@ func TestIssueCredentialReturnsTokenAndPersistsMetadata(t *testing.T) {
 	require.Equal(t, gitdomain.CredentialStatusActive, record.Status)
 }
 
+func TestIssueCredentialUsesRepositoryBoundDriver(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	driver := &fakeCredentialDriver{}
+	resolver := &fakeAppService{driver: driver}
+	svc, err := application.NewCredentialService(store, resolver, application.Options{NewID: sequenceIDs("cred-1")})
+	require.NoError(t, err)
+
+	_, err = svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "acme/api", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenant-1/acme/api"}, resolver.driverCalls)
+}
+
 func TestIssueCredentialUpdatesExistingExecutionMetadata(t *testing.T) {
 	fixture := newCredentialFixture(t)
 	first, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
@@ -254,10 +269,10 @@ func TestUpdateRepositoryReturnsRevokedErrorForRevokedRecord(t *testing.T) {
 }
 
 type credentialFixture struct {
-	svc       *application.CredentialService
-	store     *memoryStore
-	driver    *fakeCredentialDriver
-	now       time.Time
+	svc    *application.CredentialService
+	store  *memoryStore
+	driver *fakeCredentialDriver
+	now    time.Time
 }
 
 func newCredentialFixture(t *testing.T) *credentialFixture {
@@ -304,17 +319,23 @@ func (f *fakeCredentialDriver) IsAncestor(context.Context, string, string, strin
 }
 
 type fakeAppService struct {
-	driver git.Driver
+	driver      git.Driver
+	driverCalls []string
 }
 
-func (f *fakeAppService) Driver(context.Context, string) (git.Driver, error) {
+func (f *fakeAppService) Driver(_ context.Context, tenantID, fullName string) (git.Driver, error) {
+	f.driverCalls = append(f.driverCalls, tenantID+"/"+fullName)
 	return f.driver, nil
 }
 
+func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.IssueSource, error) {
+	return nil, nil
+}
+
 type memoryStore struct {
-	now           time.Time
-	credentials   map[string]*application.CredentialRecord
-	submissions   map[string]*gitdomain.Submission
+	now            time.Time
+	credentials    map[string]*application.CredentialRecord
+	submissions    map[string]*gitdomain.Submission
 	validationJobs map[string]*gitdomain.ValidationJob
 }
 

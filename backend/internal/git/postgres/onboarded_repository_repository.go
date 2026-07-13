@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
 	"github.com/jackc/pgx/v5"
@@ -46,10 +47,14 @@ func (r *onboardedRepositoryRepository) ListOnboardedRepositories(ctx context.Co
 }
 
 func (r *onboardedRepositoryRepository) GetOnboardedRepositoryByFullName(ctx context.Context, tenantID, fullName string) (*application.OnboardedRepositoryRecord, error) {
-	return scanOnboardedRepository(r.q.QueryRow(ctx, `
+	record, err := scanOnboardedRepository(r.q.QueryRow(ctx, `
 		SELECT id, tenant_id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
 		FROM onboarded_repositories
 		WHERE tenant_id = $1 AND full_name = $2`, tenantID, fullName))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	return record, err
 }
 
 func (r *onboardedRepositoryRepository) CreateOnboardedRepository(ctx context.Context, record *application.OnboardedRepositoryRecord) error {

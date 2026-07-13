@@ -33,10 +33,10 @@ type GitHubAppManager interface {
 // CredentialService issues and revokes short-lived, execution-scoped Git
 // credentials through a CredentialIssuer while persisting only metadata.
 type CredentialService struct {
-	store      Store
-	appService GitHubAppService
-	provider   string
-	newID      func() string
+	store    Store
+	resolver RepositoryGitResolver
+	provider string
+	newID    func() string
 }
 
 // Options configures a CredentialService.
@@ -46,12 +46,12 @@ type Options struct {
 }
 
 // NewCredentialService creates a CredentialService.
-func NewCredentialService(store Store, appService GitHubAppService, options Options) (*CredentialService, error) {
+func NewCredentialService(store Store, resolver RepositoryGitResolver, options Options) (*CredentialService, error) {
 	if store == nil {
 		return nil, invalid("store")
 	}
-	if appService == nil {
-		return nil, invalid("github_app_service")
+	if resolver == nil {
+		return nil, invalid("repository_git_resolver")
 	}
 	if options.NewID == nil {
 		options.NewID = randomID
@@ -61,10 +61,10 @@ func NewCredentialService(store Store, appService GitHubAppService, options Opti
 		provider = "github"
 	}
 	return &CredentialService{
-		store:      store,
-		appService: appService,
-		provider:   provider,
-		newID:      options.NewID,
+		store:    store,
+		resolver: resolver,
+		provider: provider,
+		newID:    options.NewID,
 	}, nil
 }
 

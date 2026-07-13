@@ -28,8 +28,12 @@ type fakeGitDriver struct {
 
 type ancestorKey struct{ base, head string }
 
-func (f *fakeGitDriver) Driver(_ context.Context, _ string) (git.Driver, error) {
+func (f *fakeGitDriver) Driver(_ context.Context, _, _ string) (git.Driver, error) {
 	return f, nil
+}
+
+func (f *fakeGitDriver) IssueSource(context.Context, string, string, string) (git.IssueSource, error) {
+	return nil, nil
 }
 
 func (f *fakeGitDriver) CreateCredential(_ context.Context, _, _, _ string) (git.Credential, error) {
@@ -58,11 +62,11 @@ func (f *fakeGitDriver) IsAncestor(_ context.Context, _, base, head string) (boo
 func defaultGitDriver() *fakeGitDriver {
 	return &fakeGitDriver{
 		commits: map[string]git.Commit{
-			"head-sha":          {SHA: "head-sha"},
-			"base-sha":          {SHA: "base-sha"},
-			"agentguild/exe-1":  {SHA: "head-sha"},
-			"head-sha-2":        {SHA: "head-sha-2"},
-			"agentguild/exe-2":  {SHA: "head-sha-2"},
+			"head-sha":         {SHA: "head-sha"},
+			"base-sha":         {SHA: "base-sha"},
+			"agentguild/exe-1": {SHA: "head-sha"},
+			"head-sha-2":       {SHA: "head-sha-2"},
+			"agentguild/exe-2": {SHA: "head-sha-2"},
 		},
 		compareFiles: []git.ChangedFile{{Filename: "src/main.go", Status: "modified"}},
 		ancestors: map[ancestorKey]bool{
@@ -72,11 +76,11 @@ func defaultGitDriver() *fakeGitDriver {
 	}
 }
 
-func newSubmissionService(t *testing.T, svc *application.Service, appService gitapp.GitHubAppService) *gitapp.SubmissionService {
+func newSubmissionService(t *testing.T, svc *application.Service, resolver gitapp.RepositoryGitResolver) *gitapp.SubmissionService {
 	t.Helper()
 	db := testdb.StartPostgres(t)
 	store := gitpostgres.NewStore(db)
-	verifier := gitapp.NewCommitVerifier(appService, gitpostgres.NewSubmissionRepository(db))
+	verifier := gitapp.NewCommitVerifier(resolver, gitpostgres.NewSubmissionRepository(db))
 	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil, nil)
 	require.NoError(t, err)
 	return subSvc
@@ -110,9 +114,9 @@ func startExecutionForAgent(t *testing.T, svc *application.Service, taskID strin
 }
 
 type submissionOutcome struct {
-	DomainCode string
+	DomainCode   string
 	SubmissionID string
-	Status string
+	Status       string
 }
 
 func createSubmissionViaREST(t *testing.T, svc *application.Service, subSvc *gitapp.SubmissionService, token, executionID, requestID string, commitSHA string) submissionOutcome {
@@ -128,7 +132,9 @@ func createSubmissionViaREST(t *testing.T, svc *application.Service, subSvc *git
 
 	if rec.Code != http.StatusCreated {
 		var resp struct {
-			Error struct{ Code string `json:"code"` } `json:"error"`
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
 		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		return submissionOutcome{DomainCode: resp.Error.Code}
@@ -154,17 +160,23 @@ func createSubmissionViaMCP(t *testing.T, svc *application.Service, subSvc *gita
 
 	var rpcResp struct {
 		Result struct {
-			Content []struct{ Text string `json:"text"` }
+			Content []struct {
+				Text string `json:"text"`
+			}
 			IsError bool `json:"isError"`
 		} `json:"result"`
-		Error struct{ Code int `json:"code"` }
+		Error struct {
+			Code int `json:"code"`
+		}
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &rpcResp))
 	if rpcResp.Error.Code != 0 {
 		return submissionOutcome{DomainCode: "MCP_ERROR"}
 	}
 	if rpcResp.Result.IsError {
-		var mcpErr struct{ Code string `json:"code"` }
+		var mcpErr struct {
+			Code string `json:"code"`
+		}
 		require.NoError(t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &mcpErr))
 		return submissionOutcome{DomainCode: mcpErr.Code}
 	}
@@ -185,7 +197,9 @@ func getSubmissionViaREST(t *testing.T, svc *application.Service, subSvc *gitapp
 
 	if rec.Code != http.StatusOK {
 		var resp struct {
-			Error struct{ Code string `json:"code"` } `json:"error"`
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
 		}
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		return submissionOutcome{DomainCode: resp.Error.Code}
