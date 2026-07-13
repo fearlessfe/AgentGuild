@@ -191,6 +191,31 @@ describe("GitHub issue sync API client", () => {
     await expect(deleteGitHubApp(alpha.id)).rejects.toThrow(/绑定.*仓库/);
   });
 
+  it("promotes the default after plural demo deletion and hides the deleted App repositories", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+
+    const initialApps = await demoClient.listGitHubApps();
+    const alpha = initialApps.data.items.find((app) => app.id === "gha-alpha");
+    expect(alpha).toMatchObject({ is_default: true });
+    await expect(demoClient.deleteGitHubApp(alpha!.id)).rejects.toThrow(/绑定.*仓库/);
+
+    await demoClient.removeRepository("repo-inv-1");
+    await demoClient.deleteGitHubApp(alpha!.id);
+
+    const remainingApps = await demoClient.listGitHubApps();
+    expect(remainingApps.data.items).toEqual([
+      expect.objectContaining({ id: "gha-beta", is_default: true }),
+    ]);
+    const repositories = await demoClient.listRepositories();
+    expect(repositories.data.items.map((repo) => repo.full_name)).toEqual([
+      "acme/frontend",
+      "acme/data-api",
+    ]);
+    await expect(demoClient.listGitHubAppRepositories(alpha!.id)).rejects.toThrow(/not found/);
+  });
+
   it("makes singular demo deletion remove the default App and promote the earliest remaining App", async () => {
     (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
 

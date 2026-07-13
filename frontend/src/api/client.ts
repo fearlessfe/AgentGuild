@@ -621,6 +621,26 @@ function upsertDemoOnboardedRepository(
   return repo;
 }
 
+function deleteDemoGitHubApp(id: string): void {
+  const target = demoGitHubApps.find((app) => app.id === id);
+  if (!target) throw new Error(`Demo GitHub App not found: ${id}`);
+  const bound = demoOnboardedRepositories.some(
+    (repo) => repo.source_type === "github_app" && repo.github_app_id === id,
+  );
+  if (bound) throw new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
+
+  const remaining = demoGitHubApps.filter((app) => app.id !== id);
+  if (!target.is_default) {
+    demoGitHubApps = remaining;
+    return;
+  }
+  const nextDefault = remaining.reduce<GitHubAppView | undefined>((earliest, app) => {
+    if (!earliest) return app;
+    return (app.created_at ?? "") < (earliest.created_at ?? "") ? app : earliest;
+  }, undefined);
+  demoGitHubApps = remaining.map((app) => ({ ...app, is_default: app.id === nextDefault?.id }));
+}
+
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
@@ -656,11 +676,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     if (!app) throw new Error(`Demo GitHub App not found: ${id}`);
     if (method === "GET") return clone({ data: app, meta: demoMeta });
     if (method === "DELETE") {
-      const bound = demoOnboardedRepositories.some(
-        (repo) => repo.source_type === "github_app" && repo.github_app_id === id,
-      );
-      if (bound) throw new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
-      demoGitHubApps = demoGitHubApps.filter((item) => item.id !== id);
+      deleteDemoGitHubApp(id);
       return clone({ data: { deleted: true }, meta: demoMeta });
     }
   }
@@ -671,16 +687,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
 
   if (url.pathname === "/v1/github-app" && method === "DELETE") {
     if (!defaultApp) throw new Error("Demo GitHub App not found");
-    const bound = demoOnboardedRepositories.some(
-      (repo) => repo.source_type === "github_app" && repo.github_app_id === defaultApp.id,
-    );
-    if (bound) throw new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
-    const remaining = demoGitHubApps.filter((app) => app.id !== defaultApp.id);
-    const nextDefault = remaining.reduce<GitHubAppView | undefined>((earliest, app) => {
-      if (!earliest) return app;
-      return (app.created_at ?? "") < (earliest.created_at ?? "") ? app : earliest;
-    }, undefined);
-    demoGitHubApps = remaining.map((app) => ({ ...app, is_default: app.id === nextDefault?.id }));
+    deleteDemoGitHubApp(defaultApp.id);
     return clone({ data: { deleted: true }, meta: demoMeta });
   }
 
@@ -689,7 +696,8 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   }
 
   if (url.pathname === "/v1/repositories" && method === "GET") {
-    return clone({ data: { items: Object.values(demoRepositoriesByApp).flat() }, meta: demoMeta });
+    const repositories = demoGitHubApps.flatMap((app) => demoRepositoriesByApp[app.id] ?? []);
+    return clone({ data: { items: repositories }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/repository-onboarding" && method === "GET") {

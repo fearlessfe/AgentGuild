@@ -70,7 +70,8 @@ export function GitIntegrationScreen() {
     setActionErrors((current) => withoutKey(current, app.id));
     try {
       await client.deleteGitHubApp(app.id);
-      setGitHubApps((current) => current.filter((item) => item.id !== app.id));
+      const response = await client.listGitHubApps();
+      setGitHubApps(response.data.items);
       setTestResults((current) => withoutKey(current, app.id));
       setActionStatus(`已删除 GitHub App ${app.app_slug}`);
     } catch (error) {

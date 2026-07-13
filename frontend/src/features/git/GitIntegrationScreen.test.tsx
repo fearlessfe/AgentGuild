@@ -79,6 +79,9 @@ describe("GitIntegrationScreen", () => {
   });
 
   it("tests and deletes the selected GitHub App by id", async () => {
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
     const user = userEvent.setup();
     render(<GitIntegrationScreen />);
 
@@ -90,6 +93,33 @@ describe("GitIntegrationScreen", () => {
     expect(client.deleteGitHubApp).toHaveBeenCalledWith("gha-beta");
     expect(screen.queryByText("beta · labs")).not.toBeInTheDocument();
     expect(screen.getByText("alpha · acme-corp")).toBeVisible();
+  });
+
+  it("keeps the current list visible while refreshing the promoted default after deletion", async () => {
+    let resolveRefresh!: (value: client.Envelope<{ items: client.GitHubAppView[] }>) => void;
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("alpha · acme-corp")).toBeVisible();
+    expect(screen.getByRole("button", { name: "正在删除 alpha" })).toBeDisabled();
+    expect(screen.queryByText(/尚未配置 GitHub App/)).not.toBeInTheDocument();
+
+    resolveRefresh(envelope({ items: [{ ...betaApp, is_default: true }] }));
+
+    expect(await screen.findByRole("status", { name: "GitHub App 操作结果" }))
+      .toHaveTextContent("已删除 GitHub App alpha");
+    expect(screen.queryByText("alpha · acme-corp")).not.toBeInTheDocument();
+    const betaCard = screen.getByText("beta · labs").closest(".provider-card");
+    expect(betaCard).not.toBeNull();
+    expect(within(betaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
   });
 
   it("exposes an App-scoped busy testing state without disabling other cards", async () => {
