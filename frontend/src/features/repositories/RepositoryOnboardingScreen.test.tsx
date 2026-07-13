@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
 import type { GitHubAppView, Repository, RepositoryInventoryItem, RepositoryOnboardingSummary } from "../../api/client";
@@ -70,6 +71,13 @@ describe("RepositoryOnboardingScreen", () => {
     expect(screen.queryByRole("table", { name: "GitHub App 候选仓库列表" })).not.toBeInTheDocument();
   });
 
+  it("loads independent resources under React StrictMode", async () => {
+    render(<StrictMode><RepositoryOnboardingScreen /></StrictMode>);
+
+    expect(await screen.findByText("0 个仓库")).toBeVisible();
+    expect(screen.getByLabelText("GitHub App")).toBeVisible();
+  });
+
   it("filters repositories locally without another request", async () => {
     const user = userEvent.setup();
     render(<RepositoryOnboardingScreen />);
@@ -80,6 +88,20 @@ describe("RepositoryOnboardingScreen", () => {
     expect(screen.getByRole("option", { name: "acme/web" })).toBeVisible();
     expect(screen.queryByRole("option", { name: "acme/api" })).not.toBeInTheDocument();
     expect(client.listGitHubAppRepositories).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the repository list escape only the add card and selects a later option", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-alpha");
+    const input = await screen.findByRole("combobox", { name: "授权仓库" });
+    const addCard = screen.getByText("添加仓库", { selector: ".card-title" }).closest("section");
+
+    expect(addCard).toHaveClass("repository-add-card");
+    expect(screen.getByRole("table", { name: "已接入仓库列表" }).closest("section")).not.toHaveClass("repository-add-card");
+    await user.click(input);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+    expect(input).toHaveValue("acme/web");
   });
 
   it("clears repository query and selection when switching Apps", async () => {
@@ -226,7 +248,84 @@ describe("RepositoryOnboardingScreen", () => {
     expect(screen.getByRole("button", { name: "打开 Git 接入" })).toBeVisible();
   });
 
-  it("shows textual loading and top-level errors", async () => {
+  it("keeps the loaded inventory when Apps fail and retries only Apps", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.listGitHubApps)
+      .mockRejectedValueOnce(new Error("apps unavailable"))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    vi.mocked(client.getRepositoryOnboarding).mockResolvedValue(
+      envelope(summaryFixture({ onboarded_repositories: { items: [{ id: "repo-api", source_type: "github_app", ...apiRepo }] } })),
+    );
+    render(<RepositoryOnboardingScreen />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("apps unavailable");
+    expect(screen.queryByText("暂无已安装的 GitHub App")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("acme/api")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "重试加载 GitHub Apps" }));
+
+    expect(await screen.findByLabelText("GitHub App")).toBeVisible();
+    expect(client.listGitHubApps).toHaveBeenCalledTimes(2);
+    expect(client.getRepositoryOnboarding).toHaveBeenCalledOnce();
+  });
+
+  it("does not present a confirmed zero inventory when summary fails and retries only inventory", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.getRepositoryOnboarding)
+      .mockRejectedValueOnce(new Error("inventory unavailable"))
+      .mockResolvedValueOnce(envelope(summaryFixture()));
+    render(<RepositoryOnboardingScreen />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("inventory unavailable");
+    expect(screen.queryByText("0 个仓库")).not.toBeInTheDocument();
+    expect(screen.getByText("仓库清单未确认")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "重试加载仓库清单" }));
+
+    expect(await screen.findByText("0 个仓库")).toBeVisible();
+    expect(client.getRepositoryOnboarding).toHaveBeenCalledTimes(2);
+    expect(client.listGitHubApps).toHaveBeenCalledOnce();
+  });
+
+  it("locks all repository mutations and selectors until the active add finishes", async () => {
+    const user = userEvent.setup();
+    let resolveAdd!: (value: ReturnType<typeof envelope<RepositoryInventoryItem>>) => void;
+    vi.mocked(client.getRepositoryOnboarding).mockResolvedValue(
+      envelope(summaryFixture({ onboarded_repositories: { items: [{ id: "repo-existing", source_type: "github_app", ...apiRepo }] } })),
+    );
+    vi.mocked(client.addGitHubAppRepository).mockImplementation(
+      (_appID, fullName) => new Promise((resolve) => {
+        resolveAdd = resolve;
+      }),
+    );
+    render(<RepositoryOnboardingScreen />);
+    const appSelect = await screen.findByLabelText("GitHub App");
+    await user.selectOptions(appSelect, "gha-beta");
+    const combobox = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.click(combobox);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+    const addButton = screen.getByRole("button", { name: "添加仓库" });
+    await user.click(addButton);
+
+    expect(appSelect).toBeDisabled();
+    expect(combobox).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "公开仓库" })).toBeDisabled();
+    expect(addButton).toBeDisabled();
+    expect(screen.getByRole("button", { name: "移除" })).toBeDisabled();
+    await user.selectOptions(appSelect, "gha-alpha");
+    await user.click(screen.getByRole("radio", { name: "公开仓库" }));
+    await user.click(addButton);
+    await user.click(screen.getByRole("button", { name: "移除" }));
+    expect(client.addGitHubAppRepository).toHaveBeenCalledOnce();
+    expect(client.removeRepository).not.toHaveBeenCalled();
+    expect(appSelect).toHaveValue("gha-beta");
+    expect(combobox).toHaveValue("acme/web");
+
+    resolveAdd(envelope({ id: "repo-web", source_type: "github_app", github_app_id: "gha-beta", ...webRepo }));
+    await waitFor(() => expect(appSelect).toBeEnabled());
+    expect(appSelect).toHaveValue("gha-beta");
+    expect(combobox).toHaveValue("");
+  });
+
+  it("shows textual loading and resource errors", async () => {
     let rejectApps!: (reason: Error) => void;
     vi.mocked(client.listGitHubApps).mockImplementation(() => new Promise((_, reject) => (rejectApps = reject)));
     render(<RepositoryOnboardingScreen />);

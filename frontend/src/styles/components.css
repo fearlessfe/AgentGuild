@@ -41,6 +41,8 @@
 
 .card-pad { padding: var(--sp-5); }
 
+.card.repository-add-card { overflow: visible; }
+
 .card-head {
   display: flex;
   align-items: center;

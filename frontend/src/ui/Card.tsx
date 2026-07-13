@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 type CardProps = {
+  className?: string;
   title?: ReactNode;
   sub?: ReactNode;
   head?: ReactNode;
@@ -8,10 +9,10 @@ type CardProps = {
   children: ReactNode;
 };
 
-export function Card({ title, sub, head, pad = true, children }: CardProps) {
+export function Card({ className, title, sub, head, pad = true, children }: CardProps) {
   const hasHeader = title != null || head != null;
   return (
-    <section className="card">
+    <section className={className ? `card ${className}` : "card"}>
       {hasHeader ? (
         <div className="card-head">
           <div>

@@ -120,4 +120,21 @@ describe("SearchableSelect", () => {
     await user.keyboard("{ArrowDown}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  it("closes and clears the active descendant when disabled after opening", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<ControlledSelect />);
+    const input = screen.getByRole("combobox", { name: "授权仓库" });
+
+    await user.click(input);
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveAttribute("aria-activedescendant");
+
+    rerender(<ControlledSelect disabled />);
+
+    expect(input).toBeDisabled();
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
 });

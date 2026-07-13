@@ -37,6 +37,12 @@ export function SearchableSelect<T>({
     setActiveIndex((current) => (current >= options.length ? options.length - 1 : current));
   }, [options.length]);
 
+  useEffect(() => {
+    if (!disabled) return;
+    setOpen(false);
+    setActiveIndex(-1);
+  }, [disabled]);
+
   const optionID = (option: T) => `${inputID}-option-${toDOMIDPart(getOptionKey(option))}`;
   const choose = (option: T) => {
     onChange(option);
