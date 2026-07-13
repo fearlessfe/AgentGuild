@@ -1,5 +1,5 @@
 import { ExternalLink, GitBranch, GitMerge, Plus, RefreshCcw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiNote, Button, Card, PageHeader, ProviderCard, StatusChip } from "../../ui";
 import * as client from "../../api/client";
 
@@ -23,15 +23,19 @@ export function GitIntegrationScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [testing, setTesting] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const refreshEpoch = useRef(0);
+  const confirmedDeleted = useRef(new Set<string>());
+  const deleteKeys = useRef<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
     const load = async () => {
+      const epoch = ++refreshEpoch.current;
       try {
         setLoading(true);
         setLoadError(null);
         const response = await client.listGitHubApps();
-        if (active) setGitHubApps(response.data.items);
+        if (active && epoch === refreshEpoch.current) setGitHubApps(withoutDeletedApps(response.data.items, confirmedDeleted.current));
       } catch (error) {
         if (active) setLoadError(errorMessage(error, "加载 GitHub App 失败"));
       } finally {
@@ -66,24 +70,30 @@ export function GitIntegrationScreen() {
   };
 
   const handleDelete = async (app: client.GitHubAppView) => {
-    if (!window.confirm(`确定要删除 GitHub App ${app.app_slug} 吗？此操作不可撤销。`)) return;
+    const appName = githubAppName(app);
+    if (!window.confirm(`确定要删除 GitHub App ${appName} 吗？此操作不可撤销。`)) return;
     setActionStatus("");
     setRefreshError(null);
     setDeleting((current) => new Set(current).add(app.id));
     setActionErrors((current) => withoutKey(current, app.id));
+    deleteKeys.current[app.id] ??= client.createIdempotencyKey();
     try {
-      await client.deleteGitHubApp(app.id);
+      await client.deleteGitHubApp(app.id, { idempotencyKey: deleteKeys.current[app.id] });
+      delete deleteKeys.current[app.id];
+      confirmedDeleted.current.add(app.id);
       setGitHubApps((current) => removeDeletedGitHubApp(current, app.id));
       setTestResults((current) => withoutKey(current, app.id));
-      setActionStatus(`已删除 GitHub App ${app.app_slug}`);
+      setActionStatus(`已删除 GitHub App ${appName}`);
 
       try {
+        const epoch = ++refreshEpoch.current;
         const response = await client.listGitHubApps();
-        setGitHubApps(response.data.items);
+        if (epoch === refreshEpoch.current) setGitHubApps(withoutDeletedApps(response.data.items, confirmedDeleted.current));
       } catch (error) {
         setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
       }
     } catch (error) {
+      if (error instanceof client.ApiError) delete deleteKeys.current[app.id];
       setActionErrors((current) => ({
         ...current,
         [app.id]: errorMessage(error, "删除 GitHub App 失败"),
@@ -94,11 +104,12 @@ export function GitIntegrationScreen() {
   };
 
   const handleRefresh = async () => {
+    const epoch = ++refreshEpoch.current;
     setRefreshing(true);
     setRefreshError(null);
     try {
       const response = await client.listGitHubApps();
-      setGitHubApps(response.data.items);
+      if (epoch === refreshEpoch.current) setGitHubApps(withoutDeletedApps(response.data.items, confirmedDeleted.current));
     } catch (error) {
       setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
     } finally {
@@ -214,7 +225,8 @@ function GitHubAppCard({
   onInstall: () => void;
 }) {
   const installed = Boolean(app.installation_id);
-  const label = `${app.app_slug} · ${app.installation_account_login ?? "待选择安装账户"}`;
+  const appName = githubAppName(app);
+  const label = `${appName} · ${app.installation_account_login ?? "待选择安装账户"}`;
 
   return (
     <ProviderCard
@@ -255,17 +267,17 @@ function GitHubAppCard({
               icon={<RefreshCcw size={14} strokeWidth={1.8} />}
               onClick={onTest}
               disabled={testing || deleting}
-              aria-label={testing ? `正在检测 ${app.app_slug}` : `检测 ${app.app_slug}`}
+              aria-label={testing ? `正在检测 ${appName}` : `检测 ${appName}`}
               aria-busy={testing}
             >
-              {testing ? `正在检测 ${app.app_slug}` : "检测连接"}
+              {testing ? `正在检测 ${appName}` : "检测连接"}
             </Button>
           ) : (
             <Button
               icon={<ExternalLink size={14} strokeWidth={1.8} />}
               onClick={onInstall}
               disabled={deleting}
-              aria-label={`安装 ${app.app_slug}`}
+              aria-label={`安装 ${appName}`}
             >
               安装 GitHub App
             </Button>
@@ -274,10 +286,10 @@ function GitHubAppCard({
             variant="danger"
             onClick={onDelete}
             disabled={deleting || testing}
-            aria-label={deleting ? `正在删除 ${app.app_slug}` : `删除 ${app.app_slug}`}
+            aria-label={deleting ? `正在删除 ${appName}` : `删除 ${appName}`}
             aria-busy={deleting}
           >
-            {deleting ? `正在删除 ${app.app_slug}` : "删除"}
+            {deleting ? `正在删除 ${appName}` : "删除"}
           </Button>
         </div>
       </div>
@@ -311,4 +323,12 @@ function removeDeletedGitHubApp(apps: client.GitHubAppView[], deletedID: string)
 function compareGitHubApps(left: client.GitHubAppView, right: client.GitHubAppView): number {
   const createdAt = (left.created_at ?? "").localeCompare(right.created_at ?? "");
   return createdAt || left.id.localeCompare(right.id);
+}
+
+function githubAppName(app: client.GitHubAppView): string {
+  return app.app_slug || `App ${app.app_id}`;
+}
+
+function withoutDeletedApps(apps: client.GitHubAppView[], deleted: Set<string>): client.GitHubAppView[] {
+  return apps.filter((app) => !deleted.has(app.id));
 }

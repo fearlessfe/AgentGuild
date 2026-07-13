@@ -31,13 +31,35 @@ func TestOpenAPIDocumentsPluralGitHubAppRoutes(t *testing.T) {
 	require.NotNil(t, item.Get)
 	require.NotNil(t, item.Delete)
 	require.NotNil(t, item.Delete.Responses.Value("409"))
+	require.Equal(t, "#/components/responses/Conflict", item.Delete.Responses.Value("409").Ref)
 
 	testConnection := doc.Paths.Value("/v1/github-apps/{id}:test")
 	require.NotNil(t, testConnection)
 	require.NotNil(t, testConnection.Post)
 
+	selectedRepositories := doc.Paths.Value("/v1/github-apps/{id}/repositories")
+	require.NotNil(t, selectedRepositories)
+	require.NotNil(t, selectedRepositories.Get)
+
 	publicRepository := doc.Paths.Value("/v1/repositories/public")
 	require.NotNil(t, publicRepository.Post.Responses.Value("409"))
+	appRepository := doc.Paths.Value("/v1/repositories/github-app")
+	require.NotNil(t, appRepository.Post.Responses.Value("409"))
+	repositoryItem := doc.Paths.Value("/v1/repositories/{id}")
+
+	mutations := []*openapi3.Operation{item.Delete, appRepository.Post, publicRepository.Post, repositoryItem.Delete}
+	for _, operation := range mutations {
+		require.NotNil(t, operation.Responses.Value("400"))
+		require.NotNil(t, operation.Responses.Value("409"))
+		var found bool
+		for _, parameter := range operation.Parameters {
+			if parameter.Value.Name == "Idempotency-Key" && parameter.Value.In == "header" {
+				require.True(t, parameter.Value.Required)
+				found = true
+			}
+		}
+		require.True(t, found, "mutation must require Idempotency-Key")
+	}
 
 	appView := doc.Components.Schemas["GitHubAppPublicView"].Value
 	for _, property := range []string{"id", "installation_account_login", "is_default"} {

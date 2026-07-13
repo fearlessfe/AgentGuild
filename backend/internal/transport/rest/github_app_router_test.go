@@ -391,9 +391,12 @@ func TestGitHubApp_RequiresSession(t *testing.T) {
 	require.Empty(t, manager.calls)
 }
 
-func deleteWithSession(t *testing.T, server http.Handler, path string, cookie *http.Cookie) *httptest.ResponseRecorder {
+func deleteWithSession(t *testing.T, server http.Handler, path string, cookie *http.Cookie, headers ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodDelete, path, nil)
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)

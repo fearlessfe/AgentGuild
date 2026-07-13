@@ -82,6 +82,20 @@ func TestRepositoryOnboardingSummaryReturnsAppAndOnboardedRepositories(t *testin
 	}}, body.Data.OnboardedRepositories.Items)
 }
 
+func TestRepositoryOnboardingSummaryRedactsSecretBearingGitHubError(t *testing.T) {
+	secret := "forged-github-response-secret"
+	svc := newRepositoryOnboardingService(t)
+	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{ID: "gha-1", TenantID: "tenant-1", IsDefault: true}
+	svc.apps.issueSourceErr = errors.New("github response included " + secret)
+	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
+
+	res := getWithSession(t, server, "/v1/repository-onboarding", sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Contains(t, res.Body.String(), "temporarily unavailable")
+	require.NotContains(t, res.Body.String(), secret)
+}
+
 func TestRepositoryOnboardingPublicAddRequiresAdminSession(t *testing.T) {
 	svc := newRepositoryOnboardingService(t)
 	svc.public.repos["octo/hello-world"] = git.Repository{
@@ -94,7 +108,7 @@ func TestRepositoryOnboardingPublicAddRequiresAdminSession(t *testing.T) {
 	unauthorized := postJSON(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, "token-publisher")
 	require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
 
-	created := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true))
+	created := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "public-add")
 
 	require.Equal(t, http.StatusCreated, created.Code)
 	var body struct {
@@ -128,7 +142,7 @@ func TestRepositoryOnboardingGitHubAppAddRequiresAdminSession(t *testing.T) {
 	unauthorized := postJSON(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, "token-publisher")
 	require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
 
-	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, sessionCookie(t, "admin-1", true))
+	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "app-add")
 
 	require.Equal(t, http.StatusCreated, created.Code)
 	var body struct {
@@ -150,9 +164,9 @@ func TestRepositoryOnboardingGitHubAppDuplicateReturnsConflict(t *testing.T) {
 	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
 	cookie := sessionCookie(t, "admin-1", true)
 
-	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, cookie)
+	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, cookie, "Idempotency-Key", "duplicate-first")
 	require.Equal(t, http.StatusCreated, created.Code)
-	duplicate := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, cookie)
+	duplicate := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, cookie, "Idempotency-Key", "duplicate-second")
 
 	require.Equal(t, http.StatusConflict, duplicate.Code)
 	require.Contains(t, duplicate.Body.String(), "STATE_CONFLICT")
@@ -188,7 +202,7 @@ func TestGitHubAppRepositoriesHidesForeignApp(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, res.Code)
 	require.NotContains(t, res.Body.String(), "secret/private")
 
-	added := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-foreign","repo":"secret/private"}`, sessionCookie(t, "admin-1", true))
+	added := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-foreign","repo":"secret/private"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "foreign-add")
 	require.Equal(t, http.StatusNotFound, added.Code)
 	require.NotContains(t, added.Body.String(), "secret/private")
 	require.Empty(t, svc.store.records["tenant-1"])
@@ -211,7 +225,7 @@ func TestRepositoryOnboardingDeleteRequiresAdminSession(t *testing.T) {
 	unauthorized := deleteWithBearer(t, server, "/v1/repositories/repo-1", "token-publisher")
 	require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
 
-	deleted := deleteWithSession(t, server, "/v1/repositories/repo-1", sessionCookie(t, "admin-1", true))
+	deleted := deleteWithSession(t, server, "/v1/repositories/repo-1", sessionCookie(t, "admin-1", true), "Idempotency-Key", "repo-delete")
 
 	require.Equal(t, http.StatusOK, deleted.Code)
 	var body struct {
@@ -238,13 +252,13 @@ func TestRepositoryOnboardingMutationsRejectNonAdminSession(t *testing.T) {
 		do   func() *httptest.ResponseRecorder
 	}{
 		{name: "public add", do: func() *httptest.ResponseRecorder {
-			return postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, cookie)
+			return postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, cookie, "Idempotency-Key", "non-admin-public")
 		}},
 		{name: "app add", do: func() *httptest.ResponseRecorder {
-			return postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-1","repo":"agentguild/agentguild"}`, cookie)
+			return postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-1","repo":"agentguild/agentguild"}`, cookie, "Idempotency-Key", "non-admin-app")
 		}},
 		{name: "delete", do: func() *httptest.ResponseRecorder {
-			return deleteWithSession(t, server, "/v1/repositories/repo-1", cookie)
+			return deleteWithSession(t, server, "/v1/repositories/repo-1", cookie, "Idempotency-Key", "non-admin-delete")
 		}},
 	}
 	for _, tc := range cases {

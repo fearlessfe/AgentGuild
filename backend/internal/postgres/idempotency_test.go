@@ -204,6 +204,38 @@ func TestTransactionCannotCommitAcquiredPendingIdempotency(t *testing.T) {
 	}
 }
 
+func TestStorePersistsPendingAndCompletesAcrossShortTransactions(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "owner-1", Operation: "repository.delete", RequestID: "request-1"}
+	hash, _ := postgres.CanonicalHash(map[string]any{"repository_id": "repo-1"})
+
+	acquired, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !acquired.Acquired || acquired.Completed {
+		t.Fatalf("unexpected acquire state: %#v", acquired)
+	}
+	pending, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Acquired || pending.Completed {
+		t.Fatalf("expected committed pending state, got %#v", pending)
+	}
+	if err := store.CompleteIdempotency(context.Background(), key, acquired.OwnerToken, 200, []byte(`{"data":{"deleted":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replay.Completed || replay.ResponseCode == nil || *replay.ResponseCode != 200 || string(replay.ResponseBody) != `{"data":{"deleted":true}}` {
+		t.Fatalf("unexpected replay: %#v", replay)
+	}
+}
+
 func waitForBlockedIdempotencyQuery(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

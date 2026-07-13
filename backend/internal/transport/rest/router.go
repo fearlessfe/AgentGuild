@@ -129,6 +129,7 @@ type Server struct {
 	syncRules            *syncapp.RuleService
 	syncEngine           SyncEngine
 	repositoryOnboarding repositoryOnboardingService
+	idempotencyStore     mutationIdempotencyStore
 	healthChecker        healthChecker
 }
 
@@ -160,6 +161,11 @@ func WithSyncEngine(engine SyncEngine) Option {
 // WithRepositoryOnboardingService 挂载仓库 onboarding REST API。
 func WithRepositoryOnboardingService(svc repositoryOnboardingService) Option {
 	return func(s *Server) { s.repositoryOnboarding = svc }
+}
+
+// WithIdempotencyStore enables durable replay protection for human mutation routes.
+func WithIdempotencyStore(store mutationIdempotencyStore) Option {
+	return func(s *Server) { s.idempotencyStore = store }
 }
 
 // Option 配置 Server。
@@ -369,7 +375,7 @@ func (s *Server) Router() http.Handler {
 			r.With(s.requireSession, s.rateLimit).Post("/github-app:test", s.testGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Get("/github-apps", s.listGitHubApps)
 			r.With(s.requireSession, s.rateLimit).Get("/github-apps/{id}", s.getGitHubAppByID)
-			r.With(s.requireSession, s.rateLimit).Delete("/github-apps/{id}", s.deleteGitHubAppByID)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("github_app.delete")).Delete("/github-apps/{id}", s.deleteGitHubAppByID)
 			r.With(s.requireSession, s.rateLimit).Post("/github-apps/{id}:test", s.testGitHubAppByID)
 		}
 		if s.syncRules != nil {
@@ -385,9 +391,9 @@ func (s *Server) Router() http.Handler {
 		if s.repositoryOnboarding != nil {
 			r.With(s.requireSession, s.rateLimit).Get("/repository-onboarding", s.getRepositoryOnboarding)
 			r.With(s.requireSession, s.rateLimit).Get("/github-apps/{id}/repositories", s.listGitHubAppRepositories)
-			r.With(s.requireSession, s.rateLimit).Post("/repositories/github-app", s.addGitHubAppRepository)
-			r.With(s.requireSession, s.rateLimit).Post("/repositories/public", s.addPublicRepository)
-			r.With(s.requireSession, s.rateLimit).Delete("/repositories/{id}", s.deleteOnboardedRepository)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("repository.github_app.create")).Post("/repositories/github-app", s.addGitHubAppRepository)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("repository.public.create")).Post("/repositories/public", s.addPublicRepository)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("repository.delete")).Delete("/repositories/{id}", s.deleteOnboardedRepository)
 		}
 	})
 	return r

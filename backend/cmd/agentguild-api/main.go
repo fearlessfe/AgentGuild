@@ -77,7 +77,8 @@ func run() error {
 		return err
 	}
 	mapRepo := syncpostgres.NewMapRepository(pool)
-	service, err := application.NewService(postgres.NewStore(pool), application.Options{
+	store := postgres.NewStore(pool)
+	service, err := application.NewService(store, application.Options{
 		CursorSecret:      []byte(cfg.CursorSecret),
 		IssueSourceLookup: mapRepo,
 	})
@@ -119,7 +120,8 @@ func run() error {
 		}
 	}
 
-	restOptions := make([]resttransport.Option, 0, 13)
+	restOptions := make([]resttransport.Option, 0, 14)
+	restOptions = append(restOptions, resttransport.WithIdempotencyStore(store))
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
 	}

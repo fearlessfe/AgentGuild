@@ -35,6 +35,7 @@ export function RepositoryOnboardingScreen() {
   const requestVersions = useRef<Record<string, number>>({});
   const initialRequestVersions = useRef({ apps: 0, summary: 0 });
   const mutationLock = useRef(false);
+  const mutationKeys = useRef<Record<string, string>>({});
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -146,14 +147,17 @@ export function RepositoryOnboardingScreen() {
   const handleAddAppRepository = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!inventoryReady || !selectedAppID || !selectedRepository) return;
-    const key = repositoryKey("github_app", selectedRepository.full_name);
-    if (!beginMutation(key)) return;
+    const logicalKey = repositoryKey("github_app", `${selectedAppID}:${selectedRepository.full_name}`);
+    if (!beginMutation(logicalKey)) return;
     try {
-      const response = await client.addGitHubAppRepository(selectedAppID, selectedRepository.full_name);
+      const response = await client.addGitHubAppRepository(selectedAppID, selectedRepository.full_name, mutationOptions(logicalKey));
+      settleMutation(logicalKey);
       setSummary((current) => appendOnboardedRepository(current, response.data));
       clearRepositoryChoice();
     } catch (err) {
+      if (err instanceof client.ApiError) settleMutation(logicalKey);
       setError(errorMessage(err, "添加 GitHub App 仓库失败"));
+      if (err instanceof client.ApiError && err.status === 409) await loadSummary();
     } finally {
       endMutation();
     }
@@ -163,13 +167,17 @@ export function RepositoryOnboardingScreen() {
     event.preventDefault();
     const repo = publicRepo.trim();
     if (!inventoryReady || !repo) return;
-    if (!beginMutation(repositoryKey("public_github", repo))) return;
+    const logicalKey = repositoryKey("public_github", repo);
+    if (!beginMutation(logicalKey)) return;
     try {
-      const response = await client.addPublicRepository(repo);
+      const response = await client.addPublicRepository(repo, mutationOptions(logicalKey));
+      settleMutation(logicalKey);
       setSummary((current) => appendOnboardedRepository(current, response.data));
       setPublicRepo("");
     } catch (err) {
+      if (err instanceof client.ApiError) settleMutation(logicalKey);
       setError(errorMessage(err, "添加公开仓库失败"));
+      if (err instanceof client.ApiError && err.status === 409) await loadSummary();
     } finally {
       endMutation();
     }
@@ -177,9 +185,11 @@ export function RepositoryOnboardingScreen() {
 
   const handleRemove = async (repo: RepositoryInventoryItem) => {
     if (!repo.id) return;
-    if (!beginMutation(repo.id)) return;
+    const logicalKey = `delete:${repo.id}`;
+    if (!beginMutation(logicalKey)) return;
     try {
-      await client.removeRepository(repo.id);
+      await client.removeRepository(repo.id, mutationOptions(logicalKey));
+      settleMutation(logicalKey);
       setSummary((current) =>
         current
           ? {
@@ -191,6 +201,7 @@ export function RepositoryOnboardingScreen() {
           : current,
       );
     } catch (err) {
+      if (err instanceof client.ApiError) settleMutation(logicalKey);
       setError(errorMessage(err, "移除仓库失败"));
     } finally {
       endMutation();
@@ -203,6 +214,15 @@ export function RepositoryOnboardingScreen() {
     setError(null);
     setPendingRepo(key);
     return true;
+  };
+
+  const mutationOptions = (logicalKey: string): client.MutationOptions => {
+    mutationKeys.current[logicalKey] ??= client.createIdempotencyKey();
+    return { idempotencyKey: mutationKeys.current[logicalKey] };
+  };
+
+  const settleMutation = (logicalKey: string) => {
+    delete mutationKeys.current[logicalKey];
   };
 
   const endMutation = () => {

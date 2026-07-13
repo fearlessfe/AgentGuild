@@ -2,6 +2,7 @@ package rest_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -93,7 +94,7 @@ func TestGitHubAppsDeleteBoundAppReturnsConflict(t *testing.T) {
 	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{}, deleteErr: git.ErrGitHubAppInUse}
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager))
 
-	res := deleteWithSession(t, server, "/v1/github-apps/gha-1", sessionCookie(t, "admin-1", true))
+	res := deleteWithSession(t, server, "/v1/github-apps/gha-1", sessionCookie(t, "admin-1", true), "Idempotency-Key", "delete-bound")
 
 	require.Equal(t, http.StatusConflict, res.Code)
 	require.Contains(t, res.Body.String(), "STATE_CONFLICT")
@@ -104,7 +105,7 @@ func TestGitHubAppsDeleteRequiresAdmin(t *testing.T) {
 	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{}}
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager))
 
-	res := deleteWithSession(t, server, "/v1/github-apps/gha-1", sessionCookie(t, "owner-1", false))
+	res := deleteWithSession(t, server, "/v1/github-apps/gha-1", sessionCookie(t, "owner-1", false), "Idempotency-Key", "non-admin-delete")
 
 	require.Equal(t, http.StatusForbidden, res.Code)
 	require.Empty(t, manager.calls)
@@ -173,6 +174,21 @@ func TestGitHubAppsTestHidesForeignTenantApp(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, res.Code)
 	require.NotContains(t, res.Body.String(), "secret/private")
 	require.NotContains(t, res.Body.String(), "foreign-secret")
+}
+
+func TestGitHubAppsTestRedactsSecretBearingConnectionError(t *testing.T) {
+	secret := "forged-private-key-material"
+	manager := &fakeGitHubAppManager{
+		store:          map[string]*gitapp.GitHubAppRecord{"tenant-1": {ID: "gha-2", TenantID: "tenant-1"}},
+		issueSourceErr: errors.New("upstream rejected " + secret),
+	}
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager))
+
+	res := postJSONWithSession(t, server, "/v1/github-apps/gha-2:test", `{}`, sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Contains(t, res.Body.String(), "connection test failed")
+	require.NotContains(t, res.Body.String(), secret)
 }
 
 func TestGitHubAppSingularGetUsesOnlyDefaultApp(t *testing.T) {

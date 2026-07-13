@@ -235,6 +235,23 @@ func TestRepositoryOnboardingService_SummaryReturnsConfiguredAppCandidatesAndOnb
 	require.Empty(t, summary.AppRepositoriesError)
 }
 
+func TestRepositoryOnboardingService_SummaryRedactsOperationalGitHubError(t *testing.T) {
+	secret := "forged-upstream-secret-token"
+	svc, err := application.NewRepositoryOnboardingService(
+		newMemoryOnboardedRepositoryStore(),
+		fakeGitHubApps{view: application.GitHubAppView{Configured: true}, listErr: errors.New("github response contained " + secret)},
+		fakePublicRepositoryResolver{},
+		nil,
+	)
+	require.NoError(t, err)
+
+	summary, err := svc.Summary(context.Background(), adminPrincipal("tenant-1"))
+
+	require.NoError(t, err)
+	require.NotEmpty(t, summary.AppRepositoriesError)
+	require.NotContains(t, summary.AppRepositoriesError, secret)
+}
+
 func TestRepositoryOnboardingService_SummaryReturnsUnconfiguredAppWithoutCandidates(t *testing.T) {
 	svc, err := application.NewRepositoryOnboardingService(
 		newMemoryOnboardedRepositoryStore(),
@@ -252,7 +269,7 @@ func TestRepositoryOnboardingService_SummaryReturnsUnconfiguredAppWithoutCandida
 	require.Empty(t, summary.AppRepositoriesError)
 }
 
-func TestRepositoryOnboardingService_SummaryCapturesAppRepositoryListingError(t *testing.T) {
+func TestRepositoryOnboardingService_SummaryRedactsAppRepositoryListingError(t *testing.T) {
 	svc, err := application.NewRepositoryOnboardingService(
 		newMemoryOnboardedRepositoryStore(),
 		fakeGitHubApps{
@@ -269,7 +286,7 @@ func TestRepositoryOnboardingService_SummaryCapturesAppRepositoryListingError(t 
 	require.NoError(t, err)
 	require.True(t, summary.GitHubApp.Configured)
 	require.Empty(t, summary.AppRepositories)
-	require.Equal(t, "github unavailable", summary.AppRepositoriesError)
+	require.Equal(t, "GitHub App repository inventory is temporarily unavailable", summary.AppRepositoriesError)
 }
 
 func TestRepositoryOnboardingService_RemoveDelegatesTenantScopedDelete(t *testing.T) {

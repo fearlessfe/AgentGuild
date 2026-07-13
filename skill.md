@@ -59,6 +59,7 @@ GitHub App 是当前 tenant 下的多实例资源。管理员可以同时配置�
 - `DELETE /v1/github-apps/{id}`：删除未被已接入仓库引用的 App。
 - `POST /v1/repositories/github-app`：把已选 App 可见的仓库加入平台治理清单。请求体必须显式携带 `github_app_id`，不应依赖默认 App。
 - `POST /v1/repositories/public` 与 `DELETE /v1/repositories/{id}`：接入公开仓库或移除已接入仓库。
+- `DELETE /v1/github-apps/{id}`、上述两个仓库 POST 以及仓库 DELETE 都必须携带 `Idempotency-Key`。同一逻辑操作在网络中断或响应未知时必须复用原 key；操作成功或收到确定的 HTTP 响应后，新操作使用新 key。服务端会原样重放已完成响应，并拒绝同 key 的不同请求。
 - `POST /v1/github-app` 与 `DELETE /v1/github-app`：写入或删除兼容的默认 App 配置。`GET /v1/github-app` 和非修改性的 `POST /v1/github-app:test` 只要求已认证人类 session。
 - `/oauth/github/app/manifest`、`/oauth/github/app/install`、`/oauth/github/app/callback` 与 `/oauth/github/app/installed`：创建、安装或更新 App 配置的 onboarding 流程，均要求管理员 session。
 

@@ -215,7 +215,7 @@ describe("RepositoryOnboardingScreen", () => {
     expect(screen.getByText("默认分支：develop · 可见性：private")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "添加仓库" }));
 
-    expect(client.addGitHubAppRepository).toHaveBeenCalledWith("gha-beta", "acme/web");
+    expect(client.addGitHubAppRepository).toHaveBeenCalledWith("gha-beta", "acme/web", { idempotencyKey: expect.any(String) });
     expect(input).toHaveValue("");
     await user.click(input);
     expect(screen.queryByRole("option", { name: "acme/web" })).not.toBeInTheDocument();
@@ -232,7 +232,7 @@ describe("RepositoryOnboardingScreen", () => {
     await user.type(screen.getByLabelText("公共仓库 URL 或 owner/repo"), "https://github.com/rust-lang/rust");
     await user.click(screen.getByRole("button", { name: "添加公开仓库" }));
 
-    expect(client.addPublicRepository).toHaveBeenCalledWith("https://github.com/rust-lang/rust");
+    expect(client.addPublicRepository).toHaveBeenCalledWith("https://github.com/rust-lang/rust", { idempotencyKey: expect.any(String) });
     expect(screen.getByLabelText("公共仓库 URL 或 owner/repo")).toHaveValue("");
     expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("rust-lang/rust")).toBeVisible();
     expect(createSyncRuleSpy).not.toHaveBeenCalled();
@@ -319,7 +319,7 @@ describe("RepositoryOnboardingScreen", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "添加仓库" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "添加仓库" }));
 
-    expect(client.addGitHubAppRepository).toHaveBeenCalledWith("gha-alpha", "acme/web");
+    expect(client.addGitHubAppRepository).toHaveBeenCalledWith("gha-alpha", "acme/web", { idempotencyKey: expect.any(String) });
     expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("acme/web")).toBeVisible();
     await user.click(retriedAppRepositoryInput);
     expect(screen.queryByRole("option", { name: "acme/web" })).not.toBeInTheDocument();
@@ -363,6 +363,50 @@ describe("RepositoryOnboardingScreen", () => {
     await waitFor(() => expect(appSelect).toBeEnabled());
     expect(appSelect).toHaveValue("gha-beta");
     expect(combobox).toHaveValue("");
+  });
+
+  it("refreshes inventory after a structured repository conflict", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.getRepositoryOnboarding)
+      .mockResolvedValueOnce(envelope(summaryFixture()))
+      .mockResolvedValueOnce(envelope(summaryFixture({ onboarded_repositories: { items: [{ id: "repo-web", source_type: "github_app", ...webRepo }] } })));
+    vi.mocked(client.addGitHubAppRepository).mockRejectedValueOnce(
+      new client.ApiError(409, "STATE_CONFLICT", "仓库已接入"),
+    );
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-beta");
+    const input = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.click(input);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+
+    await user.click(screen.getByRole("button", { name: "添加仓库" }));
+
+    await waitFor(() => expect(client.getRepositoryOnboarding).toHaveBeenCalledTimes(2));
+    expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("acme/web")).toBeVisible();
+  });
+
+  it("reuses an unknown-failure key for the same logical mutation and rotates for a new payload", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(client, "createIdempotencyKey").mockReturnValueOnce("key-one").mockReturnValueOnce("key-two");
+    vi.mocked(client.addPublicRepository)
+      .mockRejectedValueOnce(new TypeError("network failed"))
+      .mockResolvedValueOnce(envelope({ id: "repo-rust", source_type: "public_github", full_name: "rust-lang/rust", default_branch: "main", visibility: "public" }))
+      .mockResolvedValueOnce(envelope({ id: "repo-go", source_type: "public_github", full_name: "golang/go", default_branch: "master", visibility: "public" }));
+    render(<RepositoryOnboardingScreen />);
+    await user.click(await screen.findByRole("radio", { name: "公开仓库" }));
+    const input = screen.getByLabelText("公共仓库 URL 或 owner/repo");
+    await user.type(input, "rust-lang/rust");
+
+    await user.click(screen.getByRole("button", { name: "添加公开仓库" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "添加公开仓库" }));
+    await waitFor(() => expect(input).toHaveValue(""));
+    await user.type(input, "golang/go");
+    await user.click(screen.getByRole("button", { name: "添加公开仓库" }));
+
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(1, "rust-lang/rust", { idempotencyKey: "key-one" });
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(2, "rust-lang/rust", { idempotencyKey: "key-one" });
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(3, "golang/go", { idempotencyKey: "key-two" });
   });
 
   it("shows textual loading and resource errors", async () => {

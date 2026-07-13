@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ApiError,
   addGitHubAppRepository,
+  addPublicRepository,
   createSyncRule,
   deleteGitHubApp,
   getExecution,
@@ -152,21 +154,40 @@ describe("GitHub issue sync API client", () => {
     );
 
     await testGitHubApp("gha/a");
-    await deleteGitHubApp("gha/a");
+    await deleteGitHubApp("gha/a", { idempotencyKey: "delete-key" });
     await listGitHubAppRepositories("gha/a");
-    await addGitHubAppRepository("gha/a", "acme/service");
+    await addGitHubAppRepository("gha/a", "acme/service", { idempotencyKey: "add-key" });
+    await addPublicRepository("octo/public", { idempotencyKey: "public-key" });
+    await removeRepository("repo/a", { idempotencyKey: "remove-key" });
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       `${baseUrl}/v1/github-apps/gha%2Fa:test`,
       `${baseUrl}/v1/github-apps/gha%2Fa`,
       `${baseUrl}/v1/github-apps/gha%2Fa/repositories`,
       `${baseUrl}/v1/repositories/github-app`,
+      `${baseUrl}/v1/repositories/public`,
+      `${baseUrl}/v1/repositories/repo%2Fa`,
     ]);
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("POST");
     expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe("DELETE");
     expect((fetchMock.mock.calls[3][1] as RequestInit).body).toBe(
       JSON.stringify({ github_app_id: "gha/a", repo: "acme/service" }),
     );
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toMatchObject({ "Idempotency-Key": "delete-key" });
+    expect((fetchMock.mock.calls[3][1] as RequestInit).headers).toMatchObject({ "Idempotency-Key": "add-key" });
+    expect((fetchMock.mock.calls[4][1] as RequestInit).headers).toMatchObject({ "Idempotency-Key": "public-key" });
+    expect((fetchMock.mock.calls[5][1] as RequestInit).headers).toMatchObject({ "Idempotency-Key": "remove-key" });
+  });
+
+  it("preserves HTTP status and domain code on API errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: "STATE_CONFLICT", message: "already bound" } }), { status: 409 }),
+    );
+
+    const error = await addPublicRepository("acme/api", { idempotencyKey: "conflict-key" }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 409, code: "STATE_CONFLICT", message: "already bound" });
   });
 
   it("includes the encoded App id in the install URL", () => {
@@ -189,6 +210,27 @@ describe("GitHub issue sync API client", () => {
     expect(new Set([...alphaRepositories.data.items, ...betaRepositories.data.items].map((repo) => repo.full_name)).size)
       .toBe(alphaRepositories.data.items.length + betaRepositories.data.items.length);
     await expect(deleteGitHubApp(alpha.id)).rejects.toThrow(/绑定.*仓库/);
+  });
+
+  it("rejects demo duplicates tenant-wide regardless of source and case", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+
+    await expect(demoClient.addPublicRepository("ACME/BILLING-SERVICE", { idempotencyKey: "demo-unique" }))
+      .rejects.toMatchObject({ status: 409, code: "STATE_CONFLICT" });
+  });
+
+  it("replays demo mutations and rejects a reused key with a different payload", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+
+    const first = await demoClient.addPublicRepository("octo/new-repo", { idempotencyKey: "demo-replay" });
+    const replay = await demoClient.addPublicRepository("octo/new-repo", { idempotencyKey: "demo-replay" });
+    expect(replay).toEqual(first);
+    await expect(demoClient.addPublicRepository("octo/other-repo", { idempotencyKey: "demo-replay" }))
+      .rejects.toMatchObject({ status: 409, code: "IDEMPOTENCY_MISMATCH" });
   });
 
   it("promotes the default after plural demo deletion and hides the deleted App repositories", async () => {

@@ -127,6 +127,7 @@ func Start(t *testing.T) *Env {
 		transportmcp.WithCredentialService(credentialService),
 	).Handler()
 	restHandler := rest.NewServer(svc, verifier,
+		rest.WithIdempotencyStore(store),
 		rest.WithIdentityService(identitySvc),
 		rest.WithReviewService(reviewSvc),
 		rest.WithRubricService(reviewSvc),

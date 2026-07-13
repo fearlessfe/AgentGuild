@@ -90,6 +90,8 @@ paths:
       description: Human session/admin controlled mutation；只把 GitHub App installation 中已可见的仓库加入任务仓库池，不创建 Issue sync rule。
       security:
         - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -111,6 +113,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -166,6 +170,8 @@ paths:
       description: 管理员操作。仅允许删除未被 onboarded 仓库引用的 App；删除默认 App 时原子提升替代默认 App。
       security:
         - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: GitHub App 已删除
@@ -173,6 +179,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -246,6 +254,8 @@ paths:
       description: Human session/admin controlled mutation；解析 public GitHub 仓库元数据后加入任务仓库池，不创建 Issue sync rule。
       security:
         - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -280,6 +290,7 @@ paths:
       security:
         - sessionCookie: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -292,12 +303,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -928,7 +943,9 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 写操作的幂等键，映射为底层 request_id
+      description: >-
+        写操作的持久幂等键。相同 tenant、human owner、operation、key 与规范请求会重放首次完成的原始 HTTP status/body；
+        相同 key 用于不同请求返回 409 IDEMPOTENCY_MISMATCH，仍在处理的请求返回 409 STATE_CONFLICT。
       schema:
         type: string
         minLength: 1

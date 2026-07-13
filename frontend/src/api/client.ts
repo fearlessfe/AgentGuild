@@ -77,7 +77,7 @@ export type GitHubAppView = {
   app_id: number;
   installation_id?: number;
   base_url?: string;
-  app_slug: string;
+  app_slug?: string;
   installation_account_login?: string;
   is_default: boolean;
   configured: boolean;
@@ -157,6 +157,23 @@ type ApiRequestInit = Omit<RequestInit, "body"> & {
   body?: unknown;
 };
 
+export type MutationOptions = { idempotencyKey?: string };
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, public readonly code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function createIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `mutation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function mutationHeaders(options: MutationOptions = {}): Record<string, string> {
+  return { "Idempotency-Key": options.idempotencyKey ?? createIdempotencyKey() };
+}
+
 type DemoAgent = {
   id: string;
   name: string;
@@ -226,19 +243,21 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     if (!pathname.startsWith("/login") && !pathname.startsWith("/oauth/oidc/login")) {
       window.location.href = "/login";
     }
-    throw new Error("未登录");
+    throw new ApiError(401, "UNAUTHORIZED", "未登录");
   }
   if (!response.ok) {
     let message = `API request failed (${response.status})`;
+    let code = "HTTP_ERROR";
     try {
       const body = await response.json();
-      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "message" in body.error && typeof body.error.message === "string") {
-        message = body.error.message;
+      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object") {
+        if ("message" in body.error && typeof body.error.message === "string") message = body.error.message;
+        if ("code" in body.error && typeof body.error.code === "string") code = body.error.code;
       }
     } catch {
       // ignore parse errors and fall back to status message
     }
-    throw new Error(message);
+    throw new ApiError(response.status, code, message);
   }
   return response.json() as Promise<Envelope<T>>;
 }
@@ -274,9 +293,10 @@ export async function getGitHubApp(): Promise<Envelope<GitHubAppView>> {
   };
 }
 export const listGitHubApps = () => apiRequest<{ items: GitHubAppView[] }>("/v1/github-apps");
-export const deleteGitHubApp = (id?: string) =>
+export const deleteGitHubApp = (id?: string, options: MutationOptions = {}) =>
   apiRequest<{ deleted: boolean }>(id ? `/v1/github-apps/${encodeURIComponent(id)}` : "/v1/github-app", {
     method: "DELETE",
+    headers: mutationHeaders(options),
   });
 export const testGitHubApp = (id?: string) =>
   apiRequest<ConnectionTestResult>(id ? `/v1/github-apps/${encodeURIComponent(id)}:test` : "/v1/github-app:test", {
@@ -286,15 +306,16 @@ export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/r
 export const listGitHubAppRepositories = (id: string) =>
   apiRequest<{ items: Repository[] }>(`/v1/github-apps/${encodeURIComponent(id)}/repositories`);
 export const getRepositoryOnboarding = () => apiRequest<RepositoryOnboardingSummary>("/v1/repository-onboarding");
-export const addGitHubAppRepository = (appID: string, repo: string) =>
+export const addGitHubAppRepository = (appID: string, repo: string, options: MutationOptions = {}) =>
   apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", {
     method: "POST",
+    headers: mutationHeaders(options),
     body: { github_app_id: appID, repo },
   });
-export const addPublicRepository = (repo: string) =>
-  apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", body: { repo } });
-export const removeRepository = (id: string) =>
-  apiRequest<{ deleted: boolean }>(`/v1/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const addPublicRepository = (repo: string, options: MutationOptions = {}) =>
+  apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", headers: mutationHeaders(options), body: { repo } });
+export const removeRepository = (id: string, options: MutationOptions = {}) =>
+  apiRequest<{ deleted: boolean }>(`/v1/repositories/${encodeURIComponent(id)}`, { method: "DELETE", headers: mutationHeaders(options) });
 export const listSyncRules = () => apiRequest<{ items: SyncRule[] }>("/v1/sync-rules");
 export const getSyncRule = (id: string) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`);
 export const createSyncRule = (input: SyncRuleInput) => apiRequest<SyncRule>("/v1/sync-rules", { method: "POST", body: input });
@@ -421,6 +442,7 @@ let demoOnboardedRepositories: RepositoryInventoryItem[] = [
     updated_at: "2026-07-09T08:10:00Z",
   },
 ];
+const demoIdempotencyRecords = new Map<string, { signature: string; response?: Envelope<unknown>; error?: ApiError }>();
 let demoSyncRuleCounter = 2;
 let demoSyncRules: SyncRule[] = [
   {
@@ -604,10 +626,10 @@ function upsertDemoOnboardedRepository(
   input: Omit<RepositoryInventoryItem, "id" | "created_at" | "updated_at">,
 ): RepositoryInventoryItem {
   const existing = demoOnboardedRepositories.find(
-    (repo) => repo.full_name === input.full_name && repo.source_type === input.source_type,
+    (repo) => repo.full_name.toLowerCase() === input.full_name.toLowerCase(),
   );
   if (existing) {
-    return existing;
+    throw new ApiError(409, "STATE_CONFLICT", "该仓库已接入并绑定到现有来源");
   }
   demoOnboardedRepositoryCounter += 1;
   const now = "2026-07-09T08:30:00Z";
@@ -627,7 +649,7 @@ function deleteDemoGitHubApp(id: string): void {
   const bound = demoOnboardedRepositories.some(
     (repo) => repo.source_type === "github_app" && repo.github_app_id === id,
   );
-  if (bound) throw new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
+  if (bound) throw new ApiError(409, "STATE_CONFLICT", "该 GitHub App 仍绑定已接入仓库，请先移除仓库");
 
   const remaining = demoGitHubApps.filter((app) => app.id !== id);
   if (!target.is_default) {
@@ -642,6 +664,33 @@ function deleteDemoGitHubApp(id: string): void {
 }
 
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
+  const url = new URL(path, "http://demo.local");
+  const method = (init.method ?? "GET").toUpperCase();
+  const isMutation =
+    (method === "DELETE" && (/^\/v1\/github-apps\/[^/]+$/.test(url.pathname) || /^\/v1\/repositories\/[^/]+$/.test(url.pathname))) ||
+    (method === "POST" && (url.pathname === "/v1/repositories/github-app" || url.pathname === "/v1/repositories/public"));
+  if (!isMutation) return demoRoute(path, init);
+
+  const key = new Headers(init.headers).get("Idempotency-Key");
+  if (!key) throw new ApiError(400, "INVALID_ARGUMENT", "idempotency_key is required");
+  const signature = `${method}\n${url.pathname}\n${JSON.stringify(init.body ?? null)}`;
+  const existing = demoIdempotencyRecords.get(key);
+  if (existing) {
+    if (existing.signature !== signature) throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "idempotency key was already used with a different request");
+    if (existing.error) throw new ApiError(existing.error.status, existing.error.code, existing.error.message);
+    return clone(existing.response!);
+  }
+  try {
+    const response = demoRoute(path, init);
+    demoIdempotencyRecords.set(key, { signature, response: clone(response) });
+    return response;
+  } catch (error) {
+    if (error instanceof ApiError) demoIdempotencyRecords.set(key, { signature, error });
+    throw error;
+  }
+}
+
+function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
   const defaultApp = demoGitHubApps.find((app) => app.is_default) ?? demoGitHubApps[0];

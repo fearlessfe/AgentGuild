@@ -219,12 +219,12 @@ func (s *RepositoryOnboardingService) Summary(ctx context.Context, principal Pri
 
 	source, err := s.apps.IssueSource(ctx, principal.TenantID)
 	if err != nil {
-		summary.AppRepositoriesError = err.Error()
+		summary.AppRepositoriesError = "GitHub App repository inventory is temporarily unavailable"
 		return summary, nil
 	}
 	repos, err := source.ListInstallationRepositories(ctx)
 	if err != nil {
-		summary.AppRepositoriesError = err.Error()
+		summary.AppRepositoriesError = "GitHub App repository inventory is temporarily unavailable"
 		return summary, nil
 	}
 	summary.AppRepositories = make([]RepositoryCandidateView, 0, len(repos))
