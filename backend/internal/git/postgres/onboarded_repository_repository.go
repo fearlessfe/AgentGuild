@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 
+	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
+	"github.com/jackc/pgx/v5"
 )
 
 type onboardedRepositoryRepository struct {
@@ -66,15 +68,18 @@ func (r *onboardedRepositoryRepository) UpsertOnboardedRepository(ctx context.Co
 			clock_timestamp(), clock_timestamp()
 		)
 		ON CONFLICT (tenant_id, full_name) DO UPDATE SET
-			source_type = EXCLUDED.source_type,
 			default_branch = EXCLUDED.default_branch,
 			visibility = EXCLUDED.visibility,
-			github_app_id = EXCLUDED.github_app_id,
 			updated_at = clock_timestamp()
+		WHERE onboarded_repositories.source_type = EXCLUDED.source_type
+			AND onboarded_repositories.github_app_id IS NOT DISTINCT FROM EXCLUDED.github_app_id
 		RETURNING id, github_app_id, created_at, updated_at`,
 		record.TenantID, record.ID, record.SourceType, record.FullName,
 		record.DefaultBranch, record.Visibility, nullString(record.GitHubAppID),
 	).Scan(&record.ID, &githubAppID, &record.CreatedAt, &record.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return git.ErrRepositoryBindingConflict
+	}
 	if err != nil {
 		return err
 	}

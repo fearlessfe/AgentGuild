@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	gitdomain "agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
 	"agentguild.dev/agentguild/backend/internal/git/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
@@ -102,6 +103,101 @@ func TestOnboardedRepositoryPersistsGitHubAppBinding(t *testing.T) {
 	got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
 	require.NoError(t, err)
 	require.Equal(t, "gha-1", got.GitHubAppID)
+}
+
+func TestOnboardedRepositoryRejectsCrossAppRebinding(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	apps := postgres.NewGitHubAppRepository(db)
+	require.NoError(t, apps.Upsert(context.Background(), githubAppRecord("gha-1", 11, true)))
+	require.NoError(t, apps.Upsert(context.Background(), githubAppRecord("gha-2", 22, false)))
+	repos := postgres.NewOnboardedRepositoryRepository(db)
+	original := onboardedRepositoryRecord("tenant-1", "repo-1", application.RepositorySourceGitHubApp, "acme/api")
+	original.GitHubAppID = "gha-1"
+	require.NoError(t, repos.UpsertOnboardedRepository(context.Background(), original))
+
+	rebinding := onboardedRepositoryRecord("tenant-1", "repo-2", application.RepositorySourceGitHubApp, "acme/api")
+	rebinding.GitHubAppID = "gha-2"
+	rebinding.DefaultBranch = "trunk"
+	require.ErrorIs(t, repos.UpsertOnboardedRepository(context.Background(), rebinding), gitdomain.ErrRepositoryBindingConflict)
+
+	got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
+	require.NoError(t, err)
+	require.Equal(t, "repo-1", got.ID)
+	require.Equal(t, "gha-1", got.GitHubAppID)
+	require.Equal(t, "main", got.DefaultBranch)
+}
+
+func TestOnboardedRepositoryRejectsSourceConversion(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		original *application.OnboardedRepositoryRecord
+		updated  *application.OnboardedRepositoryRecord
+	}{
+		{
+			name:     "public to app",
+			original: onboardedRepositoryRecord("tenant-1", "repo-1", application.RepositorySourcePublicGitHub, "acme/api"),
+			updated:  onboardedRepositoryRecord("tenant-1", "repo-2", application.RepositorySourceGitHubApp, "acme/api"),
+		},
+		{
+			name:     "app to public",
+			original: onboardedRepositoryRecord("tenant-1", "repo-1", application.RepositorySourceGitHubApp, "acme/api"),
+			updated:  onboardedRepositoryRecord("tenant-1", "repo-2", application.RepositorySourcePublicGitHub, "acme/api"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := testdb.StartPostgres(t)
+			apps := postgres.NewGitHubAppRepository(db)
+			require.NoError(t, apps.Upsert(context.Background(), githubAppRecord("gha-1", 11, true)))
+			test.original.GitHubAppID = bindingForSource(test.original.SourceType)
+			test.updated.GitHubAppID = bindingForSource(test.updated.SourceType)
+			repos := postgres.NewOnboardedRepositoryRepository(db)
+			require.NoError(t, repos.UpsertOnboardedRepository(context.Background(), test.original))
+
+			require.ErrorIs(t, repos.UpsertOnboardedRepository(context.Background(), test.updated), gitdomain.ErrRepositoryBindingConflict)
+
+			got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
+			require.NoError(t, err)
+			require.Equal(t, test.original.ID, got.ID)
+			require.Equal(t, test.original.SourceType, got.SourceType)
+			require.Equal(t, test.original.GitHubAppID, got.GitHubAppID)
+		})
+	}
+}
+
+func TestOnboardedRepositoryUpdatesMetadataForSameBinding(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	apps := postgres.NewGitHubAppRepository(db)
+	require.NoError(t, apps.Upsert(context.Background(), githubAppRecord("gha-1", 11, true)))
+	repos := postgres.NewOnboardedRepositoryRepository(db)
+	original := onboardedRepositoryRecord("tenant-1", "repo-1", application.RepositorySourceGitHubApp, "acme/api")
+	original.GitHubAppID = "gha-1"
+	require.NoError(t, repos.UpsertOnboardedRepository(context.Background(), original))
+
+	updated := onboardedRepositoryRecord("tenant-1", "repo-2", application.RepositorySourceGitHubApp, "acme/api")
+	updated.GitHubAppID = "gha-1"
+	updated.DefaultBranch = "trunk"
+	updated.Visibility = "public"
+	require.NoError(t, repos.UpsertOnboardedRepository(context.Background(), updated))
+
+	got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
+	require.NoError(t, err)
+	require.Equal(t, "repo-1", got.ID)
+	require.Equal(t, "gha-1", got.GitHubAppID)
+	require.Equal(t, "trunk", got.DefaultBranch)
+	require.Equal(t, "public", got.Visibility)
+}
+
+func githubAppRecord(id string, appID int64, isDefault bool) *application.GitHubAppRecord {
+	return &application.GitHubAppRecord{
+		ID: id, TenantID: "tenant-1", AppID: appID, PrivateKey: "key-" + id, IsDefault: isDefault,
+	}
+}
+
+func bindingForSource(sourceType string) string {
+	if sourceType == application.RepositorySourceGitHubApp {
+		return "gha-1"
+	}
+	return ""
 }
 
 func onboardedRepositoryRecord(tenantID, id, sourceType, fullName string) *application.OnboardedRepositoryRecord {
