@@ -8,6 +8,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type onboardedRepositoryRepository struct {
@@ -49,6 +50,30 @@ func (r *onboardedRepositoryRepository) GetOnboardedRepositoryByFullName(ctx con
 		SELECT id, tenant_id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
 		FROM onboarded_repositories
 		WHERE tenant_id = $1 AND full_name = $2`, tenantID, fullName))
+}
+
+func (r *onboardedRepositoryRepository) CreateOnboardedRepository(ctx context.Context, record *application.OnboardedRepositoryRecord) error {
+	if record == nil {
+		return errors.New("onboarded repository record is nil")
+	}
+	var githubAppID sql.NullString
+	err := r.q.QueryRow(ctx, `
+		INSERT INTO onboarded_repositories (
+			tenant_id, id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp(), clock_timestamp())
+		RETURNING id, github_app_id, created_at, updated_at`,
+		record.TenantID, record.ID, record.SourceType, record.FullName,
+		record.DefaultBranch, record.Visibility, nullString(record.GitHubAppID),
+	).Scan(&record.ID, &githubAppID, &record.CreatedAt, &record.UpdatedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "onboarded_repositories_tenant_full_name_key" {
+			return git.ErrRepositoryBindingConflict
+		}
+		return err
+	}
+	record.GitHubAppID = githubAppID.String
+	return nil
 }
 
 func (r *onboardedRepositoryRepository) UpsertOnboardedRepository(ctx context.Context, record *application.OnboardedRepositoryRecord) error {

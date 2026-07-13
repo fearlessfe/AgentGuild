@@ -90,7 +90,7 @@ func (s *RepositoryOnboardingService) AddPublicRepository(ctx context.Context, p
 		DefaultBranch: repo.DefaultBranch,
 		Visibility:    repo.Visibility,
 	}
-	if err := s.store.UpsertOnboardedRepository(ctx, record); err != nil {
+	if err := s.store.CreateOnboardedRepository(ctx, record); err != nil {
 		return view, err
 	}
 	return toOnboardedRepositoryView(*record), nil
@@ -169,7 +169,7 @@ func (s *RepositoryOnboardingService) AddGitHubAppRepository(ctx context.Context
 			DefaultBranch: repo.DefaultBranch,
 			Visibility:    repo.Visibility,
 		}
-		if err := s.store.UpsertOnboardedRepository(ctx, record); err != nil {
+		if err := s.store.CreateOnboardedRepository(ctx, record); err != nil {
 			return view, err
 		}
 		return toOnboardedRepositoryView(*record), nil

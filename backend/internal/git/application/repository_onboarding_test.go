@@ -30,6 +30,21 @@ func TestRepositoryOnboardingService_AddPublicRepositoryNormalizesGitHubURL(t *t
 	require.Equal(t, "public", view.Visibility)
 }
 
+func TestRepositoryOnboardingService_AddPublicRepositoryRejectsDuplicate(t *testing.T) {
+	store := newMemoryOnboardedRepositoryStore()
+	svc, err := application.NewRepositoryOnboardingService(store, fakeGitHubApps{}, fakePublicRepositoryResolver{}, func() string {
+		return "repo-1"
+	})
+	require.NoError(t, err)
+
+	_, err = svc.AddPublicRepository(context.Background(), adminPrincipal("tenant-1"), "acme/docs")
+	require.NoError(t, err)
+	_, err = svc.AddPublicRepository(context.Background(), adminPrincipal("tenant-1"), "acme/docs")
+
+	require.ErrorIs(t, err, git.ErrRepositoryBindingConflict)
+	require.Len(t, store.records, 1)
+}
+
 func TestRepositoryOnboardingServiceConstructorRejectsNilDependencies(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -309,6 +324,18 @@ func (s *memoryOnboardedRepositoryStore) GetOnboardedRepositoryByFullName(_ cont
 		}
 	}
 	return nil, errors.New("repository not found")
+}
+
+func (s *memoryOnboardedRepositoryStore) CreateOnboardedRepository(_ context.Context, record *application.OnboardedRepositoryRecord) error {
+	for _, existing := range s.records {
+		if existing.TenantID == record.TenantID && existing.FullName == record.FullName {
+			return git.ErrRepositoryBindingConflict
+		}
+	}
+	record.CreatedAt = s.now
+	record.UpdatedAt = s.now
+	s.records = append(s.records, *record)
+	return nil
 }
 
 func (s *memoryOnboardedRepositoryStore) UpsertOnboardedRepository(_ context.Context, record *application.OnboardedRepositoryRecord) error {

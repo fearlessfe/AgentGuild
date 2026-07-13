@@ -85,6 +85,7 @@ type Principal struct {
 type OnboardedRepositoryStore interface {
 	ListOnboardedRepositories(context.Context, string) ([]OnboardedRepositoryRecord, error)
 	GetOnboardedRepositoryByFullName(context.Context, string, string) (*OnboardedRepositoryRecord, error)
+	CreateOnboardedRepository(context.Context, *OnboardedRepositoryRecord) error
 	UpsertOnboardedRepository(context.Context, *OnboardedRepositoryRecord) error
 	DeleteOnboardedRepository(context.Context, string, string) error
 }

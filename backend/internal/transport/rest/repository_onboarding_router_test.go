@@ -143,6 +143,21 @@ func TestRepositoryOnboardingGitHubAppAddRequiresAdminSession(t *testing.T) {
 	require.NotContains(t, created.Body.String(), "secret-key")
 }
 
+func TestRepositoryOnboardingGitHubAppDuplicateReturnsConflict(t *testing.T) {
+	svc := newRepositoryOnboardingService(t)
+	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{ID: "gha-2", TenantID: "tenant-1", AppID: 123, InstallationID: 456, PrivateKey: "secret-key", BaseURL: "https://api.github.com"}
+	svc.apps.issueSource = &fakeSyncIssueSource{repos: []git.Repository{{FullName: "agentguild/agentguild", DefaultBranch: "main", Visibility: "private"}}}
+	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
+	cookie := sessionCookie(t, "admin-1", true)
+
+	created := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, cookie)
+	require.Equal(t, http.StatusCreated, created.Code)
+	duplicate := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-2","repo":"agentguild/agentguild"}`, cookie)
+
+	require.Equal(t, http.StatusConflict, duplicate.Code)
+	require.Contains(t, duplicate.Body.String(), "STATE_CONFLICT")
+}
+
 func TestGitHubAppRepositoriesUsesSelectedApp(t *testing.T) {
 	svc := newRepositoryOnboardingService(t)
 	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{ID: "gha-2", TenantID: "tenant-1", Provider: "github", AppID: 123, InstallationID: 456, PrivateKey: "secret-key", BaseURL: "https://api.github.com"}
@@ -164,7 +179,7 @@ func TestGitHubAppRepositoriesUsesSelectedApp(t *testing.T) {
 
 func TestGitHubAppRepositoriesHidesForeignApp(t *testing.T) {
 	svc := newRepositoryOnboardingService(t)
-	svc.apps.store["tenant-1"] = &gitapp.GitHubAppRecord{ID: "gha-owned", TenantID: "tenant-1", Provider: "github", AppID: 123, InstallationID: 456, PrivateKey: "secret-key", BaseURL: "https://api.github.com"}
+	svc.apps.store["tenant-2"] = &gitapp.GitHubAppRecord{ID: "gha-foreign", TenantID: "tenant-2", Provider: "github", AppID: 123, InstallationID: 456, PrivateKey: "secret-key", BaseURL: "https://api.github.com"}
 	svc.apps.issueSource = &fakeSyncIssueSource{repos: []git.Repository{{FullName: "secret/private", DefaultBranch: "main", Visibility: "private"}}}
 	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service))
 
@@ -172,6 +187,11 @@ func TestGitHubAppRepositoriesHidesForeignApp(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, res.Code)
 	require.NotContains(t, res.Body.String(), "secret/private")
+
+	added := postJSONWithSession(t, server, "/v1/repositories/github-app", `{"github_app_id":"gha-foreign","repo":"secret/private"}`, sessionCookie(t, "admin-1", true))
+	require.Equal(t, http.StatusNotFound, added.Code)
+	require.NotContains(t, added.Body.String(), "secret/private")
+	require.Empty(t, svc.store.records["tenant-1"])
 }
 
 func TestRepositoryOnboardingDeleteRequiresAdminSession(t *testing.T) {
@@ -288,6 +308,15 @@ func (s *memoryOnboardedRepositoryStore) GetOnboardedRepositoryByFullName(ctx co
 		}
 	}
 	return nil, errors.New("repository not found")
+}
+
+func (s *memoryOnboardedRepositoryStore) CreateOnboardedRepository(ctx context.Context, record *gitapp.OnboardedRepositoryRecord) error {
+	for _, existing := range s.records[record.TenantID] {
+		if existing.FullName == record.FullName {
+			return git.ErrRepositoryBindingConflict
+		}
+	}
+	return s.UpsertOnboardedRepository(ctx, record)
 }
 
 func (s *memoryOnboardedRepositoryStore) UpsertOnboardedRepository(ctx context.Context, record *gitapp.OnboardedRepositoryRecord) error {

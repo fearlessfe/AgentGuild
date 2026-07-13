@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -102,6 +103,54 @@ func TestOnboardedRepositoryPersistsGitHubAppBinding(t *testing.T) {
 	}))
 	got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
 	require.NoError(t, err)
+	require.Equal(t, "gha-1", got.GitHubAppID)
+}
+
+func TestOnboardedRepositoryCreateIsAtomicForConcurrentSameBinding(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	apps := postgres.NewGitHubAppRepository(db)
+	require.NoError(t, apps.Upsert(context.Background(), githubAppRecord("gha-1", 11, true)))
+	repos := postgres.NewOnboardedRepositoryRepository(db)
+
+	records := []*application.OnboardedRepositoryRecord{
+		{ID: "repo-1", TenantID: "tenant-1", SourceType: application.RepositorySourceGitHubApp, GitHubAppID: "gha-1", FullName: "acme/api", DefaultBranch: "main", Visibility: "private"},
+		{ID: "repo-2", TenantID: "tenant-1", SourceType: application.RepositorySourceGitHubApp, GitHubAppID: "gha-1", FullName: "acme/api", DefaultBranch: "trunk", Visibility: "public"},
+	}
+	start := make(chan struct{})
+	errs := make([]error, len(records))
+	var wg sync.WaitGroup
+	for i := range records {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = repos.CreateOnboardedRepository(context.Background(), records[i])
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	var succeeded int
+	for _, err := range errs {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		require.ErrorIs(t, err, gitdomain.ErrRepositoryBindingConflict)
+	}
+	require.Equal(t, 1, succeeded)
+
+	got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
+	require.NoError(t, err)
+	if errs[0] == nil {
+		require.Equal(t, "repo-1", got.ID)
+		require.Equal(t, "main", got.DefaultBranch)
+		require.Equal(t, "private", got.Visibility)
+	} else {
+		require.Equal(t, "repo-2", got.ID)
+		require.Equal(t, "trunk", got.DefaultBranch)
+		require.Equal(t, "public", got.Visibility)
+	}
 	require.Equal(t, "gha-1", got.GitHubAppID)
 }
 
