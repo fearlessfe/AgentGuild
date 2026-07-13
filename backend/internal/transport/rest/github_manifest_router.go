@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"agentguild.dev/agentguild/backend/internal/git"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 )
 
 // githubManifest builds a GitHub App manifest + signed state for the current
@@ -47,11 +48,12 @@ func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) 
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 
-	if err := s.manifest.VerifyState(state, principal.TenantID); err != nil {
+	decoded, err := s.manifest.VerifyState(state, principal.TenantID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid manifest state")
 		return
 	}
-	if _, err := s.manifest.ExchangeCode(r.Context(), principal.TenantID, code); err != nil {
+	if _, err := s.manifest.ExchangeCode(r.Context(), decoded.TenantID, decoded.GitHubAppID, code); err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}
@@ -62,12 +64,19 @@ func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) 
 // already-created App while carrying a fresh signed state token.
 func (s *Server) githubAppInstall(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
-	view, err := s.gitHubAppManager.Get(r.Context(), principal.TenantID)
+	githubAppID := r.URL.Query().Get("github_app_id")
+	var view gitapp.GitHubAppView
+	var err error
+	if githubAppID == "" {
+		view, err = s.gitHubAppManager.Get(r.Context(), principal.TenantID)
+	} else {
+		view, err = s.gitHubAppManager.GetByID(r.Context(), principal.TenantID, githubAppID)
+	}
 	if err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}
-	installURL, err := s.manifest.BuildInstallURL(principal.TenantID, view.AppSlug)
+	installURL, err := s.manifest.BuildInstallURL(principal.TenantID, view.ID, view.AppSlug)
 	if err != nil {
 		mapDomainError(w, err, principal)
 		return
@@ -85,12 +94,13 @@ func (s *Server) githubAppInstalled(w http.ResponseWriter, r *http.Request) {
 		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "installation_id is invalid", "installation_id")
 		return
 	}
-	if err := s.manifest.VerifyState(state, principal.TenantID); err != nil {
+	decoded, err := s.manifest.VerifyState(state, principal.TenantID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid manifest state")
 		return
 	}
 
-	if _, err := s.gitHubAppManager.Install(r.Context(), principal.TenantID, installationID); err != nil {
+	if _, err := s.manifest.Install(r.Context(), decoded.TenantID, decoded.GitHubAppID, installationID); err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}

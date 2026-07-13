@@ -299,6 +299,10 @@ func (a fakeGitHubApps) InstallByID(context.Context, string, string, int64, stri
 	return a.view, nil
 }
 
+func (fakeGitHubApps) InstallationAccount(context.Context, string, string, int64) (string, error) {
+	return "", nil
+}
+
 func (a fakeGitHubApps) Get(context.Context, string) (application.GitHubAppView, error) {
 	if a.getErr != nil {
 		return application.GitHubAppView{}, a.getErr

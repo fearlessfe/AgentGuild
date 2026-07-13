@@ -26,6 +26,24 @@ func newManifestService(t *testing.T, apps application.GitHubAppManager, convers
 	return svc
 }
 
+func newManifestServiceWithIDs(t *testing.T, apps application.GitHubAppManager, conversionsBaseURL string, ids ...string) *application.ManifestService {
+	t.Helper()
+	next := 0
+	svc := application.NewManifestService(apps, application.ManifestOptions{
+		PublicBaseURL:      "https://guild.example.com",
+		StateSecret:        []byte("test-state-secret"),
+		ConversionsBaseURL: conversionsBaseURL,
+		Now:                func() time.Time { return time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC) },
+		NewID: func() string {
+			id := ids[next]
+			next++
+			return id
+		},
+	})
+	require.NotNil(t, svc)
+	return svc
+}
+
 func TestManifestBuildContainsPermissionsAndCallbacks(t *testing.T) {
 	svc := newManifestService(t, newGitHubAppManager(t), "")
 
@@ -69,10 +87,11 @@ func TestManifestVerifyStateRejectsTampered(t *testing.T) {
 	require.NoError(t, err)
 
 	// Valid state + matching tenant + fresh → nil.
-	require.NoError(t, svc.VerifyState(state, "tenant-1"))
+	_, err = svc.VerifyState(state, "tenant-1")
+	require.NoError(t, err)
 
 	// Tampered tenant → error.
-	err = svc.VerifyState(state, "tenant-2")
+	_, err = svc.VerifyState(state, "tenant-2")
 	require.Error(t, err)
 	var derr *domain.Error
 	require.ErrorAs(t, err, &derr)
@@ -82,23 +101,42 @@ func TestManifestVerifyStateRejectsTampered(t *testing.T) {
 	parts := strings.Split(state, ".")
 	require.Len(t, parts, 2)
 	mangled := parts[0] + "." + parts[1] + "x"
-	err = svc.VerifyState(mangled, "tenant-1")
+	_, err = svc.VerifyState(mangled, "tenant-1")
 	require.Error(t, err)
 
 	// Empty state → error.
-	require.Error(t, svc.VerifyState("", "tenant-1"))
+	_, err = svc.VerifyState("", "tenant-1")
+	require.Error(t, err)
+}
+
+func TestManifestStateKeepsGitHubAppIDAcrossParallelFlows(t *testing.T) {
+	svc := newManifestServiceWithIDs(t, newGitHubAppManager(t), "", "gha-1", "gha-2")
+
+	_, firstState, _, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+	_, secondState, _, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+
+	first, err := svc.VerifyState(firstState, "tenant-1")
+	require.NoError(t, err)
+	second, err := svc.VerifyState(secondState, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, "gha-1", first.GitHubAppID)
+	require.Equal(t, "gha-2", second.GitHubAppID)
 }
 
 func TestManifestBuildInstallURLIncludesVerifiableState(t *testing.T) {
 	svc := newManifestService(t, newGitHubAppManager(t), "")
 
-	installURL, err := svc.BuildInstallURL("tenant-1", "agentguild-test")
+	installURL, err := svc.BuildInstallURL("tenant-1", "gha-2", "agentguild-test")
 
 	require.NoError(t, err)
 	require.Contains(t, installURL, "https://github.com/apps/agentguild-test/installations/new?state=")
 	state := strings.TrimPrefix(installURL, "https://github.com/apps/agentguild-test/installations/new?state=")
 	require.NotEmpty(t, state)
-	require.NoError(t, svc.VerifyState(state, "tenant-1"))
+	decoded, err := svc.VerifyState(state, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, "gha-2", decoded.GitHubAppID)
 }
 
 func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
@@ -120,9 +158,13 @@ func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	manager, err := application.NewGitHubAppManager(repo)
 	require.NoError(t, err)
 
-	svc := newManifestService(t, manager, server.URL)
+	svc := newManifestServiceWithIDs(t, manager, server.URL, "gha-manifest")
+	_, state, _, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+	decoded, err := svc.VerifyState(state, "tenant-1")
+	require.NoError(t, err)
 
-	view, err := svc.ExchangeCode(ctx, "tenant-1", code)
+	view, err := svc.ExchangeCode(ctx, "tenant-1", decoded.GitHubAppID, code)
 	require.NoError(t, err)
 
 	require.Equal(t, "/app-manifests/"+code+"/conversions", gotPath)
@@ -132,6 +174,7 @@ func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	record, err := repo.GetDefault(ctx, "tenant-1")
 	require.NoError(t, err)
 	require.Equal(t, int64(123), record.AppID)
+	require.Equal(t, "gha-manifest", record.ID)
 	require.Equal(t, int64(0), record.InstallationID)
 	require.Equal(t, "my-app", record.AppSlug)
 	require.Contains(t, record.PrivateKey, "BEGIN RSA PRIVATE KEY")
@@ -149,4 +192,34 @@ func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(blob), "BEGIN RSA PRIVATE KEY")
 	require.NotContains(t, string(blob), "private_key")
+}
+
+func TestManifestInstallFetchesAccountWithoutExposingCredentials(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/app/installations/456", r.URL.Path)
+		require.NotEmpty(t, r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"account":{"login":"acme-corp"}}`))
+	}))
+	defer server.Close()
+
+	repo := newMemoryGitHubAppRepo()
+	manager, err := application.NewGitHubAppManager(repo)
+	require.NoError(t, err)
+	require.NoError(t, manager.Upsert(ctx, application.UpsertGitHubApp{
+		ID: "gha-2", TenantID: "tenant-1", AppID: 42,
+		PrivateKey: generateRSAPrivateKeyPEM(t), BaseURL: server.URL, AppSlug: "agentguild-test",
+	}))
+	svc := newManifestService(t, manager, "")
+
+	view, err := svc.Install(ctx, "tenant-1", "gha-2", 456)
+	require.NoError(t, err)
+	require.Equal(t, "gha-2", view.ID)
+	require.Equal(t, int64(456), view.InstallationID)
+	require.Equal(t, "acme-corp", view.InstallationAccountLogin)
+
+	encoded, err := json.Marshal(view)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "PRIVATE KEY")
+	require.NotContains(t, string(encoded), "private_key")
 }

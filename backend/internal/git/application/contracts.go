@@ -21,6 +21,7 @@ type GitHubAppManager interface {
 	Upsert(context.Context, UpsertGitHubApp) error
 	Install(context.Context, string, int64) (GitHubAppView, error)
 	InstallByID(context.Context, string, string, int64, string) (GitHubAppView, error)
+	InstallationAccount(context.Context, string, string, int64) (string, error)
 	Get(context.Context, string) (GitHubAppView, error)
 	GetByID(context.Context, string, string) (GitHubAppView, error)
 	List(context.Context, string) ([]GitHubAppView, error)

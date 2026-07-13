@@ -227,6 +227,31 @@ func (s *gitHubAppService) InstallByID(ctx context.Context, tenantID, appID stri
 	return s.GetByID(ctx, tenantID, appID)
 }
 
+// InstallationAccount fetches trusted installation metadata while keeping App
+// credentials private.
+func (s *gitHubAppService) InstallationAccount(ctx context.Context, tenantID, appID string, installationID int64) (string, error) {
+	if tenantID == "" {
+		return "", invalid("tenant_id")
+	}
+	if appID == "" {
+		return "", invalid("github_app_id")
+	}
+	if installationID == 0 {
+		return "", invalid("installation_id")
+	}
+	record, err := s.repo.GetByID(ctx, tenantID, appID)
+	if err != nil {
+		return "", err
+	}
+	client, err := github.NewInstallationClient(github.InstallationClientConfig{
+		BaseURL: record.BaseURL, AppID: record.AppID, PrivateKey: record.PrivateKey,
+	})
+	if err != nil {
+		return "", err
+	}
+	return client.InstallationAccount(ctx, installationID)
+}
+
 // Delete removes a tenant's GitHub App configuration.
 func (s *gitHubAppService) Delete(ctx context.Context, tenantID string) error {
 	if tenantID == "" {
