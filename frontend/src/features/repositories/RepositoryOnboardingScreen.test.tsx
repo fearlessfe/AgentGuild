@@ -285,6 +285,46 @@ describe("RepositoryOnboardingScreen", () => {
     expect(client.listGitHubApps).toHaveBeenCalledOnce();
   });
 
+  it("blocks App and public adds until inventory retry succeeds", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.getRepositoryOnboarding)
+      .mockRejectedValueOnce(new Error("inventory unavailable"))
+      .mockResolvedValueOnce(envelope(summaryFixture()));
+    render(<RepositoryOnboardingScreen />);
+
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-alpha");
+    const appRepositoryInput = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.click(appRepositoryInput);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+    const appAddButton = screen.getByRole("button", { name: "添加仓库" });
+    expect(appAddButton).toBeDisabled();
+    await user.click(appAddButton);
+    expect(client.addGitHubAppRepository).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("radio", { name: "公开仓库" }));
+    const publicRepositoryInput = screen.getByLabelText("公共仓库 URL 或 owner/repo");
+    await user.type(publicRepositoryInput, "rust-lang/rust");
+    const publicAddButton = screen.getByRole("button", { name: "添加公开仓库" });
+    expect(publicAddButton).toBeDisabled();
+    await user.click(publicAddButton);
+    expect(client.addPublicRepository).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("radio", { name: "GitHub App 授权仓库" }));
+    await user.selectOptions(screen.getByLabelText("GitHub App"), "gha-alpha");
+    const retriedAppRepositoryInput = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.click(retriedAppRepositoryInput);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+    await user.click(screen.getByRole("button", { name: "重试加载仓库清单" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "添加仓库" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "添加仓库" }));
+
+    expect(client.addGitHubAppRepository).toHaveBeenCalledWith("gha-alpha", "acme/web");
+    expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("acme/web")).toBeVisible();
+    await user.click(retriedAppRepositoryInput);
+    expect(screen.queryByRole("option", { name: "acme/web" })).not.toBeInTheDocument();
+  });
+
   it("locks all repository mutations and selectors until the active add finishes", async () => {
     const user = userEvent.setup();
     let resolveAdd!: (value: ReturnType<typeof envelope<RepositoryInventoryItem>>) => void;

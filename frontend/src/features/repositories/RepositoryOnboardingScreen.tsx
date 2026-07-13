@@ -98,6 +98,7 @@ export function RepositoryOnboardingScreen() {
   }, [onboardedNames, repositoryQuery, selectedAppRepositories]);
   const currentRepositoryLoad = repositoryLoadStates[selectedAppID];
   const loading = appsLoad.loading || summaryLoad.loading;
+  const inventoryReady = summary !== null && !summaryLoad.loading && !summaryLoad.error;
   const isMutating = pendingRepo !== null;
 
   const loadRepositories = async (appID: string, force = false) => {
@@ -144,7 +145,7 @@ export function RepositoryOnboardingScreen() {
 
   const handleAddAppRepository = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedAppID || !selectedRepository) return;
+    if (!inventoryReady || !selectedAppID || !selectedRepository) return;
     const key = repositoryKey("github_app", selectedRepository.full_name);
     if (!beginMutation(key)) return;
     try {
@@ -161,7 +162,7 @@ export function RepositoryOnboardingScreen() {
   const handleAddPublicRepository = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const repo = publicRepo.trim();
-    if (!repo) return;
+    if (!inventoryReady || !repo) return;
     if (!beginMutation(repositoryKey("public_github", repo))) return;
     try {
       const response = await client.addPublicRepository(repo);
@@ -251,7 +252,7 @@ export function RepositoryOnboardingScreen() {
       <div className="split-2">
         <div className="col">
           <Card className="repository-add-card" title="添加仓库" sub="选择一种仓库来源并完成接入。">
-            <fieldset className="source-selector" disabled={loading || isMutating}>
+            <fieldset className="source-selector" disabled={appsLoad.loading || isMutating}>
               <legend className="field-label">仓库来源</legend>
               <label className="source-selector__option">
                 <input
@@ -351,11 +352,12 @@ export function RepositoryOnboardingScreen() {
                       <Button
                         type="submit"
                         icon={<Plus size={14} strokeWidth={1.8} />}
-                        disabled={!selectedRepository || isMutating}
+                        disabled={!inventoryReady || !selectedRepository || isMutating}
                       >
                         添加仓库
                       </Button>
                     </div>
+                    {!inventoryReady ? <p className="field-hint">仓库清单确认后才能添加仓库，请重试加载仓库清单。</p> : null}
                   </>
                 )}
               </form>
@@ -377,11 +379,12 @@ export function RepositoryOnboardingScreen() {
                   <Button
                     type="submit"
                     icon={<Plus size={14} strokeWidth={1.8} />}
-                    disabled={!publicRepo.trim() || isMutating}
+                    disabled={!inventoryReady || !publicRepo.trim() || isMutating}
                   >
                     添加公开仓库
                   </Button>
                 </div>
+                {!inventoryReady ? <p className="field-hint">仓库清单确认后才能添加仓库，请重试加载仓库清单。</p> : null}
               </form>
             )}
           </Card>
