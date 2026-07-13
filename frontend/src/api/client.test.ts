@@ -4,12 +4,14 @@ import {
   createSyncRule,
   deleteGitHubApp,
   getExecution,
+  getGitHubApp,
   getTask,
   githubInstallUrl,
   listGitHubAppRepositories,
   listGitHubApps,
   listSyncRules,
   listTasks,
+  removeRepository,
   testGitHubApp,
 } from "./client";
 
@@ -187,6 +189,24 @@ describe("GitHub issue sync API client", () => {
     expect(new Set([...alphaRepositories.data.items, ...betaRepositories.data.items].map((repo) => repo.full_name)).size)
       .toBe(alphaRepositories.data.items.length + betaRepositories.data.items.length);
     await expect(deleteGitHubApp(alpha.id)).rejects.toThrow(/绑定.*仓库/);
+  });
+
+  it("makes singular demo deletion remove the default App and promote the earliest remaining App", async () => {
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+
+    const initialDefault = await getGitHubApp();
+    expect(initialDefault.data.id).toBe("gha-alpha");
+    await expect(deleteGitHubApp()).rejects.toThrow(/绑定.*仓库/);
+
+    await removeRepository("repo-inv-1");
+    await deleteGitHubApp();
+
+    const currentDefault = await getGitHubApp();
+    expect(currentDefault.data).toMatchObject({ id: "gha-beta", is_default: true });
+    const apps = await listGitHubApps();
+    expect(apps.data.items).toEqual([expect.objectContaining({ id: "gha-beta", is_default: true })]);
+    const testResult = await testGitHubApp();
+    expect(testResult.data).toMatchObject({ ok: true, repo_count: 2 });
   });
 
   it("keeps the legacy singular connection test helper compatible", async () => {

@@ -286,15 +286,11 @@ export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/r
 export const listGitHubAppRepositories = (id: string) =>
   apiRequest<{ items: Repository[] }>(`/v1/github-apps/${encodeURIComponent(id)}/repositories`);
 export const getRepositoryOnboarding = () => apiRequest<RepositoryOnboardingSummary>("/v1/repository-onboarding");
-export function addGitHubAppRepository(appID: string, repo: string): Promise<Envelope<RepositoryInventoryItem>>;
-/** @deprecated Pass the GitHub App ID as the first argument. */
-export function addGitHubAppRepository(repo: string): Promise<Envelope<RepositoryInventoryItem>>;
-export function addGitHubAppRepository(appIDOrRepo: string, maybeRepo?: string) {
-  const body = maybeRepo === undefined
-    ? { repo: appIDOrRepo }
-    : { github_app_id: appIDOrRepo, repo: maybeRepo };
-  return apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", { method: "POST", body });
-}
+export const addGitHubAppRepository = (appID: string, repo: string) =>
+  apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", {
+    method: "POST",
+    body: { github_app_id: appID, repo },
+  });
 export const addPublicRepository = (repo: string) =>
   apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", body: { repo } });
 export const removeRepository = (id: string) =>
@@ -674,6 +670,17 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   }
 
   if (url.pathname === "/v1/github-app" && method === "DELETE") {
+    if (!defaultApp) throw new Error("Demo GitHub App not found");
+    const bound = demoOnboardedRepositories.some(
+      (repo) => repo.source_type === "github_app" && repo.github_app_id === defaultApp.id,
+    );
+    if (bound) throw new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
+    const remaining = demoGitHubApps.filter((app) => app.id !== defaultApp.id);
+    const nextDefault = remaining.reduce<GitHubAppView | undefined>((earliest, app) => {
+      if (!earliest) return app;
+      return (app.created_at ?? "") < (earliest.created_at ?? "") ? app : earliest;
+    }, undefined);
+    demoGitHubApps = remaining.map((app) => ({ ...app, is_default: app.id === nextDefault?.id }));
     return clone({ data: { deleted: true }, meta: demoMeta });
   }
 

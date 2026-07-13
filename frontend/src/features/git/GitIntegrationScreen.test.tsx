@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
@@ -63,6 +63,21 @@ describe("GitIntegrationScreen", () => {
     expect(screen.getByRole("button", { name: "新增 GitHub App" })).toBeVisible();
   });
 
+  it("shows only a retryable error state when loading Apps fails", async () => {
+    vi.mocked(client.listGitHubApps)
+      .mockRejectedValueOnce(new Error("网络不可用"))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    const user = userEvent.setup();
+
+    render(<GitIntegrationScreen />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("网络不可用");
+    expect(screen.queryByText(/尚未配置 GitHub App/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试加载 GitHub App" }));
+    expect(await screen.findByText("alpha · acme-corp")).toBeVisible();
+    expect(client.listGitHubApps).toHaveBeenCalledTimes(2);
+  });
+
   it("tests and deletes the selected GitHub App by id", async () => {
     const user = userEvent.setup();
     render(<GitIntegrationScreen />);
@@ -75,6 +90,45 @@ describe("GitIntegrationScreen", () => {
     expect(client.deleteGitHubApp).toHaveBeenCalledWith("gha-beta");
     expect(screen.queryByText("beta · labs")).not.toBeInTheDocument();
     expect(screen.getByText("alpha · acme-corp")).toBeVisible();
+  });
+
+  it("exposes an App-scoped busy testing state without disabling other cards", async () => {
+    let resolveTest!: (value: client.Envelope<client.ConnectionTestResult>) => void;
+    vi.mocked(client.testGitHubApp).mockReturnValueOnce(new Promise((resolve) => {
+      resolveTest = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "检测 beta" }));
+
+    const pending = screen.getByRole("button", { name: "正在检测 beta" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "检测 alpha" })).toBeEnabled();
+
+    resolveTest(envelope({ ok: true, repo_count: 2 }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "检测 beta" })).toBeEnabled());
+  });
+
+  it("announces an App-scoped busy deletion and its successful completion", async () => {
+    let resolveDelete!: (value: client.Envelope<{ deleted: boolean }>) => void;
+    vi.mocked(client.deleteGitHubApp).mockReturnValueOnce(new Promise((resolve) => {
+      resolveDelete = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 beta" }));
+
+    const pending = screen.getByRole("button", { name: "正在删除 beta" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "删除 alpha" })).toBeEnabled();
+
+    resolveDelete(envelope({ deleted: true }));
+    expect(await screen.findByRole("status", { name: "GitHub App 操作结果" }))
+      .toHaveTextContent("已删除 GitHub App beta");
   });
 
   it("installs only the selected pending App", async () => {

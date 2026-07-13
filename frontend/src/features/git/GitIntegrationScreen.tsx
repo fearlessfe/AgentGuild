@@ -15,8 +15,10 @@ export function GitIntegrationScreen() {
   const [githubApps, setGitHubApps] = useState<client.GitHubAppView[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+  const [actionStatus, setActionStatus] = useState("");
   const [testing, setTesting] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
 
@@ -38,7 +40,7 @@ export function GitIntegrationScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadAttempt]);
 
   const handleConnect = () => {
     window.location.href = client.githubManifestUrl();
@@ -63,12 +65,14 @@ export function GitIntegrationScreen() {
 
   const handleDelete = async (app: client.GitHubAppView) => {
     if (!window.confirm(`确定要删除 GitHub App ${app.app_slug} 吗？此操作不可撤销。`)) return;
+    setActionStatus("");
     setDeleting((current) => new Set(current).add(app.id));
     setActionErrors((current) => withoutKey(current, app.id));
     try {
       await client.deleteGitHubApp(app.id);
       setGitHubApps((current) => current.filter((item) => item.id !== app.id));
       setTestResults((current) => withoutKey(current, app.id));
+      setActionStatus(`已删除 GitHub App ${app.app_slug}`);
     } catch (error) {
       setActionErrors((current) => ({
         ...current,
@@ -90,8 +94,20 @@ export function GitIntegrationScreen() {
 
       {loadError ? (
         <Card title="GitHub App 加载失败">
-          <p role="alert" className="text-sm">{loadError}</p>
+          <div className="stack-sm">
+            <p role="alert" className="text-sm">{loadError}</p>
+            <div className="row">
+              <Button aria-label="重试加载 GitHub App" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+                重试
+              </Button>
+            </div>
+          </div>
         </Card>
+      ) : null}
+      {actionStatus ? (
+        <p role="status" aria-label="GitHub App 操作结果" className="text-sm">
+          {actionStatus}
+        </p>
       ) : null}
 
       <div className="split-2">
@@ -100,7 +116,7 @@ export function GitIntegrationScreen() {
             <Card title="GitHub Apps">
               <p role="status">正在加载 GitHub App...</p>
             </Card>
-          ) : githubApps.length === 0 ? (
+          ) : loadError ? null : githubApps.length === 0 ? (
             <Card title="GitHub Apps">
               <p>尚未配置 GitHub App。使用“新增 GitHub App”开始接入。</p>
             </Card>
@@ -201,7 +217,8 @@ function GitHubAppCard({
               icon={<RefreshCcw size={14} strokeWidth={1.8} />}
               onClick={onTest}
               disabled={testing || deleting}
-              aria-label={`检测 ${app.app_slug}`}
+              aria-label={testing ? `正在检测 ${app.app_slug}` : `检测 ${app.app_slug}`}
+              aria-busy={testing}
             >
               {testing ? `正在检测 ${app.app_slug}` : "检测连接"}
             </Button>
@@ -219,7 +236,8 @@ function GitHubAppCard({
             variant="danger"
             onClick={onDelete}
             disabled={deleting || testing}
-            aria-label={`删除 ${app.app_slug}`}
+            aria-label={deleting ? `正在删除 ${app.app_slug}` : `删除 ${app.app_slug}`}
+            aria-busy={deleting}
           >
             {deleting ? `正在删除 ${app.app_slug}` : "删除"}
           </Button>

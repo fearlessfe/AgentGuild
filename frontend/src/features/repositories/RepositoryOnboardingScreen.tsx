@@ -45,9 +45,10 @@ export function RepositoryOnboardingScreen() {
   const onboardedKeys = useMemo(() => new Set(onboarded.map(repositoryInventoryKey)), [onboarded]);
 
   const handleAddAppRepository = async (repo: string) => {
+    if (!githubApp) return;
     try {
       setPendingRepo(repositoryKey("github_app", repo));
-      const response = await client.addGitHubAppRepository(repo);
+      const response = await client.addGitHubAppRepository(githubApp.id, repo);
       setSummary((current) => appendOnboardedRepository(current, response.data));
     } catch (err) {
       setError(err instanceof Error ? err.message : "添加 GitHub App 仓库失败");

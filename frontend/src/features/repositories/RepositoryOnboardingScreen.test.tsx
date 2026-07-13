@@ -36,6 +36,29 @@ describe("RepositoryOnboardingScreen", () => {
     await waitFor(() => expect(within(table).getByText("acme/event-gateway")).toBeVisible());
   });
 
+  it("sends the summary GitHub App id when adding a repository candidate", async () => {
+    const candidate: RepositoryInventoryItem = {
+      full_name: "acme/service",
+      default_branch: "main",
+      visibility: "private",
+    };
+    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
+      data: summaryFixture({ app_repositories: { items: [candidate] } }),
+      meta: { server_time: "", resource_version: 0 },
+    });
+    const addRepository = vi.spyOn(client, "addGitHubAppRepository").mockResolvedValue({
+      data: { ...candidate, id: "repo-service", source_type: "github_app" },
+      meta: { server_time: "", resource_version: 1 },
+    });
+
+    render(<RepositoryOnboardingScreen />);
+
+    const candidateRow = await screen.findByRole("row", { name: /acme\/service/ });
+    await userEvent.click(within(candidateRow).getByRole("button", { name: "添加" }));
+
+    expect(addRepository).toHaveBeenCalledWith("gha-test", "acme/service");
+  });
+
   it("adds a public GitHub URL without creating an issue sync rule", async () => {
     const createSyncRuleSpy = vi.spyOn(client, "createSyncRule");
 
