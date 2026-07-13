@@ -41,7 +41,7 @@ export function RepositoryOnboardingScreen() {
   const isGitHubAppInstalled = Boolean(githubApp?.installation_id);
   const canInstallGitHubApp = isGitHubAppConfigured && !isGitHubAppInstalled && Boolean(githubApp?.app_slug);
   const showAppRepositoriesEmpty =
-    !loading && summary?.github_app.configured && !appRepositoriesError && appRepositories.length === 0;
+    !loading && Boolean(summary?.github_app?.configured) && !appRepositoriesError && appRepositories.length === 0;
   const onboardedKeys = useMemo(() => new Set(onboarded.map(repositoryInventoryKey)), [onboarded]);
 
   const handleAddAppRepository = async (repo: string) => {

@@ -703,7 +703,7 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   if (url.pathname === "/v1/repository-onboarding" && method === "GET") {
     return clone({
       data: {
-        github_app: defaultApp,
+        github_app: defaultApp ?? { configured: false },
         app_repositories: { items: defaultRepositories },
         onboarded_repositories: { items: demoOnboardedRepositories },
       },

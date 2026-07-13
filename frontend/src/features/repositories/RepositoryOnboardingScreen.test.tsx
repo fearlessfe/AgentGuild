@@ -131,6 +131,21 @@ describe("RepositoryOnboardingScreen", () => {
     expect(await screen.findByText("暂无 GitHub App 可见仓库")).toBeVisible();
   });
 
+  it("renders the unconfigured state when a legacy summary omits github_app", async () => {
+    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
+      data: {
+        app_repositories: { items: [] },
+        onboarded_repositories: { items: [] },
+      } as unknown as RepositoryOnboardingSummary,
+      meta: { server_time: "", resource_version: 0 },
+    });
+
+    render(<RepositoryOnboardingScreen />);
+
+    expect(await screen.findByText("未配置")).toBeVisible();
+    expect(screen.getByText("请先在 Git 接入页安装或更新 GitHub App。")).toBeVisible();
+  });
+
   it("keeps public and GitHub App entries separate for the same full name", async () => {
     const publicRepo: RepositoryInventoryItem = {
       id: "public-acme-shared",

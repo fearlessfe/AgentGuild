@@ -234,6 +234,19 @@ describe("GitHub issue sync API client", () => {
     expect(testResult.data).toMatchObject({ ok: true, repo_count: 2 });
   });
 
+  it("returns an unconfigured GitHub App in onboarding after deleting every demo App", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+
+    await demoClient.removeRepository("repo-inv-1");
+    await demoClient.deleteGitHubApp("gha-beta");
+    await demoClient.deleteGitHubApp("gha-alpha");
+
+    const summary = await demoClient.getRepositoryOnboarding();
+    expect(summary.data.github_app).toEqual({ configured: false });
+  });
+
   it("keeps the legacy singular connection test helper compatible", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ data: { ok: true }, meta: {} }), { status: 200 }),

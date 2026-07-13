@@ -16,3 +16,12 @@
 - Full unit result: 16 files passed, 94 tests passed.
 - Build command: `cd frontend && npm run build`
 - Build result: TypeScript project build and Vite production build completed successfully.
+
+## Final demo empty-state edge
+
+- RED command: `cd frontend && npm test -- --run src/api/client.test.ts src/features/repositories/RepositoryOnboardingScreen.test.tsx`
+- RED result: 2 failed, 22 passed. After deleting both demo Apps, onboarding omitted `github_app`; a legacy omitted value also crashed `RepositoryOnboardingScreen` while reading `configured`.
+- Fix: demo onboarding now returns `{ configured: false }` when no default App exists, matching production; the screen uses optional access for the empty-state condition.
+- Focused GREEN: 2 files passed, 24 tests passed.
+- Full frontend unit: 16 files passed, 96 tests passed.
+- Frontend build: TypeScript and Vite production build passed.
