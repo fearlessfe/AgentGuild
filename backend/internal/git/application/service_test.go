@@ -10,6 +10,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	"agentguild.dev/agentguild/backend/internal/git/gittest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -268,6 +269,37 @@ func TestUpdateRepositoryReturnsRevokedErrorForRevokedRecord(t *testing.T) {
 	require.ErrorIs(t, err, git.ErrCredentialRevoked)
 }
 
+func TestIssueCredentialUsesCanonicalRepositoryForResolvedDriver(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	driver := &fakeCredentialDriver{}
+	apps := &resolverGitHubApps{drivers: map[string]git.Driver{"gha-api": driver}}
+	resolver, err := application.NewRepositoryGitResolver(
+		&resolverRepositoryStore{records: map[string]*application.OnboardedRepositoryRecord{
+			"tenant-1/acme/api": {
+				TenantID: "tenant-1", SourceType: application.RepositorySourceGitHubApp,
+				FullName: "acme/api", GitHubAppID: "gha-api",
+			},
+		}},
+		apps,
+		&gittest.StubIssueSource{},
+	)
+	require.NoError(t, err)
+	svc, err := application.NewCredentialService(store, resolver, application.Options{NewID: sequenceIDs("cred-1")})
+	require.NoError(t, err)
+
+	got, err := svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1",
+		Repo:        "  https://github.com/acme/api.git  ",
+		BaseCommit:  "base-sha",
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenant-1/gha-api"}, apps.driverCalls)
+	require.Equal(t, []string{"acme/api"}, driver.repos)
+	require.Equal(t, "https://github.com/acme/api.git", got.Data.Credential.RepoURL)
+	require.Equal(t, "https://github.com/acme/api.git", store.credentialByExecution("tenant-1", "exec-1").RepoURL)
+}
+
 type credentialFixture struct {
 	svc    *application.CredentialService
 	store  *memoryStore
@@ -290,12 +322,14 @@ func newCredentialFixture(t *testing.T) *credentialFixture {
 type fakeCredentialDriver struct {
 	counter int
 	err     error
+	repos   []string
 }
 
 func (f *fakeCredentialDriver) CreateCredential(_ context.Context, repo, branch, baseCommit string) (git.Credential, error) {
 	if f.err != nil {
 		return git.Credential{}, f.err
 	}
+	f.repos = append(f.repos, repo)
 	f.counter++
 	return git.Credential{
 		Token:      "tok-" + branch + "-" + string(rune('a'+f.counter-1)),
@@ -323,13 +357,13 @@ type fakeAppService struct {
 	driverCalls []string
 }
 
-func (f *fakeAppService) Driver(_ context.Context, tenantID, fullName string) (git.Driver, error) {
+func (f *fakeAppService) Driver(_ context.Context, tenantID, fullName string) (git.ResolvedDriver, error) {
 	f.driverCalls = append(f.driverCalls, tenantID+"/"+fullName)
-	return f.driver, nil
+	return git.ResolvedDriver{Driver: f.driver, FullName: fullName}, nil
 }
 
-func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.IssueSource, error) {
-	return nil, nil
+func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.ResolvedIssueSource, error) {
+	return git.ResolvedIssueSource{}, nil
 }
 
 type memoryStore struct {

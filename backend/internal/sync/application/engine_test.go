@@ -75,6 +75,26 @@ func TestEnginePassesRepositoryToIssueSourceProvider(t *testing.T) {
 	}
 }
 
+func TestEngineListsIssuesWithCanonicalResolvedRepository(t *testing.T) {
+	ctx := context.Background()
+	rule := mustRule(t, "rule-1", "tenant-1", "acme/api", nil, nil, "open", syncdomain.DedupeUpdate)
+	rule.Repo = "  https://github.com/acme/api.git  "
+	source := &recordingIssueSource{}
+	sources := &recordingSources{source: source, fullName: "acme/api"}
+	engine := NewEngine(newFakeRuleRepo(rule), newFakeMapRepo(), newFakeTaskSink(), sources, EngineOptions{})
+
+	_, err := engine.RunRule(ctx, "tenant-1", "rule-1")
+	if err != nil {
+		t.Fatalf("RunRule returned error: %v", err)
+	}
+	if len(sources.calls) != 1 || sources.calls[0] != "tenant-1/  https://github.com/acme/api.git  /app" {
+		t.Fatalf("IssueSource calls = %v, want raw repository resolved once", sources.calls)
+	}
+	if len(source.calls) != 1 || source.calls[0].Repo != "acme/api" {
+		t.Fatalf("ListIssues calls = %+v, want canonical repo acme/api", source.calls)
+	}
+}
+
 func TestEngineSkipsIssueWithExcludedLabel(t *testing.T) {
 	ctx := context.Background()
 	rule := mustRule(t, "rule-1", "tenant-1", "acme/api", []string{"bug"}, []string{"wontfix"}, "open", syncdomain.DedupeUpdate)
@@ -527,7 +547,7 @@ func (s *fakeTaskSink) TaskStatus(ctx context.Context, tenantID, taskID string) 
 
 type fakeSources map[string]git.IssueSource
 
-func (s fakeSources) IssueSource(ctx context.Context, tenantID, repo, sourceAuth string) (git.IssueSource, error) {
+func (s fakeSources) IssueSource(ctx context.Context, tenantID, repo, sourceAuth string) (git.ResolvedIssueSource, error) {
 	key := tenantID
 	if sourceAuth == syncdomain.SourceAuthPublic {
 		key = syncdomain.SourceAuthPublic
@@ -539,19 +559,24 @@ func (s fakeSources) IssueSource(ctx context.Context, tenantID, repo, sourceAuth
 		source, ok = s[tenantID]
 	}
 	if !ok {
-		return nil, syncdomain.ErrNotFound
+		return git.ResolvedIssueSource{}, syncdomain.ErrNotFound
 	}
-	return source, nil
+	return git.ResolvedIssueSource{Source: source, FullName: repo}, nil
 }
 
 type recordingSources struct {
-	source git.IssueSource
-	calls  []string
+	source   git.IssueSource
+	fullName string
+	calls    []string
 }
 
-func (s *recordingSources) IssueSource(_ context.Context, tenantID, repo, sourceAuth string) (git.IssueSource, error) {
+func (s *recordingSources) IssueSource(_ context.Context, tenantID, repo, sourceAuth string) (git.ResolvedIssueSource, error) {
 	s.calls = append(s.calls, tenantID+"/"+repo+"/"+sourceAuth)
-	return s.source, nil
+	fullName := s.fullName
+	if fullName == "" {
+		fullName = repo
+	}
+	return git.ResolvedIssueSource{Source: s.source, FullName: fullName}, nil
 }
 
 type recordingIssueSource struct {

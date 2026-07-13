@@ -13,12 +13,12 @@ type acceptanceGitAppService struct {
 	driver git.Driver
 }
 
-func (s *acceptanceGitAppService) Driver(ctx context.Context, tenantID, repo string) (git.Driver, error) {
-	return s.driver, nil
+func (s *acceptanceGitAppService) Driver(ctx context.Context, tenantID, repo string) (git.ResolvedDriver, error) {
+	return git.ResolvedDriver{Driver: s.driver, FullName: repo}, nil
 }
 
-func (s *acceptanceGitAppService) IssueSource(context.Context, string, string, string) (git.IssueSource, error) {
-	return nil, nil
+func (s *acceptanceGitAppService) IssueSource(context.Context, string, string, string) (git.ResolvedIssueSource, error) {
+	return git.ResolvedIssueSource{}, nil
 }
 
 var _ gitapp.RepositoryGitResolver = (*acceptanceGitAppService)(nil)

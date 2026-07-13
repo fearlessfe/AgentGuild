@@ -34,3 +34,10 @@ type IssueSource interface {
 	ListInstallationRepositories(ctx context.Context) ([]Repository, error)
 	ListIssues(ctx context.Context, repo string, filter IssueFilter, since time.Time) ([]Issue, error)
 }
+
+// ResolvedIssueSource couples an issue source with the canonical
+// owner/repository identity selected by the repository inventory.
+type ResolvedIssueSource struct {
+	Source   IssueSource
+	FullName string
+}

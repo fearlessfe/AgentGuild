@@ -25,7 +25,7 @@ func NewCommitVerifier(resolver RepositoryGitResolver, repo SubmissionRepository
 	return &CommitVerifier{resolver: resolver, submissions: repo}
 }
 
-func (v *CommitVerifier) driver(ctx context.Context, tenantID, repo string) (git.Driver, error) {
+func (v *CommitVerifier) driver(ctx context.Context, tenantID, repo string) (git.ResolvedDriver, error) {
 	return v.resolver.Driver(ctx, tenantID, repo)
 }
 
@@ -100,11 +100,11 @@ func (v *CommitVerifier) Verify(ctx context.Context, cmd VerifyCommit) error {
 	}
 
 	// 1. Commit exists.
-	driver, err := v.driver(ctx, cmd.TenantID, cmd.Repo)
+	resolved, err := v.driver(ctx, cmd.TenantID, cmd.Repo)
 	if err != nil {
 		return err
 	}
-	if _, err := driver.GetCommit(ctx, cmd.Repo, cmd.CommitSHA); err != nil {
+	if _, err := resolved.Driver.GetCommit(ctx, resolved.FullName, cmd.CommitSHA); err != nil {
 		if errors.Is(err, git.ErrRepoNotFound) {
 			return &domain.Error{Code: "not_found", Message: "commit not found", Field: "commit_sha"}
 		}
@@ -112,7 +112,7 @@ func (v *CommitVerifier) Verify(ctx context.Context, cmd VerifyCommit) error {
 	}
 
 	// 2. Base is an ancestor of head.
-	isAncestor, err := driver.IsAncestor(ctx, cmd.Repo, cmd.BaseCommitSHA, cmd.CommitSHA)
+	isAncestor, err := resolved.Driver.IsAncestor(ctx, resolved.FullName, cmd.BaseCommitSHA, cmd.CommitSHA)
 	if err != nil {
 		if errors.Is(err, git.ErrRepoNotFound) {
 			return &domain.Error{Code: "invalid_argument", Message: "base commit not found", Field: "base_commit_sha"}
@@ -124,12 +124,12 @@ func (v *CommitVerifier) Verify(ctx context.Context, cmd VerifyCommit) error {
 	}
 
 	// 3. Commit appears on the expected branch.
-	if err := v.verifyBranch(ctx, driver, cmd); err != nil {
+	if err := v.verifyBranch(ctx, resolved, cmd); err != nil {
 		return err
 	}
 
 	// 4. Changed paths stay within the allowed set and avoid forbidden paths.
-	files, err := driver.CompareCommits(ctx, cmd.Repo, cmd.BaseCommitSHA, cmd.CommitSHA)
+	files, err := resolved.Driver.CompareCommits(ctx, resolved.FullName, cmd.BaseCommitSHA, cmd.CommitSHA)
 	if err != nil {
 		return err
 	}
@@ -174,30 +174,30 @@ func validateVerifyCommit(cmd VerifyCommit) error {
 
 // ChangedFiles returns the files changed between base and head.
 func (v *CommitVerifier) ChangedFiles(ctx context.Context, tenantID, repo, base, head string) ([]git.ChangedFile, error) {
-	driver, err := v.driver(ctx, tenantID, repo)
+	resolved, err := v.driver(ctx, tenantID, repo)
 	if err != nil {
 		return nil, err
 	}
-	return driver.CompareCommits(ctx, repo, base, head)
+	return resolved.Driver.CompareCommits(ctx, resolved.FullName, base, head)
 }
 
 // IsCommitReachable reports whether commitSHA is still an ancestor of the
 // current branch head. A false result means the branch was force-pushed or the
 // commit was removed.
 func (v *CommitVerifier) IsCommitReachable(ctx context.Context, tenantID, repo, branch, commitSHA string) (bool, error) {
-	driver, err := v.driver(ctx, tenantID, repo)
+	resolved, err := v.driver(ctx, tenantID, repo)
 	if err != nil {
 		return false, err
 	}
-	branchHead, err := driver.GetCommit(ctx, repo, branch)
+	branchHead, err := resolved.Driver.GetCommit(ctx, resolved.FullName, branch)
 	if err != nil {
 		return false, err
 	}
-	return driver.IsAncestor(ctx, repo, commitSHA, branchHead.SHA)
+	return resolved.Driver.IsAncestor(ctx, resolved.FullName, commitSHA, branchHead.SHA)
 }
 
-func (v *CommitVerifier) verifyBranch(ctx context.Context, driver git.Driver, cmd VerifyCommit) error {
-	branchHead, err := driver.GetCommit(ctx, cmd.Repo, cmd.Branch)
+func (v *CommitVerifier) verifyBranch(ctx context.Context, resolved git.ResolvedDriver, cmd VerifyCommit) error {
+	branchHead, err := resolved.Driver.GetCommit(ctx, resolved.FullName, cmd.Branch)
 	if err != nil {
 		if errors.Is(err, git.ErrRepoNotFound) {
 			return &domain.Error{Code: "invalid_argument", Message: "branch not found", Field: "branch"}
@@ -205,7 +205,7 @@ func (v *CommitVerifier) verifyBranch(ctx context.Context, driver git.Driver, cm
 		return err
 	}
 
-	onBranch, err := driver.IsAncestor(ctx, cmd.Repo, cmd.CommitSHA, branchHead.SHA)
+	onBranch, err := resolved.Driver.IsAncestor(ctx, resolved.FullName, cmd.CommitSHA, branchHead.SHA)
 	if err != nil {
 		return err
 	}

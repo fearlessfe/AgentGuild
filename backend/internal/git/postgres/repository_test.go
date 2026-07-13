@@ -294,12 +294,12 @@ type fakeAppService struct {
 	driver git.Driver
 }
 
-func (f *fakeAppService) Driver(context.Context, string, string) (git.Driver, error) {
-	return f.driver, nil
+func (f *fakeAppService) Driver(_ context.Context, _, repo string) (git.ResolvedDriver, error) {
+	return git.ResolvedDriver{Driver: f.driver, FullName: repo}, nil
 }
 
-func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.IssueSource, error) {
-	return nil, nil
+func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.ResolvedIssueSource, error) {
+	return git.ResolvedIssueSource{}, nil
 }
 
 func sequenceIDs(values ...string) func() string {

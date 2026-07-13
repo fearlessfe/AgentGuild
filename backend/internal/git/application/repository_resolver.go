@@ -16,8 +16,8 @@ const (
 // RepositoryGitResolver resolves runtime Git access from the repository's
 // immutable tenant-scoped onboarding binding.
 type RepositoryGitResolver interface {
-	Driver(ctx context.Context, tenantID, fullName string) (git.Driver, error)
-	IssueSource(ctx context.Context, tenantID, fullName, sourceAuth string) (git.IssueSource, error)
+	Driver(ctx context.Context, tenantID, fullName string) (git.ResolvedDriver, error)
+	IssueSource(ctx context.Context, tenantID, fullName, sourceAuth string) (git.ResolvedIssueSource, error)
 }
 
 type repositoryGitAppProvider interface {
@@ -46,57 +46,66 @@ func NewRepositoryGitResolver(store OnboardedRepositoryStore, apps repositoryGit
 	return &repositoryGitResolver{store: store, apps: apps, public: public}, nil
 }
 
-func (r *repositoryGitResolver) Driver(ctx context.Context, tenantID, fullName string) (git.Driver, error) {
-	record, err := r.repository(ctx, tenantID, fullName)
+func (r *repositoryGitResolver) Driver(ctx context.Context, tenantID, fullName string) (git.ResolvedDriver, error) {
+	record, canonical, err := r.repository(ctx, tenantID, fullName)
 	if err != nil {
-		return nil, err
+		return git.ResolvedDriver{}, err
 	}
 	if record.SourceType != RepositorySourceGitHubApp || record.GitHubAppID == "" {
-		return nil, repositoryAccessConflict()
+		return git.ResolvedDriver{}, repositoryAccessConflict()
 	}
-	return r.apps.DriverForApp(ctx, tenantID, record.GitHubAppID)
+	driver, err := r.apps.DriverForApp(ctx, tenantID, record.GitHubAppID)
+	if err != nil {
+		return git.ResolvedDriver{}, err
+	}
+	return git.ResolvedDriver{Driver: driver, FullName: canonical}, nil
 }
 
-func (r *repositoryGitResolver) IssueSource(ctx context.Context, tenantID, fullName, sourceAuth string) (git.IssueSource, error) {
-	record, err := r.repository(ctx, tenantID, fullName)
+func (r *repositoryGitResolver) IssueSource(ctx context.Context, tenantID, fullName, sourceAuth string) (git.ResolvedIssueSource, error) {
+	record, canonical, err := r.repository(ctx, tenantID, fullName)
 	if err != nil {
-		return nil, err
+		return git.ResolvedIssueSource{}, err
 	}
+	var source git.IssueSource
 	switch sourceAuth {
 	case "", repositoryIssueSourceAuthApp:
 		if record.SourceType != RepositorySourceGitHubApp || record.GitHubAppID == "" {
-			return nil, repositoryAccessConflict()
+			return git.ResolvedIssueSource{}, repositoryAccessConflict()
 		}
-		return r.apps.IssueSourceForApp(ctx, tenantID, record.GitHubAppID)
+		source, err = r.apps.IssueSourceForApp(ctx, tenantID, record.GitHubAppID)
 	case repositoryIssueSourceAuthPublic:
 		if record.SourceType != RepositorySourcePublicGitHub {
-			return nil, repositoryAccessConflict()
+			return git.ResolvedIssueSource{}, repositoryAccessConflict()
 		}
-		return r.public, nil
+		source = r.public
 	default:
-		return nil, invalid("source_auth")
+		return git.ResolvedIssueSource{}, invalid("source_auth")
 	}
+	if err != nil {
+		return git.ResolvedIssueSource{}, err
+	}
+	return git.ResolvedIssueSource{Source: source, FullName: canonical}, nil
 }
 
-func (r *repositoryGitResolver) repository(ctx context.Context, tenantID, fullName string) (*OnboardedRepositoryRecord, error) {
+func (r *repositoryGitResolver) repository(ctx context.Context, tenantID, fullName string) (*OnboardedRepositoryRecord, string, error) {
 	if tenantID == "" {
-		return nil, invalid("tenant_id")
+		return nil, "", invalid("tenant_id")
 	}
 	normalized, err := normalizeGitHubRepository(fullName)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	record, err := r.store.GetOnboardedRepositoryByFullName(ctx, tenantID, normalized)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) || errors.Is(err, git.ErrRepoNotFound) {
-			return nil, repositoryNotFound()
+			return nil, "", repositoryNotFound()
 		}
-		return nil, err
+		return nil, "", err
 	}
 	if record == nil {
-		return nil, repositoryNotFound()
+		return nil, "", repositoryNotFound()
 	}
-	return record, nil
+	return record, normalized, nil
 }
 
 func repositoryNotFound() error {

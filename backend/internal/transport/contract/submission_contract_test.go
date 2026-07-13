@@ -28,12 +28,12 @@ type fakeGitDriver struct {
 
 type ancestorKey struct{ base, head string }
 
-func (f *fakeGitDriver) Driver(_ context.Context, _, _ string) (git.Driver, error) {
-	return f, nil
+func (f *fakeGitDriver) Driver(_ context.Context, _, repo string) (git.ResolvedDriver, error) {
+	return git.ResolvedDriver{Driver: f, FullName: repo}, nil
 }
 
-func (f *fakeGitDriver) IssueSource(context.Context, string, string, string) (git.IssueSource, error) {
-	return nil, nil
+func (f *fakeGitDriver) IssueSource(context.Context, string, string, string) (git.ResolvedIssueSource, error) {
+	return git.ResolvedIssueSource{}, nil
 }
 
 func (f *fakeGitDriver) CreateCredential(_ context.Context, _, _, _ string) (git.Credential, error) {

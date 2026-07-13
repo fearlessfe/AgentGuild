@@ -33,11 +33,13 @@ func TestRepositoryGitResolverChoosesBoundApp(t *testing.T) {
 
 	got, err := resolver.Driver(context.Background(), "tenant-1", "https://github.com/acme/api.git")
 	require.NoError(t, err)
-	require.Same(t, driver2, got)
+	require.Same(t, driver2, got.Driver)
+	require.Equal(t, "acme/api", got.FullName)
 
 	got, err = resolver.Driver(context.Background(), "tenant-1", "acme/web")
 	require.NoError(t, err)
-	require.Same(t, driver1, got)
+	require.Same(t, driver1, got.Driver)
+	require.Equal(t, "acme/web", got.FullName)
 	require.Equal(t, []string{"tenant-1/gha-2", "tenant-1/gha-1"}, apps.driverCalls)
 }
 
@@ -57,9 +59,10 @@ func TestRepositoryGitResolverUsesBoundAppIssueSource(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	got, err := resolver.IssueSource(context.Background(), "tenant-1", "acme/api", "app")
+	got, err := resolver.IssueSource(context.Background(), "tenant-1", "  https://github.com/acme/api.git  ", "app")
 	require.NoError(t, err)
-	require.Same(t, source2, got)
+	require.Same(t, source2, got.Source)
+	require.Equal(t, "acme/api", got.FullName)
 	require.Equal(t, []string{"tenant-1/gha-2"}, apps.sourceCalls)
 }
 
@@ -100,7 +103,8 @@ func TestRepositoryGitResolverPublicIssueSourceDoesNotChooseApp(t *testing.T) {
 
 	got, err := resolver.IssueSource(context.Background(), "tenant-1", "acme/api", "public")
 	require.NoError(t, err)
-	require.Same(t, public, got)
+	require.Same(t, public, got.Source)
+	require.Equal(t, "acme/api", got.FullName)
 	require.Empty(t, apps.sourceCalls)
 }
 
