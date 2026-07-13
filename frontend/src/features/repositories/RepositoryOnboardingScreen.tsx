@@ -155,7 +155,7 @@ export function RepositoryOnboardingScreen() {
       setSummary((current) => appendOnboardedRepository(current, response.data));
       clearRepositoryChoice();
     } catch (err) {
-      if (err instanceof client.ApiError) settleMutation(logicalKey);
+      if (!client.shouldRetainMutationKey(err)) settleMutation(logicalKey);
       setError(errorMessage(err, "添加 GitHub App 仓库失败"));
       if (err instanceof client.ApiError && err.status === 409) await loadSummary();
     } finally {
@@ -175,7 +175,7 @@ export function RepositoryOnboardingScreen() {
       setSummary((current) => appendOnboardedRepository(current, response.data));
       setPublicRepo("");
     } catch (err) {
-      if (err instanceof client.ApiError) settleMutation(logicalKey);
+      if (!client.shouldRetainMutationKey(err)) settleMutation(logicalKey);
       setError(errorMessage(err, "添加公开仓库失败"));
       if (err instanceof client.ApiError && err.status === 409) await loadSummary();
     } finally {
@@ -201,7 +201,7 @@ export function RepositoryOnboardingScreen() {
           : current,
       );
     } catch (err) {
-      if (err instanceof client.ApiError) settleMutation(logicalKey);
+      if (!client.shouldRetainMutationKey(err)) settleMutation(logicalKey);
       setError(errorMessage(err, "移除仓库失败"));
     } finally {
       endMutation();

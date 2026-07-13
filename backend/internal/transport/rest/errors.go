@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	agentversiondomain "agentguild.dev/agentguild/backend/internal/agentversion/domain"
 	agentexperiencedomain "agentguild.dev/agentguild/backend/internal/agentexperience/domain"
+	agentversiondomain "agentguild.dev/agentguild/backend/internal/agentversion/domain"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	evaluationdomain "agentguild.dev/agentguild/backend/internal/evaluation/domain"
@@ -111,6 +111,8 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusConflict, "LEASE_EXPIRED", err.Error())
 	case "idempotency_mismatch":
 		writeError(w, http.StatusConflict, "IDEMPOTENCY_MISMATCH", err.Error())
+	case "idempotency_in_progress":
+		writeError(w, http.StatusConflict, "IDEMPOTENCY_IN_PROGRESS", err.Error())
 	case "deadline_exceeded":
 		writeError(w, http.StatusConflict, "DEADLINE_EXCEEDED", err.Error())
 	case "token_revoked":

@@ -409,6 +409,30 @@ describe("RepositoryOnboardingScreen", () => {
     expect(client.addPublicRepository).toHaveBeenNthCalledWith(3, "golang/go", { idempotencyKey: "key-two" });
   });
 
+  it("retains a repository key for 5xx and in-progress, then rotates after a definitive 409", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(client, "createIdempotencyKey").mockReturnValueOnce("repo-key-one").mockReturnValueOnce("repo-key-two");
+    vi.mocked(client.addPublicRepository)
+      .mockRejectedValueOnce(new client.ApiError(500, "INTERNAL_ERROR", "server failed"))
+      .mockRejectedValueOnce(new client.ApiError(409, "IDEMPOTENCY_IN_PROGRESS", "still running"))
+      .mockRejectedValueOnce(new client.ApiError(409, "STATE_CONFLICT", "already added"))
+      .mockResolvedValueOnce(envelope({ id: "repo-rust", source_type: "public_github", full_name: "rust-lang/rust", default_branch: "main", visibility: "public" }));
+    render(<RepositoryOnboardingScreen />);
+    await user.click(await screen.findByRole("radio", { name: "公开仓库" }));
+    await user.type(screen.getByLabelText("公共仓库 URL 或 owner/repo"), "rust-lang/rust");
+
+    const add = screen.getByRole("button", { name: "添加公开仓库" });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await user.click(add);
+      if (attempt < 3) await screen.findByRole("alert");
+    }
+
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(1, "rust-lang/rust", { idempotencyKey: "repo-key-one" });
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(2, "rust-lang/rust", { idempotencyKey: "repo-key-one" });
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(3, "rust-lang/rust", { idempotencyKey: "repo-key-one" });
+    expect(client.addPublicRepository).toHaveBeenNthCalledWith(4, "rust-lang/rust", { idempotencyKey: "repo-key-two" });
+  });
+
   it("shows textual loading and resource errors", async () => {
     let rejectApps!: (reason: Error) => void;
     vi.mocked(client.listGitHubApps).mockImplementation(() => new Promise((_, reject) => (rejectApps = reject)));

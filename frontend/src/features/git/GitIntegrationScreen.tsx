@@ -37,9 +37,9 @@ export function GitIntegrationScreen() {
         const response = await client.listGitHubApps();
         if (active && epoch === refreshEpoch.current) setGitHubApps(withoutDeletedApps(response.data.items, confirmedDeleted.current));
       } catch (error) {
-        if (active) setLoadError(errorMessage(error, "加载 GitHub App 失败"));
+        if (active && epoch === refreshEpoch.current) setLoadError(errorMessage(error, "加载 GitHub App 失败"));
       } finally {
-        if (active) setLoading(false);
+        if (active && epoch === refreshEpoch.current) setLoading(false);
       }
     };
     void load();
@@ -85,15 +85,18 @@ export function GitIntegrationScreen() {
       setTestResults((current) => withoutKey(current, app.id));
       setActionStatus(`已删除 GitHub App ${appName}`);
 
+      const epoch = ++refreshEpoch.current;
+      setRefreshing(true);
       try {
-        const epoch = ++refreshEpoch.current;
         const response = await client.listGitHubApps();
         if (epoch === refreshEpoch.current) setGitHubApps(withoutDeletedApps(response.data.items, confirmedDeleted.current));
       } catch (error) {
-        setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
+        if (epoch === refreshEpoch.current) setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
+      } finally {
+        if (epoch === refreshEpoch.current) setRefreshing(false);
       }
     } catch (error) {
-      if (error instanceof client.ApiError) delete deleteKeys.current[app.id];
+      if (!client.shouldRetainMutationKey(error)) delete deleteKeys.current[app.id];
       setActionErrors((current) => ({
         ...current,
         [app.id]: errorMessage(error, "删除 GitHub App 失败"),
@@ -111,9 +114,9 @@ export function GitIntegrationScreen() {
       const response = await client.listGitHubApps();
       if (epoch === refreshEpoch.current) setGitHubApps(withoutDeletedApps(response.data.items, confirmedDeleted.current));
     } catch (error) {
-      setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
+      if (epoch === refreshEpoch.current) setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
     } finally {
-      setRefreshing(false);
+      if (epoch === refreshEpoch.current) setRefreshing(false);
     }
   };
 

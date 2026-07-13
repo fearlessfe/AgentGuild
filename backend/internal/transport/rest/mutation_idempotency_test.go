@@ -2,8 +2,12 @@ package rest_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/git"
@@ -123,7 +127,79 @@ func TestOnboardingMutationReturnsConflictForPendingRequest(t *testing.T) {
 	res := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "pending")
 
 	require.Equal(t, http.StatusConflict, res.Code)
-	require.Contains(t, res.Body.String(), "STATE_CONFLICT")
+	require.Contains(t, res.Body.String(), "IDEMPOTENCY_IN_PROGRESS")
+}
+
+func TestOnboardingMutationCompletesAfterRequestContextCancellation(t *testing.T) {
+	store := newMemoryIdempotencyStore()
+	completionContext := make(chan error, 1)
+	observed := &completionContextStore{memoryIdempotencyStore: store, completionContext: completionContext}
+	svc := newRepositoryOnboardingService(t)
+	svc.public.repos["octo/hello-world"] = git.Repository{FullName: "octo/hello-world", DefaultBranch: "main", Visibility: "public"}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancellingService := &cancelingRepositoryOnboardingService{RepositoryOnboardingService: svc.service, cancel: cancel}
+	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(cancellingService), rest.WithIdempotencyStore(observed))
+	request := httptest.NewRequest(http.MethodPost, "/v1/repositories/public", strings.NewReader(`{"repo":"octo/hello-world"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "cancelled-completion")
+	request.AddCookie(sessionCookie(t, "admin-1", true))
+	request = request.WithContext(ctx)
+
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, request)
+
+	require.Equal(t, http.StatusCreated, res.Code)
+	select {
+	case err := <-completionContext:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("completion was not attempted")
+	}
+}
+
+func TestOnboardingMutationReturns500AndLeavesPendingWhenCompletionFails(t *testing.T) {
+	store := newMemoryIdempotencyStore()
+	failing := &failingCompletionStore{memoryIdempotencyStore: store}
+	svc := newRepositoryOnboardingService(t)
+	svc.public.repos["octo/hello-world"] = git.Repository{FullName: "octo/hello-world", DefaultBranch: "main", Visibility: "public"}
+	server := newTestServer(&fakeApplication{}, rest.WithRepositoryOnboardingService(svc.service), rest.WithIdempotencyStore(failing))
+
+	res := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "failed-completion")
+
+	require.Equal(t, http.StatusInternalServerError, res.Code)
+	require.Contains(t, res.Body.String(), "INTERNAL_ERROR")
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "failed-completion"}
+	require.False(t, store.records[key].Completed)
+	require.Nil(t, store.records[key].ResponseCode)
+}
+
+type cancelingRepositoryOnboardingService struct {
+	*gitapp.RepositoryOnboardingService
+	cancel context.CancelFunc
+}
+
+func (s *cancelingRepositoryOnboardingService) AddPublicRepository(ctx context.Context, principal gitapp.Principal, input string) (gitapp.OnboardedRepositoryView, error) {
+	view, err := s.RepositoryOnboardingService.AddPublicRepository(ctx, principal, input)
+	s.cancel()
+	return view, err
+}
+
+type completionContextStore struct {
+	*memoryIdempotencyStore
+	completionContext chan<- error
+}
+
+type failingCompletionStore struct {
+	*memoryIdempotencyStore
+}
+
+func (s *failingCompletionStore) CompleteIdempotency(context.Context, application.IdempotencyKey, string, int, []byte) error {
+	return errors.New("completion unavailable")
+}
+
+func (s *completionContextStore) CompleteIdempotency(ctx context.Context, key application.IdempotencyKey, owner string, status int, body []byte) error {
+	s.completionContext <- ctx.Err()
+	return s.memoryIdempotencyStore.CompleteIdempotency(ctx, key, owner, status, body)
 }
 
 func TestGitHubAppDeleteReplaysExactHandledConflict(t *testing.T) {

@@ -166,6 +166,34 @@ describe("GitIntegrationScreen", () => {
     expect(screen.queryByText("beta · labs")).not.toBeInTheDocument();
   });
 
+  it("ignores a stale refresh failure after a newer deletion refresh succeeds", async () => {
+    const gammaApp: client.GitHubAppView = {
+      ...betaApp,
+      id: "gha-gamma",
+      app_id: 101,
+      app_slug: "gamma",
+      installation_account_login: "platform",
+    };
+    let rejectStale!: (reason: Error) => void;
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp, gammaApp] }))
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectStale = reject; }))
+      .mockResolvedValueOnce(envelope({ items: [gammaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "删除 beta" }));
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("gamma · platform")).toBeVisible();
+
+    rejectStale(new Error("stale network failure"));
+
+    await waitFor(() => expect(screen.queryByText(/stale network failure/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/删除已成功，但刷新/)).not.toBeInTheDocument();
+  });
+
   it("falls back to the App id when GitHub has not returned a slug", async () => {
     vi.mocked(client.listGitHubApps).mockResolvedValueOnce(
       envelope({ items: [{ ...alphaApp, app_slug: undefined }] }),
@@ -232,6 +260,31 @@ describe("GitIntegrationScreen", () => {
 
     expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(1, "gha-beta", { idempotencyKey: "delete-retry-key" });
     expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(2, "gha-beta", { idempotencyKey: "delete-retry-key" });
+  });
+
+  it("retains the delete key for 5xx and in-progress, then rotates after a definitive 409", async () => {
+    vi.spyOn(client, "createIdempotencyKey").mockReturnValueOnce("delete-key-one").mockReturnValueOnce("delete-key-two");
+    vi.mocked(client.deleteGitHubApp)
+      .mockRejectedValueOnce(new client.ApiError(500, "INTERNAL_ERROR", "server failed"))
+      .mockRejectedValueOnce(new client.ApiError(409, "IDEMPOTENCY_IN_PROGRESS", "still running"))
+      .mockRejectedValueOnce(new client.ApiError(409, "STATE_CONFLICT", "repository bound"))
+      .mockResolvedValueOnce(envelope({ deleted: true }));
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    const deleteBeta = await screen.findByRole("button", { name: "删除 beta" });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await user.click(deleteBeta);
+      if (attempt < 3) await screen.findByRole("alert");
+    }
+
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(1, "gha-beta", { idempotencyKey: "delete-key-one" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(2, "gha-beta", { idempotencyKey: "delete-key-one" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(3, "gha-beta", { idempotencyKey: "delete-key-one" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(4, "gha-beta", { idempotencyKey: "delete-key-two" });
   });
 
   it("installs only the selected pending App", async () => {

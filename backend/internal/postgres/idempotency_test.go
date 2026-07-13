@@ -236,6 +236,131 @@ func TestStorePersistsPendingAndCompletesAcrossShortTransactions(t *testing.T) {
 	}
 }
 
+func TestPendingIdempotencyBeforeLeaseExpiryIsNotAcquired(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "owner-1", Operation: "repository.create", RequestID: "pending-lease"}
+	hash, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/one"})
+
+	first, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Acquired || second.Acquired || second.Completed || second.OwnerToken != "" {
+		t.Fatalf("unexpected pending lease states: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestExpiredPendingIdempotencyLeaseCanBeTakenOver(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "owner-1", Operation: "repository.create", RequestID: "lease-takeover"}
+	hash, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/one"})
+
+	first, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(context.Background(), `UPDATE idempotency_records SET updated_at=clock_timestamp()-interval '6 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	takeover, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !takeover.Acquired || takeover.Completed || takeover.OwnerToken == "" || takeover.OwnerToken == first.OwnerToken {
+		t.Fatalf("unexpected takeover state: first=%#v takeover=%#v", first, takeover)
+	}
+}
+
+func TestConcurrentExpiredPendingLeaseHasExactlyOneTakeoverOwner(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "owner-1", Operation: "repository.create", RequestID: "concurrent-takeover"}
+	hash, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/one"})
+	if _, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(context.Background(), `UPDATE idempotency_records SET updated_at=clock_timestamp()-interval '6 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan *application.IdempotencyRecord, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			record, err := store.AcquireIdempotency(context.Background(), key, hash, time.Now().Add(time.Hour))
+			results <- record
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var acquired int
+	var owner string
+	for record := range results {
+		if record.Acquired {
+			acquired++
+			owner = record.OwnerToken
+		}
+	}
+	if acquired != 1 || owner == "" {
+		t.Fatalf("takeover acquisitions=%d owner=%q want exactly one", acquired, owner)
+	}
+}
+
+func TestPendingIdempotencyHashMismatchDuringRetention(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "owner-1", Operation: "repository.create", RequestID: "pending-mismatch"}
+	first, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/one"})
+	second, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/two"})
+	if _, err := store.AcquireIdempotency(context.Background(), key, first, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := store.AcquireIdempotency(context.Background(), key, second, time.Now().Add(time.Hour))
+	var domainErr *domain.Error
+	if !errors.As(err, &domainErr) || domainErr.Code != "idempotency_mismatch" {
+		t.Fatalf("expected idempotency_mismatch, got %v", err)
+	}
+}
+
+func TestExpiredIdempotencyRetentionAllowsAtomicKeyReuse(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := postgres.NewStore(db)
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "owner-1", Operation: "repository.create", RequestID: "retention-reuse"}
+	firstHash, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/one"})
+	secondHash, _ := postgres.CanonicalHash(map[string]any{"repo": "octo/two"})
+	first, err := store.AcquireIdempotency(context.Background(), key, firstHash, time.Now().Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reused, err := store.AcquireIdempotency(context.Background(), key, secondHash, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reused.Acquired || reused.Completed || reused.OwnerToken == "" || reused.OwnerToken == first.OwnerToken || reused.RequestHash != secondHash {
+		t.Fatalf("unexpected reused state: first=%#v reused=%#v", first, reused)
+	}
+}
+
 func waitForBlockedIdempotencyQuery(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

@@ -14,7 +14,10 @@ import (
 	canonicaljson "github.com/gibson042/canonicaljson-go"
 )
 
-const mutationIdempotencyTTL = 24 * time.Hour
+const (
+	mutationIdempotencyTTL    = 24 * time.Hour
+	mutationCompletionTimeout = 5 * time.Second
+)
 
 type mutationIdempotencyStore interface {
 	AcquireIdempotency(context.Context, application.IdempotencyKey, [32]byte, time.Time) (*application.IdempotencyRecord, error)
@@ -57,14 +60,17 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 				return
 			}
 			if !record.Acquired {
-				mapDomainError(w, &domain.Error{Code: "state_conflict", Message: "an idempotent request is already in progress"}, principal)
+				mapDomainError(w, &domain.Error{Code: "idempotency_in_progress", Message: "an idempotent request is already in progress"}, principal)
 				return
 			}
 
 			recorder := newBufferedResponse()
 			next.ServeHTTP(recorder, r)
 			if recorder.status < http.StatusInternalServerError {
-				if err := s.idempotencyStore.CompleteIdempotency(r.Context(), key, record.OwnerToken, recorder.status, recorder.body.Bytes()); err != nil {
+				completionContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), mutationCompletionTimeout)
+				err := s.idempotencyStore.CompleteIdempotency(completionContext, key, record.OwnerToken, recorder.status, recorder.body.Bytes())
+				cancel()
+				if err != nil {
 					writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 					return
 				}

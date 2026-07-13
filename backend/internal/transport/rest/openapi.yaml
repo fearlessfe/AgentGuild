@@ -945,7 +945,7 @@ components:
       required: true
       description: >-
         写操作的持久幂等键。相同 tenant、human owner、operation、key 与规范请求会重放首次完成的原始 HTTP status/body；
-        相同 key 用于不同请求返回 409 IDEMPOTENCY_MISMATCH，仍在处理的请求返回 409 STATE_CONFLICT。
+        相同 key 用于不同请求返回 409 IDEMPOTENCY_MISMATCH，仍在处理的请求返回 409 IDEMPOTENCY_IN_PROGRESS。
       schema:
         type: string
         minLength: 1

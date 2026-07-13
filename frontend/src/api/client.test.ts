@@ -233,6 +233,47 @@ describe("GitHub issue sync API client", () => {
       .rejects.toMatchObject({ status: 409, code: "IDEMPOTENCY_MISMATCH" });
   });
 
+  it("replays canonical-equivalent demo JSON bodies", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+    const headers = { "Idempotency-Key": "canonical-demo" };
+
+    const first = await demoClient.apiRequest("/v1/repositories/github-app", {
+      method: "POST",
+      headers,
+      body: { github_app_id: "gha-beta", repo: "acme/frontend" },
+    });
+    const replay = await demoClient.apiRequest("/v1/repositories/github-app", {
+      method: "POST",
+      headers,
+      body: { repo: "acme/frontend", github_app_id: "gha-beta" },
+    });
+
+    expect(replay).toEqual(first);
+  });
+
+  it("scopes the same demo key by operation", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+
+    const added = await demoClient.addPublicRepository("octo/operation-scope", { idempotencyKey: "shared-operation-key" });
+    await expect(demoClient.removeRepository(added.data.id!, { idempotencyKey: "shared-operation-key" }))
+      .resolves.toMatchObject({ data: { deleted: true } });
+  });
+
+  it("resets demo idempotency state explicitly between tests", async () => {
+    vi.resetModules();
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+    const demoClient = await import("./client");
+
+    await demoClient.addPublicRepository("octo/reset-one", { idempotencyKey: "reset-key" });
+    demoClient.resetDemoIdempotencyForTests();
+
+    await expect(demoClient.addPublicRepository("octo/reset-two", { idempotencyKey: "reset-key" })).resolves.toBeDefined();
+  });
+
   it("promotes the default after plural demo deletion and hides the deleted App repositories", async () => {
     vi.resetModules();
     (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";

@@ -170,6 +170,11 @@ export function createIdempotencyKey(): string {
   return globalThis.crypto?.randomUUID?.() ?? `mutation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+export function shouldRetainMutationKey(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.code === "IDEMPOTENCY_IN_PROGRESS";
+}
+
 function mutationHeaders(options: MutationOptions = {}): Record<string, string> {
   return { "Idempotency-Key": options.idempotencyKey ?? createIdempotencyKey() };
 }
@@ -443,6 +448,7 @@ let demoOnboardedRepositories: RepositoryInventoryItem[] = [
   },
 ];
 const demoIdempotencyRecords = new Map<string, { signature: string; response?: Envelope<unknown>; error?: ApiError }>();
+const demoIdempotencyIdentity = { tenantID: "billing-platform", actorID: "demo-admin" };
 let demoSyncRuleCounter = 2;
 let demoSyncRules: SyncRule[] = [
   {
@@ -666,15 +672,14 @@ function deleteDemoGitHubApp(id: string): void {
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
-  const isMutation =
-    (method === "DELETE" && (/^\/v1\/github-apps\/[^/]+$/.test(url.pathname) || /^\/v1\/repositories\/[^/]+$/.test(url.pathname))) ||
-    (method === "POST" && (url.pathname === "/v1/repositories/github-app" || url.pathname === "/v1/repositories/public"));
-  if (!isMutation) return demoRoute(path, init);
+  const operation = demoMutationOperation(method, url.pathname);
+  if (!operation) return demoRoute(path, init);
 
   const key = new Headers(init.headers).get("Idempotency-Key");
   if (!key) throw new ApiError(400, "INVALID_ARGUMENT", "idempotency_key is required");
-  const signature = `${method}\n${url.pathname}\n${JSON.stringify(init.body ?? null)}`;
-  const existing = demoIdempotencyRecords.get(key);
+  const scopedKey = [demoIdempotencyIdentity.tenantID, demoIdempotencyIdentity.actorID, operation, key].join("\n");
+  const signature = `${method}\n${url.pathname}\n${canonicalJSONStringify(init.body ?? null)}`;
+  const existing = demoIdempotencyRecords.get(scopedKey);
   if (existing) {
     if (existing.signature !== signature) throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "idempotency key was already used with a different request");
     if (existing.error) throw new ApiError(existing.error.status, existing.error.code, existing.error.message);
@@ -682,12 +687,42 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   }
   try {
     const response = demoRoute(path, init);
-    demoIdempotencyRecords.set(key, { signature, response: clone(response) });
+    demoIdempotencyRecords.set(scopedKey, { signature, response: clone(response) });
     return response;
   } catch (error) {
-    if (error instanceof ApiError) demoIdempotencyRecords.set(key, { signature, error });
+    if (error instanceof ApiError) demoIdempotencyRecords.set(scopedKey, { signature, error });
     throw error;
   }
+}
+
+function demoMutationOperation(method: string, path: string): string | undefined {
+  if (method === "DELETE" && /^\/v1\/github-apps\/[^/]+$/.test(path)) return "github_app.delete";
+  if (method === "DELETE" && /^\/v1\/repositories\/[^/]+$/.test(path)) return "repository.delete";
+  if (method === "POST" && path === "/v1/repositories/github-app") return "repository.github_app.create";
+  if (method === "POST" && path === "/v1/repositories/public") return "repository.public.create";
+  return undefined;
+}
+
+function canonicalJSONStringify(value: unknown): string {
+  const jsonValue = JSON.parse(JSON.stringify(value)) as unknown;
+  return JSON.stringify(sortCanonicalJSON(jsonValue));
+}
+
+function sortCanonicalJSON(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortCanonicalJSON);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, item]) => [key, sortCanonicalJSON(item)]),
+    );
+  }
+  return value;
+}
+
+/** Test-only isolation for demo idempotency records. */
+export function resetDemoIdempotencyForTests(): void {
+  demoIdempotencyRecords.clear();
 }
 
 function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
