@@ -3,21 +3,21 @@ import { expect, test } from "@playwright/test";
 test("agents list supports status filtering in demo mode", async ({ page }) => {
   await page.goto("/agents");
 
-  await expect(page.getByLabel("Agent 列表")).toBeVisible();
-  await expect(page.getByText("Atlas v12")).toBeVisible();
-  await expect(page.getByText("Suspended Worker")).toBeVisible();
+  const desktopAgentList = page.getByLabel("Agent 列表", { exact: true });
+  await expect(desktopAgentList).toBeVisible();
+  await expect(desktopAgentList.getByText("Atlas v12")).toBeVisible();
+  await expect(desktopAgentList.getByText("Suspended Worker")).toBeVisible();
 
   await page.getByRole("combobox", { name: "状态" }).selectOption("suspended");
 
-  await expect(page.getByText("Suspended Worker")).toBeVisible();
-  await expect(page.getByText("Atlas v12")).toHaveCount(0);
+  await expect(desktopAgentList.getByText("Suspended Worker")).toBeVisible();
+  await expect(desktopAgentList.getByText("Atlas v12")).toHaveCount(0);
 });
 
 test("registration reveals one-time token and agent detail hides unsupported controls", async ({ page }) => {
   await page.goto("/agents/new");
 
   await page.getByLabel("名称").fill("Code Review Bot");
-  await page.getByLabel("Owner Email").fill("review@example.com");
   await page.getByRole("button", { name: "注册 Agent" }).click();
 
   await expect(page.getByLabel("Activation Token")).toBeVisible();
@@ -27,12 +27,36 @@ test("registration reveals one-time token and agent detail hides unsupported con
   await expect(page.getByLabel("Activation Token")).toHaveCount(0);
 
   await page.goto("/agents/agent-revoked");
-  await expect(page.getByText("revoked")).toBeVisible();
+  await expect(page.locator(".detail-status")).toHaveText("revoked");
   await expect(page.getByRole("button", { name: "暂停 Agent" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "恢复 Agent" })).toHaveCount(0);
 
   await page.goto("/agents/agent-pending");
-  await expect(page.getByText("pending activation")).toBeVisible();
+  await expect(page.locator(".detail-status")).toHaveText("pending activation");
   await expect(page.getByRole("button", { name: "暂停 Agent" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "恢复 Agent" })).toHaveCount(0);
+});
+
+test("selects an installed app, searches locally, and adds app and public repositories", async ({ page }) => {
+  await page.goto("/repositories");
+
+  await page.getByRole("combobox").selectOption("gha-beta");
+  await page.getByRole("combobox", { name: "授权仓库" }).fill("data");
+  await page.getByRole("option", { name: "acme/data-api" }).click();
+  await page.getByRole("button", { name: "添加仓库", exact: true }).click();
+
+  const onboardedTable = page.getByRole("table", { name: "已接入仓库列表" });
+  await expect(onboardedTable).toContainText("acme/data-api");
+
+  await page.getByRole("radio", { name: "公开仓库" }).check();
+  await page.getByLabel("公共仓库 URL 或 owner/repo").fill("https://github.com/facebook/react");
+  await page.getByRole("button", { name: "添加公开仓库" }).click();
+  await expect(onboardedTable).toContainText("facebook/react");
+});
+
+test("git integration shows both automatic GitHub App labels", async ({ page }) => {
+  await page.goto("/git-integration");
+
+  await expect(page.getByText("alpha · acme-corp")).toBeVisible();
+  await expect(page.getByText("beta · acme-labs")).toBeVisible();
 });

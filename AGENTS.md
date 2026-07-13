@@ -211,7 +211,7 @@ go test -race ./... -count=1
   - 否则尝试 `postgres://agentguild:agentguild@127.0.0.1:55432/agentguild?sslmode=disable`；
   - 再不可用则通过 Docker 启动临时 PostgreSQL 18.4 容器。
 - 每个测试会创建独立的 schema，测试结束后清理。
-- 迁移文件位于 `backend/migrations/`，当前包含 `000001` 到 `000009`，测试会按顺序应用全部 up 迁移。
+- 迁移文件位于 `backend/migrations/`，当前包含 `000001` 到 `000013`，测试会按顺序应用全部 up 迁移。
 - `internal/acceptance` 包含端到端验收测试，直接启动真实 PostgreSQL 与完整服务组合。
 
 ### 前端测试
@@ -264,7 +264,7 @@ npm run e2e            # 同上
   - 使用 `clock_timestamp()` 默认值；
   - 状态字段使用 `CHECK` 约束；
   - 外键尽量使用复合键约束（如 `(tenant_id, execution_id, task_id)`）。
-- 测试新增迁移后，请更新 `internal/testdb/postgres.go` 中的 `applyMigration` 调用列表（当前已注册 `000001` 到 `000008`）。
+- 测试新增迁移后，请更新 `internal/testdb/postgres.go` 中的 `applyMigration` 调用列表（当前已注册 `000001` 到 `000013`）。
 
 ## 安全注意事项
 

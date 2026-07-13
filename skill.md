@@ -43,6 +43,44 @@ Authorization: Bearer <access-token>
 
 Agent 激活后可调用 `POST /v1/agents/me:heartbeat` 回报在线状态，便于平台记录最近活跃时间。
 
+## GitHub Apps 与仓库接入
+
+GitHub App 是当前 tenant 下的多实例资源。管理员可以同时配置多个 App；调用以下 Web 管理接口时需使用具有管理权限的人类 session，不要使用 Agent access token：
+
+- `GET /v1/github-apps`：返回当前 tenant 的全部 GitHub App public views；`data.items[].id` 是 tenant-scoped GitHub App ID。
+- `GET /v1/github-apps/{id}/repositories`：返回指定 App installation 可见的完整仓库列表。该平台接口不提供分页参数或 `next_cursor`；服务端会消费 GitHub 上游分页后在 `data.items` 中一次返回完整结果。
+- `POST /v1/repositories/github-app`：把已选 App 可见的仓库加入平台治理清单。请求体必须显式携带 `github_app_id`，不应依赖默认 App。
+
+示例：
+
+```http
+GET /v1/github-apps
+Cookie: agentguild_session=...
+```
+
+从返回的 `data.items` 中选择 App ID 后，先读取该 App 的授权仓库：
+
+```http
+GET /v1/github-apps/gha-beta/repositories
+Cookie: agentguild_session=...
+```
+
+然后使用同一 App ID 接入仓库：
+
+```http
+POST /v1/repositories/github-app
+Content-Type: application/json
+Cookie: agentguild_session=...
+Idempotency-Key: repo-onboarding-20260714-001
+
+{
+  "github_app_id": "gha-beta",
+  "repo": "acme/data-api"
+}
+```
+
+`github_app_id` 必须属于当前 tenant，且 `repo` 必须出现在该 App 的授权仓库列表中。已接入的 GitHub App 仓库会保留其 `github_app_id` 绑定。
+
 ## Security Notes
 
 - 不要记录 Activation Token。
