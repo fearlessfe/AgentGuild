@@ -37,8 +37,24 @@ func (f *fakeGitHubAppManager) Driver(ctx context.Context, tenantID string) (git
 	return nil, f.driverErr
 }
 
+func (f *fakeGitHubAppManager) DriverForApp(ctx context.Context, tenantID, appID string) (git.Driver, error) {
+	f.calls = append(f.calls, githubAppCall{method: "DriverForApp", tenantID: tenantID, payload: appID})
+	return nil, f.driverErr
+}
+
 func (f *fakeGitHubAppManager) IssueSource(ctx context.Context, tenantID string) (git.IssueSource, error) {
 	f.calls = append(f.calls, githubAppCall{method: "IssueSource", tenantID: tenantID})
+	if f.issueSourceErr != nil {
+		return nil, f.issueSourceErr
+	}
+	if f.issueSource != nil {
+		return f.issueSource, nil
+	}
+	return nil, git.ErrGitHubAppNotConfigured
+}
+
+func (f *fakeGitHubAppManager) IssueSourceForApp(ctx context.Context, tenantID, appID string) (git.IssueSource, error) {
+	f.calls = append(f.calls, githubAppCall{method: "IssueSourceForApp", tenantID: tenantID, payload: appID})
 	if f.issueSourceErr != nil {
 		return nil, f.issueSourceErr
 	}
@@ -60,23 +76,68 @@ func (f *fakeGitHubAppManager) Get(ctx context.Context, tenantID string) (gitapp
 	return toGitHubAppView(record), nil
 }
 
+func (f *fakeGitHubAppManager) GetByID(ctx context.Context, tenantID, appID string) (gitapp.GitHubAppView, error) {
+	f.calls = append(f.calls, githubAppCall{method: "GetByID", tenantID: tenantID, payload: appID})
+	record, ok := f.store[tenantID]
+	if !ok || record.ID != appID {
+		return gitapp.GitHubAppView{}, git.ErrGitHubAppNotConfigured
+	}
+	return toGitHubAppView(record), nil
+}
+
+func (f *fakeGitHubAppManager) List(ctx context.Context, tenantID string) ([]gitapp.GitHubAppView, error) {
+	f.calls = append(f.calls, githubAppCall{method: "List", tenantID: tenantID})
+	record, ok := f.store[tenantID]
+	if !ok {
+		return []gitapp.GitHubAppView{}, nil
+	}
+	return []gitapp.GitHubAppView{toGitHubAppView(record)}, nil
+}
+
 func (f *fakeGitHubAppManager) Upsert(ctx context.Context, cmd gitapp.UpsertGitHubApp) error {
 	f.calls = append(f.calls, githubAppCall{method: "Upsert", tenantID: cmd.TenantID, payload: cmd})
 	if f.upsertErr != nil {
 		return f.upsertErr
 	}
 	now := time.Now().UTC().Truncate(time.Second)
+	id := cmd.ID
+	isDefault := true
+	if existing, ok := f.store[cmd.TenantID]; ok {
+		if id == "" {
+			id = existing.ID
+		}
+		isDefault = existing.IsDefault
+	}
+	if id == "" {
+		id = "default"
+	}
 	f.store[cmd.TenantID] = &gitapp.GitHubAppRecord{
+		ID:             id,
 		TenantID:       cmd.TenantID,
 		Provider:       cmd.Provider,
 		AppID:          cmd.AppID,
 		InstallationID: cmd.InstallationID,
 		PrivateKey:     cmd.PrivateKey,
 		BaseURL:        cmd.BaseURL,
+		IsDefault:      isDefault,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	return nil
+}
+
+func (f *fakeGitHubAppManager) InstallByID(ctx context.Context, tenantID, appID string, installationID int64, accountLogin string) (gitapp.GitHubAppView, error) {
+	f.calls = append(f.calls, githubAppCall{method: "InstallByID", tenantID: tenantID, payload: appID})
+	record, ok := f.store[tenantID]
+	if !ok || record.ID != appID {
+		return gitapp.GitHubAppView{}, git.ErrGitHubAppNotConfigured
+	}
+	copy := *record
+	copy.InstallationID = installationID
+	copy.InstallationAccountLogin = accountLogin
+	copy.UpdatedAt = time.Now().UTC().Truncate(time.Second)
+	f.store[tenantID] = &copy
+	return toGitHubAppView(&copy), nil
 }
 
 func (f *fakeGitHubAppManager) Install(ctx context.Context, tenantID string, installationID int64) (gitapp.GitHubAppView, error) {
@@ -105,20 +166,36 @@ func (f *fakeGitHubAppManager) Delete(ctx context.Context, tenantID string) erro
 	return nil
 }
 
+func (f *fakeGitHubAppManager) DeleteByID(ctx context.Context, tenantID, appID string) error {
+	f.calls = append(f.calls, githubAppCall{method: "DeleteByID", tenantID: tenantID, payload: appID})
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	record, ok := f.store[tenantID]
+	if !ok || record.ID != appID {
+		return git.ErrGitHubAppNotConfigured
+	}
+	delete(f.store, tenantID)
+	return nil
+}
+
 func toGitHubAppView(record *gitapp.GitHubAppRecord) gitapp.GitHubAppView {
 	if record == nil {
 		return gitapp.GitHubAppView{Configured: false}
 	}
 	return gitapp.GitHubAppView{
-		TenantID:       record.TenantID,
-		Provider:       record.Provider,
-		AppID:          record.AppID,
-		InstallationID: record.InstallationID,
-		BaseURL:        record.BaseURL,
-		AppSlug:        record.AppSlug,
-		Configured:     true,
-		CreatedAt:      record.CreatedAt,
-		UpdatedAt:      record.UpdatedAt,
+		ID:                       record.ID,
+		TenantID:                 record.TenantID,
+		Provider:                 record.Provider,
+		AppID:                    record.AppID,
+		InstallationID:           record.InstallationID,
+		BaseURL:                  record.BaseURL,
+		AppSlug:                  record.AppSlug,
+		InstallationAccountLogin: record.InstallationAccountLogin,
+		IsDefault:                record.IsDefault,
+		Configured:               true,
+		CreatedAt:                record.CreatedAt,
+		UpdatedAt:                record.UpdatedAt,
 	}
 }
 

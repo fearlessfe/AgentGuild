@@ -23,6 +23,10 @@ type githubAppRepository struct {
 	q queryer
 }
 
+type transactionBeginner interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 // NewGitHubAppRepository returns a GitHubAppRepository backed by pool.
 func NewGitHubAppRepository(pool queryer) application.GitHubAppRepository {
 	return &githubAppRepository{q: pool}
@@ -38,25 +42,52 @@ func (r *githubAppRepository) Upsert(ctx context.Context, record *application.Gi
 	if record.BaseURL == "" {
 		record.BaseURL = "https://api.github.com"
 	}
-	if record.ID == "" {
-		existing, err := r.GetDefault(ctx, record.TenantID)
-		switch {
-		case err == nil:
-			record.ID = existing.ID
-		case errors.Is(err, git.ErrGitHubAppNotConfigured):
-			record.ID = fmt.Sprintf("gha_%x", md5.Sum([]byte(fmt.Sprintf("%s:%d", record.TenantID, record.AppID))))
-		default:
+	return r.withTenantLock(ctx, record.TenantID, func(q queryer) error {
+		return upsertGitHubApp(ctx, q, record)
+	})
+}
+
+func (r *githubAppRepository) withTenantLock(ctx context.Context, tenantID string, fn func(queryer) error) error {
+	if beginner, ok := r.q.(transactionBeginner); ok {
+		tx, err := beginner.Begin(ctx)
+		if err != nil {
 			return err
 		}
-		record.IsDefault = true
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 7241301))`, tenantID); err != nil {
+			return err
+		}
+		if err := fn(tx); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 
-	return r.q.QueryRow(ctx, `
+	if _, err := r.q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 7241301))`, tenantID); err != nil {
+		return err
+	}
+	return fn(r.q)
+}
+
+func upsertGitHubApp(ctx context.Context, q queryer, record *application.GitHubAppRecord) error {
+	fallbackID := fmt.Sprintf("gha_%x", md5.Sum([]byte(fmt.Sprintf("%s:%d", record.TenantID, record.AppID))))
+
+	return q.QueryRow(ctx, `
+		WITH resolved AS MATERIALIZED (
+			SELECT
+				CASE WHEN $2 = '' THEN COALESCE(
+					(SELECT id FROM github_apps WHERE tenant_id = $1 AND is_default),
+					$13
+				) ELSE $2 END AS id,
+				NOT EXISTS (SELECT 1 FROM github_apps WHERE tenant_id = $1) AS is_default
+		)
 		INSERT INTO github_apps (
 			tenant_id, id, provider, app_id, installation_id, private_key, base_url,
 			webhook_secret, client_id, client_secret, app_slug, installation_account_login,
 			is_default, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, clock_timestamp(), clock_timestamp())
+		) SELECT $1, resolved.id, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+			resolved.is_default, clock_timestamp(), clock_timestamp()
+		FROM resolved
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			app_id = EXCLUDED.app_id,
@@ -68,14 +99,13 @@ func (r *githubAppRepository) Upsert(ctx context.Context, record *application.Gi
 			client_secret = EXCLUDED.client_secret,
 			app_slug = EXCLUDED.app_slug,
 			installation_account_login = EXCLUDED.installation_account_login,
-			is_default = EXCLUDED.is_default,
 			updated_at = clock_timestamp()
-		RETURNING created_at, updated_at`,
+		RETURNING id, is_default, created_at, updated_at`,
 		record.TenantID, record.ID, record.Provider, record.AppID, record.InstallationID,
 		record.PrivateKey, record.BaseURL, nullString(record.WebhookSecret),
 		nullString(record.ClientID), nullString(record.ClientSecret), nullString(record.AppSlug),
-		nullString(record.InstallationAccountLogin), record.IsDefault,
-	).Scan(&record.CreatedAt, &record.UpdatedAt)
+		nullString(record.InstallationAccountLogin), fallbackID,
+	).Scan(&record.ID, &record.IsDefault, &record.CreatedAt, &record.UpdatedAt)
 }
 
 func (r *githubAppRepository) ListByTenant(ctx context.Context, tenantID string) ([]application.GitHubAppRecord, error) {
@@ -169,8 +199,14 @@ func (r *githubAppRepository) Delete(ctx context.Context, tenantID, id string) e
 }
 
 func (r *githubAppRepository) DeleteAndPromoteDefault(ctx context.Context, tenantID, id string) error {
+	return r.withTenantLock(ctx, tenantID, func(q queryer) error {
+		return deleteAndPromoteDefault(ctx, q, tenantID, id)
+	})
+}
+
+func deleteAndPromoteDefault(ctx context.Context, q queryer, tenantID, id string) error {
 	var found, bound, deleted bool
-	err := r.q.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		WITH target AS MATERIALIZED (
 			SELECT is_default
 			FROM github_apps

@@ -106,24 +106,18 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 	}
 	id := cmd.ID
 	if id == "" {
-		id = s.newID()
-	}
-	if id == "" {
-		return invalid("id")
-	}
-	isDefault := false
-	existing, err := s.repo.GetByID(ctx, cmd.TenantID, id)
-	switch {
-	case err == nil:
-		isDefault = existing.IsDefault
-	case errors.Is(err, git.ErrGitHubAppNotConfigured):
-		records, listErr := s.repo.ListByTenant(ctx, cmd.TenantID)
-		if listErr != nil {
-			return listErr
+		existing, err := s.repo.GetDefault(ctx, cmd.TenantID)
+		switch {
+		case err == nil:
+			id = existing.ID
+		case errors.Is(err, git.ErrGitHubAppNotConfigured):
+			id = s.newID()
+		default:
+			return err
 		}
-		isDefault = len(records) == 0
-	default:
-		return err
+		if id == "" {
+			return invalid("id")
+		}
 	}
 	provider := cmd.Provider
 	if provider == "" {
@@ -146,7 +140,6 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 		ClientSecret:             cmd.ClientSecret,
 		AppSlug:                  cmd.AppSlug,
 		InstallationAccountLogin: cmd.InstallationAccountLogin,
-		IsDefault:                isDefault,
 	})
 }
 

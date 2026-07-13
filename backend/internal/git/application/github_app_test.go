@@ -87,6 +87,36 @@ func TestGitHubAppManagerGeneratesIDWhenAbsent(t *testing.T) {
 	require.True(t, view.IsDefault)
 }
 
+func TestGitHubAppManagerLegacyUpsertWithoutIDUpdatesDefault(t *testing.T) {
+	ctx := context.Background()
+	repo := newMemoryGitHubAppRepo()
+	ids := []string{"gha-first", "gha-unexpected"}
+	manager, err := application.NewGitHubAppManagerWithOptions(repo, application.GitHubAppManagerOptions{
+		NewID: func() string {
+			id := ids[0]
+			ids = ids[1:]
+			return id
+		},
+	})
+	require.NoError(t, err)
+	key := generateRSAPrivateKeyPEM(t)
+
+	require.NoError(t, manager.Upsert(ctx, application.UpsertGitHubApp{
+		TenantID: "tenant-1", AppID: 1, PrivateKey: key, AppSlug: "before",
+	}))
+	require.NoError(t, manager.Upsert(ctx, application.UpsertGitHubApp{
+		TenantID: "tenant-1", AppID: 2, PrivateKey: key, AppSlug: "after",
+	}))
+
+	views, err := manager.List(ctx, "tenant-1")
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	require.Equal(t, "gha-first", views[0].ID)
+	require.Equal(t, int64(2), views[0].AppID)
+	require.Equal(t, "after", views[0].AppSlug)
+	require.True(t, views[0].IsDefault)
+}
+
 func TestGitHubAppManagerInstallsAppByID(t *testing.T) {
 	ctx := context.Background()
 	manager := newGitHubAppManager(t)
@@ -398,8 +428,10 @@ func (r *memoryGitHubAppRepository) Upsert(_ context.Context, record *applicatio
 	}
 	if existing, ok := r.apps[record.TenantID][record.ID]; ok {
 		record.CreatedAt = existing.CreatedAt
+		record.IsDefault = existing.IsDefault
 	} else {
 		record.CreatedAt = now
+		record.IsDefault = len(r.apps[record.TenantID]) == 0
 	}
 	record.UpdatedAt = now
 	copy := *record

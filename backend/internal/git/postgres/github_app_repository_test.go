@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	gitdomain "agentguild.dev/agentguild/backend/internal/git"
@@ -23,6 +24,68 @@ func TestGitHubAppRepositoryStoresTwoAppsForTenant(t *testing.T) {
 	apps, err := repo.ListByTenant(context.Background(), "tenant-1")
 	require.NoError(t, err)
 	require.Equal(t, []string{"gha-1", "gha-2"}, []string{apps[0].ID, apps[1].ID})
+}
+
+func TestGitHubAppRepositoryConcurrentFirstAppsChooseExactlyOneDefault(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := postgres.NewGitHubAppRepository(db)
+	ctx := context.Background()
+	start := make(chan struct{})
+	errCh := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	for _, record := range []*application.GitHubAppRecord{
+		{ID: "gha-1", TenantID: "tenant-1", AppID: 11, PrivateKey: "key-1"},
+		{ID: "gha-2", TenantID: "tenant-1", AppID: 22, PrivateKey: "key-2"},
+	} {
+		record := record
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errCh <- repo.Upsert(ctx, record)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	apps, err := repo.ListByTenant(ctx, "tenant-1")
+	require.NoError(t, err)
+	require.Len(t, apps, 2)
+	defaultCount := 0
+	for _, app := range apps {
+		if app.IsDefault {
+			defaultCount++
+		}
+	}
+	require.Equal(t, 1, defaultCount)
+}
+
+func TestGitHubAppRepositoryStaleInstallUpsertPreservesPromotedDefault(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := postgres.NewGitHubAppRepository(db)
+	ctx := context.Background()
+	require.NoError(t, repo.Upsert(ctx, &application.GitHubAppRecord{ID: "gha-1", TenantID: "tenant-1", AppID: 11, PrivateKey: "key-1"}))
+	require.NoError(t, repo.Upsert(ctx, &application.GitHubAppRecord{ID: "gha-2", TenantID: "tenant-1", AppID: 22, PrivateKey: "key-2"}))
+
+	stale, err := repo.GetByID(ctx, "tenant-1", "gha-2")
+	require.NoError(t, err)
+	require.False(t, stale.IsDefault)
+	require.NoError(t, repo.DeleteAndPromoteDefault(ctx, "tenant-1", "gha-1"))
+
+	stale.InstallationID = 42
+	stale.InstallationAccountLogin = "acme"
+	require.NoError(t, repo.Upsert(ctx, stale))
+
+	got, err := repo.GetDefault(ctx, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, "gha-2", got.ID)
+	require.Equal(t, int64(42), got.InstallationID)
+	require.Equal(t, "acme", got.InstallationAccountLogin)
 }
 
 func TestGitHubAppRepositoryDeleteAndPromoteDefaultIsAtomic(t *testing.T) {
