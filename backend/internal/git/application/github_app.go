@@ -10,18 +10,21 @@ import (
 
 // GitHubAppRecord is the persistent configuration for a tenant's GitHub App.
 type GitHubAppRecord struct {
-	TenantID       string
-	Provider       string
-	AppID          int64
-	InstallationID int64
-	PrivateKey     string
-	BaseURL        string
-	WebhookSecret  string
-	ClientID       string
-	ClientSecret   string
-	AppSlug        string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                       string
+	TenantID                 string
+	Provider                 string
+	AppID                    int64
+	InstallationID           int64
+	PrivateKey               string
+	BaseURL                  string
+	WebhookSecret            string
+	ClientID                 string
+	ClientSecret             string
+	AppSlug                  string
+	InstallationAccountLogin string
+	IsDefault                bool
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // GitHubAppView is the public shape of a GitHub App configuration. It never
@@ -109,7 +112,7 @@ func (s *gitHubAppService) Get(ctx context.Context, tenantID string) (GitHubAppV
 	if tenantID == "" {
 		return view, invalid("tenant_id")
 	}
-	record, err := s.repo.GetByTenant(ctx, tenantID)
+	record, err := s.repo.GetDefault(ctx, tenantID)
 	if err != nil {
 		return view, err
 	}
@@ -125,7 +128,7 @@ func (s *gitHubAppService) Install(ctx context.Context, tenantID string, install
 	if installationID == 0 {
 		return GitHubAppView{}, invalid("installation_id")
 	}
-	record, err := s.repo.GetByTenant(ctx, tenantID)
+	record, err := s.repo.GetDefault(ctx, tenantID)
 	if err != nil {
 		return GitHubAppView{}, err
 	}
@@ -142,7 +145,11 @@ func (s *gitHubAppService) Delete(ctx context.Context, tenantID string) error {
 	if tenantID == "" {
 		return invalid("tenant_id")
 	}
-	return s.repo.Delete(ctx, tenantID)
+	record, err := s.repo.GetDefault(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	return s.repo.Delete(ctx, tenantID, record.ID)
 }
 
 // Driver returns a git.Driver for the tenant, or an error if not configured.
@@ -150,7 +157,7 @@ func (s *gitHubAppService) Driver(ctx context.Context, tenantID string) (git.Dri
 	if tenantID == "" {
 		return nil, invalid("tenant_id")
 	}
-	record, err := s.repo.GetByTenant(ctx, tenantID)
+	record, err := s.repo.GetDefault(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}

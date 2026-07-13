@@ -3,6 +3,7 @@ package rest_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -242,6 +243,16 @@ func (s *memoryOnboardedRepositoryStore) ListOnboardedRepositories(ctx context.C
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
 	return items, nil
+}
+
+func (s *memoryOnboardedRepositoryStore) GetOnboardedRepositoryByFullName(ctx context.Context, tenantID, fullName string) (*gitapp.OnboardedRepositoryRecord, error) {
+	for _, record := range s.records[tenantID] {
+		if record.FullName == fullName {
+			copy := record
+			return &copy, nil
+		}
+	}
+	return nil, errors.New("repository not found")
 }
 
 func (s *memoryOnboardedRepositoryStore) UpsertOnboardedRepository(ctx context.Context, record *gitapp.OnboardedRepositoryRecord) error {

@@ -230,6 +230,16 @@ func (s *memoryOnboardedRepositoryStore) ListOnboardedRepositories(_ context.Con
 	return records, nil
 }
 
+func (s *memoryOnboardedRepositoryStore) GetOnboardedRepositoryByFullName(_ context.Context, tenantID, fullName string) (*application.OnboardedRepositoryRecord, error) {
+	for _, record := range s.records {
+		if record.TenantID == tenantID && record.FullName == fullName {
+			copy := record
+			return &copy, nil
+		}
+	}
+	return nil, errors.New("repository not found")
+}
+
 func (s *memoryOnboardedRepositoryStore) UpsertOnboardedRepository(_ context.Context, record *application.OnboardedRepositoryRecord) error {
 	record.CreatedAt = s.now
 	record.UpdatedAt = s.now

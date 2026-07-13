@@ -129,7 +129,7 @@ func TestManifestExchangeCodePersistsCredentials(t *testing.T) {
 	require.Equal(t, "application/vnd.github+json", gotAccept)
 
 	// Persisted record carries all credentials.
-	record, err := repo.GetByTenant(ctx, "tenant-1")
+	record, err := repo.GetDefault(ctx, "tenant-1")
 	require.NoError(t, err)
 	require.Equal(t, int64(123), record.AppID)
 	require.Equal(t, int64(0), record.InstallationID)

@@ -77,6 +77,7 @@ type Principal struct {
 // for task repository selection.
 type OnboardedRepositoryStore interface {
 	ListOnboardedRepositories(context.Context, string) ([]OnboardedRepositoryRecord, error)
+	GetOnboardedRepositoryByFullName(context.Context, string, string) (*OnboardedRepositoryRecord, error)
 	UpsertOnboardedRepository(context.Context, *OnboardedRepositoryRecord) error
 	DeleteOnboardedRepository(context.Context, string, string) error
 }
@@ -95,6 +96,7 @@ type OnboardedRepositoryRecord struct {
 	FullName      string
 	DefaultBranch string
 	Visibility    string
+	GitHubAppID   string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

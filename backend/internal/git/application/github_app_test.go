@@ -248,6 +248,10 @@ func (r *memoryGitHubAppRepository) Upsert(_ context.Context, record *applicatio
 	defer r.mu.Unlock()
 
 	now := r.nowFn()
+	if record.ID == "" {
+		record.ID = "default"
+		record.IsDefault = true
+	}
 	if existing, ok := r.apps[record.TenantID]; ok {
 		record.CreatedAt = existing.CreatedAt
 	} else {
@@ -258,22 +262,43 @@ func (r *memoryGitHubAppRepository) Upsert(_ context.Context, record *applicatio
 	return nil
 }
 
-func (r *memoryGitHubAppRepository) GetByTenant(_ context.Context, tenantID string) (*application.GitHubAppRecord, error) {
+func (r *memoryGitHubAppRepository) ListByTenant(_ context.Context, tenantID string) ([]application.GitHubAppRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record, ok := r.apps[tenantID]
+	if !ok {
+		return []application.GitHubAppRecord{}, nil
+	}
+	return []application.GitHubAppRecord{*record}, nil
+}
+
+func (r *memoryGitHubAppRepository) GetByID(_ context.Context, tenantID, id string) (*application.GitHubAppRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	record, ok := r.apps[tenantID]
-	if !ok {
+	if !ok || record.ID != id {
 		return nil, git.ErrGitHubAppNotConfigured
 	}
 	return record, nil
 }
 
-func (r *memoryGitHubAppRepository) Delete(_ context.Context, tenantID string) error {
+func (r *memoryGitHubAppRepository) GetDefault(_ context.Context, tenantID string) (*application.GitHubAppRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record, ok := r.apps[tenantID]
+	if !ok || !record.IsDefault {
+		return nil, git.ErrGitHubAppNotConfigured
+	}
+	return record, nil
+}
+
+func (r *memoryGitHubAppRepository) Delete(_ context.Context, tenantID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.apps[tenantID]; !ok {
+	record, ok := r.apps[tenantID]
+	if !ok || record.ID != id {
 		return git.ErrGitHubAppNotConfigured
 	}
 	delete(r.apps, tenantID)

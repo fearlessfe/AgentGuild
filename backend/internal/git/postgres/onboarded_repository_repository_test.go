@@ -16,8 +16,8 @@ func TestOnboardedRepositoryRepositoryPersistsTenantScopedRepositories(t *testin
 	ctx := context.Background()
 	repo := postgres.NewOnboardedRepositoryRepository(db)
 
-	record := onboardedRepositoryRecord("tenant-1", "repo-1", "github_app", "owner/repo")
-	recordTenant2 := onboardedRepositoryRecord("tenant-2", "repo-2", "github_app", "owner/repo")
+	record := onboardedRepositoryRecord("tenant-1", "repo-1", "public_github", "owner/repo")
+	recordTenant2 := onboardedRepositoryRecord("tenant-2", "repo-2", "public_github", "owner/repo")
 	recordTenant1Other := onboardedRepositoryRecord("tenant-1", "repo-3", "public_github", "public/repo")
 
 	require.NoError(t, repo.UpsertOnboardedRepository(ctx, record))
@@ -71,8 +71,8 @@ func TestOnboardedRepositoryRepositoryDeleteUsesTenantAndID(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewOnboardedRepositoryRepository(db)
 
-	recordTenant1 := onboardedRepositoryRecord("tenant-1", "repo-1", "github_app", "owner/repo")
-	recordTenant2 := onboardedRepositoryRecord("tenant-2", "repo-1", "github_app", "owner/repo")
+	recordTenant1 := onboardedRepositoryRecord("tenant-1", "repo-1", "public_github", "owner/repo")
+	recordTenant2 := onboardedRepositoryRecord("tenant-2", "repo-1", "public_github", "owner/repo")
 	require.NoError(t, repo.UpsertOnboardedRepository(ctx, recordTenant1))
 	require.NoError(t, repo.UpsertOnboardedRepository(ctx, recordTenant2))
 
@@ -86,6 +86,22 @@ func TestOnboardedRepositoryRepositoryDeleteUsesTenantAndID(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, gotTenant2, 1)
 	require.Equal(t, "repo-1", gotTenant2[0].ID)
+}
+
+func TestOnboardedRepositoryPersistsGitHubAppBinding(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	apps := postgres.NewGitHubAppRepository(db)
+	require.NoError(t, apps.Upsert(context.Background(), &application.GitHubAppRecord{
+		ID: "gha-1", TenantID: "tenant-1", AppID: 11, PrivateKey: "key-1", IsDefault: true,
+	}))
+	repos := postgres.NewOnboardedRepositoryRepository(db)
+	require.NoError(t, repos.UpsertOnboardedRepository(context.Background(), &application.OnboardedRepositoryRecord{
+		ID: "repo-1", TenantID: "tenant-1", SourceType: application.RepositorySourceGitHubApp,
+		FullName: "acme/api", GitHubAppID: "gha-1", DefaultBranch: "main", Visibility: "private",
+	}))
+	got, err := repos.GetOnboardedRepositoryByFullName(context.Background(), "tenant-1", "acme/api")
+	require.NoError(t, err)
+	require.Equal(t, "gha-1", got.GitHubAppID)
 }
 
 func onboardedRepositoryRecord(tenantID, id, sourceType, fullName string) *application.OnboardedRepositoryRecord {

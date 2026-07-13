@@ -599,7 +599,7 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 			seedTenant = cfg.LocalAdmin.TenantID
 		}
 		if seedTenant != "" {
-			if _, err := gitAppRepo.GetByTenant(ctx, seedTenant); err != nil {
+			if _, err := gitAppRepo.GetDefault(ctx, seedTenant); err != nil {
 				if errors.Is(err, git.ErrGitHubAppNotConfigured) {
 					if upsertErr := gitAppManager.Upsert(ctx, gitapp.UpsertGitHubApp{
 						TenantID:       seedTenant,

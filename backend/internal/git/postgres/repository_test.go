@@ -161,7 +161,7 @@ func TestGitHubAppRepositoryPersistsManifestColumns(t *testing.T) {
 		WebhookSecret: "ws", ClientID: "cid", ClientSecret: "cs", AppSlug: "my-app",
 	}
 	require.NoError(t, repo.Upsert(ctx, rec))
-	got, err := repo.GetByTenant(ctx, "t1")
+	got, err := repo.GetDefault(ctx, "t1")
 	require.NoError(t, err)
 	require.Equal(t, "ws", got.WebhookSecret)
 	require.Equal(t, "cid", got.ClientID)
