@@ -95,7 +95,7 @@ describe("GitIntegrationScreen", () => {
     expect(screen.getByText("alpha · acme-corp")).toBeVisible();
   });
 
-  it("keeps the current list visible while refreshing the promoted default after deletion", async () => {
+  it("applies the local deletion and default promotion while awaiting the authoritative refresh", async () => {
     let resolveRefresh!: (value: client.Envelope<{ items: client.GitHubAppView[] }>) => void;
     vi.mocked(client.listGitHubApps)
       .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
@@ -108,8 +108,9 @@ describe("GitIntegrationScreen", () => {
     await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
 
     await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(2));
-    expect(screen.getByText("alpha · acme-corp")).toBeVisible();
-    expect(screen.getByRole("button", { name: "正在删除 alpha" })).toBeDisabled();
+    expect(screen.queryByText("alpha · acme-corp")).not.toBeInTheDocument();
+    const locallyPromotedBetaCard = screen.getByText("beta · labs").closest(".provider-card");
+    expect(within(locallyPromotedBetaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
     expect(screen.queryByText(/尚未配置 GitHub App/)).not.toBeInTheDocument();
 
     resolveRefresh(envelope({ items: [{ ...betaApp, is_default: true }] }));
@@ -120,6 +121,36 @@ describe("GitIntegrationScreen", () => {
     const betaCard = screen.getByText("beta · labs").closest(".provider-card");
     expect(betaCard).not.toBeNull();
     expect(within(betaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
+  });
+
+  it("keeps the confirmed local deletion when the authoritative refresh fails", async () => {
+    const gammaApp: client.GitHubAppView = {
+      ...betaApp,
+      id: "gha-gamma",
+      app_id: 101,
+      app_slug: "gamma",
+      installation_account_login: "platform",
+      created_at: "2026-07-03T00:00:00Z",
+    };
+    const datedBetaApp = { ...betaApp, created_at: "2026-07-02T00:00:00Z" };
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, gammaApp, datedBetaApp] }))
+      .mockRejectedValueOnce(new Error("网络不可用"));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+
+    expect(await screen.findByRole("status", { name: "GitHub App 操作结果" }))
+      .toHaveTextContent("已删除 GitHub App alpha");
+    expect(screen.queryByText("alpha · acme-corp")).not.toBeInTheDocument();
+    const betaCard = screen.getByText("beta · labs").closest(".provider-card");
+    const gammaCard = screen.getByText("gamma · platform").closest(".provider-card");
+    expect(within(betaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
+    expect(within(gammaCard as HTMLElement).getByText(/^GitHub App$/)).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("删除已成功，但刷新 GitHub App 列表失败：网络不可用");
+    expect(screen.getByRole("button", { name: "重试刷新 GitHub App 列表" })).toBeVisible();
+    expect(screen.queryByText(/删除失败/)).not.toBeInTheDocument();
   });
 
   it("exposes an App-scoped busy testing state without disabling other cards", async () => {

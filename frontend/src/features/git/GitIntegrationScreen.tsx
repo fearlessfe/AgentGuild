@@ -19,6 +19,8 @@ export function GitIntegrationScreen() {
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const [actionStatus, setActionStatus] = useState("");
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [testing, setTesting] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
 
@@ -66,14 +68,21 @@ export function GitIntegrationScreen() {
   const handleDelete = async (app: client.GitHubAppView) => {
     if (!window.confirm(`确定要删除 GitHub App ${app.app_slug} 吗？此操作不可撤销。`)) return;
     setActionStatus("");
+    setRefreshError(null);
     setDeleting((current) => new Set(current).add(app.id));
     setActionErrors((current) => withoutKey(current, app.id));
     try {
       await client.deleteGitHubApp(app.id);
-      const response = await client.listGitHubApps();
-      setGitHubApps(response.data.items);
+      setGitHubApps((current) => removeDeletedGitHubApp(current, app.id));
       setTestResults((current) => withoutKey(current, app.id));
       setActionStatus(`已删除 GitHub App ${app.app_slug}`);
+
+      try {
+        const response = await client.listGitHubApps();
+        setGitHubApps(response.data.items);
+      } catch (error) {
+        setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
+      }
     } catch (error) {
       setActionErrors((current) => ({
         ...current,
@@ -81,6 +90,19 @@ export function GitIntegrationScreen() {
       }));
     } finally {
       setDeleting((current) => withoutSetItem(current, app.id));
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const response = await client.listGitHubApps();
+      setGitHubApps(response.data.items);
+    } catch (error) {
+      setRefreshError(errorMessage(error, "刷新 GitHub App 列表失败"));
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -109,6 +131,21 @@ export function GitIntegrationScreen() {
         <p role="status" aria-label="GitHub App 操作结果" className="text-sm">
           {actionStatus}
         </p>
+      ) : null}
+      {refreshError ? (
+        <div className="stack-sm">
+          <p role="alert" className="text-sm">删除已成功，但刷新 GitHub App 列表失败：{refreshError}</p>
+          <div className="row">
+            <Button
+              aria-label={refreshing ? "正在刷新 GitHub App 列表" : "重试刷新 GitHub App 列表"}
+              aria-busy={refreshing}
+              disabled={refreshing}
+              onClick={() => void handleRefresh()}
+            >
+              {refreshing ? "正在刷新" : "重试刷新"}
+            </Button>
+          </div>
+        </div>
       ) : null}
 
       <div className="split-2">
@@ -258,4 +295,20 @@ function withoutSetItem(items: Set<string>, item: string): Set<string> {
   const next = new Set(items);
   next.delete(item);
   return next;
+}
+
+function removeDeletedGitHubApp(apps: client.GitHubAppView[], deletedID: string): client.GitHubAppView[] {
+  const deleted = apps.find((app) => app.id === deletedID);
+  const remaining = apps.filter((app) => app.id !== deletedID);
+  if (!deleted?.is_default || remaining.length === 0) return remaining;
+
+  const nextDefault = remaining.reduce((earliest, app) => (
+    compareGitHubApps(app, earliest) < 0 ? app : earliest
+  ));
+  return remaining.map((app) => ({ ...app, is_default: app.id === nextDefault.id }));
+}
+
+function compareGitHubApps(left: client.GitHubAppView, right: client.GitHubAppView): number {
+  const createdAt = (left.created_at ?? "").localeCompare(right.created_at ?? "");
+  return createdAt || left.id.localeCompare(right.id);
 }
