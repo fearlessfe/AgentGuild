@@ -25,7 +25,7 @@ AgentGuild 是一个面向企业内部的“Agent 任务平台”（Coding MVP�
 - **后端**：Go 1.26.0，工具链 `go1.26.4`（模块路径 `agentguild.dev/agentguild/backend`）
 - **数据库**：PostgreSQL 18.4
 - **Web 前端**：React 19.1 + TypeScript 5.8 + Vite 7 + React Router 7 + TanStack Query 5
-- **端到端测试**：Playwright 1.54（Chrome 通道）
+- **端到端测试**：Playwright 1.54
 - **单元测试**：
   - 后端：`go test` + `testify`
   - 前端：`vitest` + `@testing-library/react` + `jsdom`
@@ -48,7 +48,7 @@ AgentGuild 是一个面向企业内部的“Agent 任务平台”（Coding MVP�
 backend/
   cmd/agentguild-api/          # 单一可执行入口
   internal/
-    application/               # 核心任务生命周期应用服务（Task / Execution / Claim）
+    application/               # 核心任务生命周期应用服务（Task / Execution / Claim / SystemTask）
     domain/                    # 核心领域模型（Task、Execution、状态机、错误）
     postgres/                  # 核心 PostgreSQL 存储、事务、idempotency、reaper、outbox 事件
     transport/
@@ -63,7 +63,8 @@ backend/
     agentexperience/           # 经验候选提取与人工审核
     review/                    # 代码评审、rubric、行级评论、评分
     reputation/                # 声望投影与后台 projector
-    git/                       # Git 凭证签发、Submission、commit 验证、validation worker
+    git/                       # Git 凭证签发、Submission、commit 验证、validation worker、GitHub App、仓库 onboarding
+    sync/                      # Issue ↔ Task 同步规则与同步引擎
     worker/                    # Outbox worker
     telemetry/                 # Langfuse 成本观测
     ratelimit/                 # 限流
@@ -76,14 +77,23 @@ frontend/
     features/                  # 按业务领域组织的组件
       agents/                  # Agent 注册、列表、详情、激活 Token 展示
       auth/                    # 登录页
-      tasks/                   # 任务列表、任务详情
-      reviews/                 # 评审页、Diff 查看、Rubric、行级评论
-      versions/                # Agent 版本树、版本操作
       evaluations/             # 评测基准集与评测运行
+      executions/              # Execution 详情展示
       experiences/             # 经验候选与人工审核
+      git/                     # Git 集成配置页
+      onboarding/              # Agent 引导页
+      outcome/                 # 结果展示页
+      repositories/            # 仓库 onboarding 配置
       reputation/              # 声望页面
+      reviews/                 # 评审页、Diff 查看、Rubric、行级评论
+      shared/                  # 共享 mock 数据
+      submissions/             # Submission 验证展示
+      sync/                    # 同步规则与同步结果
+      tasks/                   # 任务列表、任务详情
+      versions/                # Agent 版本树、版本操作
     styles/                    # CSS tokens（tokens.css）
     test/                      # vitest setup（setup.ts）
+    ui/                        # 通用 UI 组件
   e2e/                         # Playwright 端到端测试
 openspec/                      # 规格说明（spec-driven 设计产物）
   config.yaml                  # openspec 配置
@@ -95,19 +105,24 @@ openspec/                      # 规格说明（spec-driven 设计产物）
     agent-reputation/
     agent-versioning/
     code-review/
+    console-ui-ux/
     evaluation/
     git-delivery/
+    github-app-integration/
+    local-login/
     submission-validation/
     task-lifecycle/
     task-mcp-access/
 docs/                          # 设计文档与视觉稿
   agentguild-agent-task-protocol-design.md
   assets/                      # 产品界面截图
+  docker-compose.md
+  local-dev-github-issue-sync.md
 scripts/                       # comet-verify.sh（CI 验证脚本）
 skill.md                       # Agent 接入说明文档，通过 GET /skill.md 暴露
 ```
 
-后端采用**模块化 DDD 分层**：核心任务模块与业务模块（identity、agentversion、evaluation、agentexperience、review、reputation、git）各自包含 `domain/`（领域模型）、`application/`（应用服务/命令/查询）、`postgres/`（存储实现）。`internal/transport` 同时暴露 REST 和 MCP 两种入口，两者依赖同样的应用服务接口。`internal/acceptance` 提供端到端验收测试的共享 harness，直接组装真实 PostgreSQL、应用服务与双 transport。
+后端采用**模块化 DDD 分层**：核心任务模块与业务模块（identity、agentversion、evaluation、agentexperience、review、reputation、git、sync）各自包含 `domain/`（领域模型）、`application/`（应用服务/命令/查询）、`postgres/`（存储实现）。`internal/transport` 同时暴露 REST 和 MCP 两种入口，两者依赖同样的应用服务接口。`internal/acceptance` 提供端到端验收测试的共享 harness，直接组装真实 PostgreSQL、应用服务与双 transport。
 
 ## 构建与运行
 
@@ -145,13 +160,16 @@ make db-down        # docker compose down
   - `OIDC_AUTH_URL`、`OIDC_TOKEN_URL`、`OIDC_JWKS_URL`
   - `OIDC_ADMIN_CLAIM`：管理员 claim 名称（可选）
   - `OIDC_ADMIN_EMAILS`：管理员邮箱 CSV（可选）
-  - `SESSION_COOKIE_SECRET`：≥32 字节
+  - `SESSION_COOKIE_SECRET`：≥32 字节；同时用作 GitHub App manifest state secret
   - `SESSION_COOKIE_SECURE`：cookie secure 标志，默认 `false`
   - `AGENT_RSA_PRIVATE_KEY_PEM` 或 `AGENT_RSA_PRIVATE_KEY_PATH`：用于签发 Agent access token
 - GitHub App（可选；未配置则 git 交付与验证禁用）：
   - `GITHUB_APP_PUBLIC_BASE_URL`：`WEB_ENABLED=true` 时必填；AgentGuild 的公网 HTTP(S) origin，不包含路径、query 或 fragment（生产示例：`https://agentguild.example.com`）
-  - 全局默认：`GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY`、`GITHUB_INSTALLATION_ID`、`GITHUB_BASE_URL`（默认 `https://api.github.com`）
-  - 按租户配置：通过 `POST /v1/github-app` 为指定 tenant 设置 `app_id`、`installation_id`、`private_key`、`base_url`
+  - 全局默认：启动时会自动写入 `OIDC_TENANT_ID` 或 `LOCAL_ADMIN_TENANT_ID` 对应的 tenant：
+    - `GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY`、`GITHUB_INSTALLATION_ID`
+    - `GITHUB_BASE_URL`（默认 `https://api.github.com`）
+  - 按租户配置：通过 `POST /v1/github-app` 为指定 tenant 设置 `provider`、`app_id`、`installation_id`、`private_key`、`base_url`
+  - GitHub App Manifest 流程：`WEB_ENABLED=true` 且配置 `GITHUB_APP_PUBLIC_BASE_URL` 时，可通过 `POST /v1/github-manifest` 创建 manifest 并回调 `POST /v1/github-manifest/callback` 完成按租户 onboarding
 - 本地管理员登录（开发环境，仅在 `OIDC_TENANT_ID` 为空且 `LOCAL_ADMIN_PASSWORD` 设置时启用）：
   - `LOCAL_ADMIN_PASSWORD`：≥12 字符，启用本地 fallback 登录
   - `LOCAL_ADMIN_TENANT_ID`（默认 `local`）
@@ -162,6 +180,9 @@ make db-down        # docker compose down
   - `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`
   - `LANGFUSE_MODE`（默认 `cloud`）、`LANGFUSE_SUPPORTS_COST`（默认 `true`）
   - `LANGFUSE_METRICS_PATH`、`LANGFUSE_COMPLETE_COVERAGE_TAG`
+- Issue-Task 同步 worker（可选，均有默认值）：
+  - `SYNC_WORKER_INTERVAL`（默认 `60s`）
+  - `SYNC_DEFAULT_DEADLINE`（默认 `365d`）
 - 后台 worker 间隔（可选，均有默认值）：
   - `REAPER_INTERVAL`（默认 `5s`）
   - `OUTBOX_INTERVAL`（默认 `3s`）
@@ -187,7 +208,7 @@ cd backend && go run ./cmd/agentguild-api
 ```bash
 cd frontend
 npm install
-npm run dev        # Vite dev server，默认 http://localhost:5173，代理 /api -> :8080
+npm run dev        # Vite dev server，默认 http://localhost:5173，代理 /api 与 /oauth -> :8080
 ```
 
 前端支持 `VITE_DEMO_MODE=true` 离线演示模式（Playwright e2e 使用），所有 API 请求由 `src/api/client.ts` 中的 `demo()` 函数本地响应。其他环境变量：
@@ -211,7 +232,7 @@ go test -race ./... -count=1
   - 否则尝试 `postgres://agentguild:agentguild@127.0.0.1:55432/agentguild?sslmode=disable`；
   - 再不可用则通过 Docker 启动临时 PostgreSQL 18.4 容器。
 - 每个测试会创建独立的 schema，测试结束后清理。
-- 迁移文件位于 `backend/migrations/`，当前包含 `000001` 到 `000009`，测试会按顺序应用全部 up 迁移。
+- 迁移文件位于 `backend/migrations/`，当前包含 `000001` 到 `000012`，测试会按顺序应用全部 up 迁移。
 - `internal/acceptance` 包含端到端验收测试，直接启动真实 PostgreSQL 与完整服务组合。
 
 ### 前端测试
@@ -224,7 +245,12 @@ npm run e2e            # 同上
 ```
 
 - 单元测试文件与源码同目录，后缀 `.test.tsx`/`.test.ts`；vitest 配置在 `vite.config.ts`，setup 文件为 `src/test/setup.ts`。
-- e2e 测试位于 `frontend/e2e/`。
+- e2e 测试位于 `frontend/e2e/`，当前包含：
+  - `agent-onboarding.spec.ts`
+  - `agent-version-and-experience.spec.ts`
+  - `console-ui-ux.spec.ts`
+  - `task-observer.spec.ts`
+  - `task-observer.visual.spec.ts`
 - Playwright 配置会启动 `npm run dev` 作为 webServer，并设置 `VITE_DEMO_MODE=true`。
 
 ### CI 验证
@@ -264,7 +290,7 @@ npm run e2e            # 同上
   - 使用 `clock_timestamp()` 默认值；
   - 状态字段使用 `CHECK` 约束；
   - 外键尽量使用复合键约束（如 `(tenant_id, execution_id, task_id)`）。
-- 测试新增迁移后，请更新 `internal/testdb/postgres.go` 中的 `applyMigration` 调用列表（当前已注册 `000001` 到 `000008`）。
+- 测试新增迁移后，请更新 `internal/testdb/postgres.go` 中的 `applyMigration` 调用列表（当前已注册 `000001` 到 `000012`）。
 
 ## 安全注意事项
 
@@ -274,12 +300,15 @@ npm run e2e            # 同上
 - **多租户**：所有资源查询必须带 `tenant_id` 校验，不能仅凭 `agent_id` 授权。
 - **秘密管理**：`.gitignore` 已排除 `.env`、`.env.*`、`backend/coverage.out`、frontend `dist/`、`test-results/` 等。不要提交私钥或 OIDC client secret。
 - **RSA 私钥**：`AGENT_RSA_PRIVATE_KEY_PEM` 或 `AGENT_RSA_PRIVATE_KEY_PATH` 用于签发 Agent token，生产环境请通过安全的 secret 注入。
+- **GitHub App 私钥**：按租户配置时通过 API 写入，不要在日志、测试固件或 demo 数据中保留私钥。
 
 ## 关键文档
 
 - `docs/agentguild-agent-task-protocol-design.md`：完整的产品界面、Agent 接入协议、任务生命周期、状态机、安全设计。
+- `docs/docker-compose.md`：Docker Compose 本地部署说明。
+- `docs/local-dev-github-issue-sync.md`：本地开发 GitHub Issue 同步指南。
 - `skill.md`：Agent 接入说明文档，通过 `GET /skill.md` 暴露。
-- `openspec/specs/`：按领域拆分的规格说明（agent-identity、task-lifecycle、git-delivery、code-review、agent-versioning、agent-experience、evaluation 等）。
+- `openspec/specs/`：按领域拆分的规格说明（agent-identity、task-lifecycle、git-delivery、code-review、agent-versioning、agent-experience、evaluation、github-app-integration、local-login 等）。
 
 ## 给 Agent 的实用提示
 
