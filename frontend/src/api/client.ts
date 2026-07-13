@@ -71,12 +71,15 @@ export type TaskView = {
 };
 
 export type GitHubAppView = {
+  id: string;
   tenant_id?: string;
   provider?: string;
-  app_id?: number;
+  app_id: number;
   installation_id?: number;
   base_url?: string;
-  app_slug?: string;
+  app_slug: string;
+  installation_account_login?: string;
+  is_default: boolean;
   configured: boolean;
   created_at?: string;
   updated_at?: string;
@@ -93,6 +96,7 @@ export type RepositorySourceType = "github_app" | "public_github";
 export type RepositoryInventoryItem = {
   id?: string;
   source_type?: RepositorySourceType;
+  github_app_id?: string;
   full_name: string;
   default_branch: string;
   visibility: string;
@@ -269,12 +273,28 @@ export async function getGitHubApp(): Promise<Envelope<GitHubAppView>> {
     meta: { server_time: "", resource_version: 0 },
   };
 }
-export const deleteGitHubApp = () => apiRequest<{ deleted: boolean }>("/v1/github-app", { method: "DELETE" });
-export const testGitHubApp = () => apiRequest<ConnectionTestResult>("/v1/github-app:test", { method: "POST" });
+export const listGitHubApps = () => apiRequest<{ items: GitHubAppView[] }>("/v1/github-apps");
+export const deleteGitHubApp = (id?: string) =>
+  apiRequest<{ deleted: boolean }>(id ? `/v1/github-apps/${encodeURIComponent(id)}` : "/v1/github-app", {
+    method: "DELETE",
+  });
+export const testGitHubApp = (id?: string) =>
+  apiRequest<ConnectionTestResult>(id ? `/v1/github-apps/${encodeURIComponent(id)}:test` : "/v1/github-app:test", {
+    method: "POST",
+  });
 export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/repositories");
+export const listGitHubAppRepositories = (id: string) =>
+  apiRequest<{ items: Repository[] }>(`/v1/github-apps/${encodeURIComponent(id)}/repositories`);
 export const getRepositoryOnboarding = () => apiRequest<RepositoryOnboardingSummary>("/v1/repository-onboarding");
-export const addGitHubAppRepository = (repo: string) =>
-  apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", { method: "POST", body: { repo } });
+export function addGitHubAppRepository(appID: string, repo: string): Promise<Envelope<RepositoryInventoryItem>>;
+/** @deprecated Pass the GitHub App ID as the first argument. */
+export function addGitHubAppRepository(repo: string): Promise<Envelope<RepositoryInventoryItem>>;
+export function addGitHubAppRepository(appIDOrRepo: string, maybeRepo?: string) {
+  const body = maybeRepo === undefined
+    ? { repo: appIDOrRepo }
+    : { github_app_id: appIDOrRepo, repo: maybeRepo };
+  return apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", { method: "POST", body });
+}
 export const addPublicRepository = (repo: string) =>
   apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", body: { repo } });
 export const removeRepository = (id: string) =>
@@ -286,7 +306,11 @@ export const updateSyncRule = (id: string, input: SyncRuleInput) => apiRequest<S
 export const deleteSyncRule = (id: string) => apiRequest<{ deleted: boolean }>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const runSyncRule = (id: string) => apiRequest<SyncResult>(`/v1/sync-rules/${encodeURIComponent(id)}:run`, { method: "POST" });
 export const githubManifestUrl = () => `${base}/oauth/github/app/manifest`;
-export const githubInstallUrl = () => `${base}/oauth/github/app/install`;
+export const githubInstallUrl = (id?: string) => {
+  if (!id) return `${base}/oauth/github/app/install`;
+  const query = new URLSearchParams({ github_app_id: id });
+  return `${base}/oauth/github/app/install?${query.toString()}`;
+};
 
 const demoTasks: TaskView[] = [
   ["AG-192", "修复批量退款时的余额竞争条件", "open", "billing-service", "TypeScript"],
@@ -342,27 +366,49 @@ const demoMeta = {
 
 let demoAgentCounter = 4;
 let demoAgents: DemoAgent[] = createDemoAgents();
-const demoGitHubApp: GitHubAppView = {
+let demoGitHubApps: GitHubAppView[] = [{
+  id: "gha-alpha",
   tenant_id: "billing-platform",
   provider: "github",
   app_id: 123456,
   installation_id: 987654,
   base_url: "https://api.github.com",
-  app_slug: "agentguild-billing-platform",
+  app_slug: "alpha",
+  installation_account_login: "acme-corp",
+  is_default: true,
   configured: true,
   created_at: "2026-07-01T08:00:00Z",
   updated_at: "2026-07-02T12:30:00Z",
+}, {
+  id: "gha-beta",
+  tenant_id: "billing-platform",
+  provider: "github",
+  app_id: 654321,
+  installation_id: 456789,
+  base_url: "https://api.github.com",
+  app_slug: "beta",
+  installation_account_login: "acme-labs",
+  is_default: false,
+  configured: true,
+  created_at: "2026-07-03T08:00:00Z",
+  updated_at: "2026-07-03T08:00:00Z",
+}];
+const demoRepositoriesByApp: Record<string, Repository[]> = {
+  "gha-alpha": [
+    { full_name: "acme/billing-service", default_branch: "main", visibility: "private" },
+    { full_name: "acme/event-gateway", default_branch: "main", visibility: "private" },
+  ],
+  "gha-beta": [
+    { full_name: "acme/frontend", default_branch: "main", visibility: "internal" },
+    { full_name: "acme/data-api", default_branch: "main", visibility: "private" },
+  ],
 };
-const demoRepositories: Repository[] = [
-  { full_name: "acme/billing-service", default_branch: "main", visibility: "private" },
-  { full_name: "acme/event-gateway", default_branch: "main", visibility: "private" },
-  { full_name: "acme/frontend", default_branch: "main", visibility: "internal" },
-];
 let demoOnboardedRepositoryCounter = 2;
 let demoOnboardedRepositories: RepositoryInventoryItem[] = [
   {
     id: "repo-inv-1",
     source_type: "github_app",
+    github_app_id: "gha-alpha",
     full_name: "acme/billing-service",
     default_branch: "main",
     visibility: "private",
@@ -582,9 +628,49 @@ function upsertDemoOnboardedRepository(
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
+  const defaultApp = demoGitHubApps.find((app) => app.is_default) ?? demoGitHubApps[0];
+  const defaultRepositories = defaultApp ? demoRepositoriesByApp[defaultApp.id] ?? [] : [];
+
+  if (url.pathname === "/v1/github-apps" && method === "GET") {
+    return clone({ data: { items: demoGitHubApps }, meta: demoMeta });
+  }
+
+  const appTestMatch = url.pathname.match(/^\/v1\/github-apps\/([^/]+):test$/);
+  if (appTestMatch && method === "POST") {
+    const id = decodeURIComponent(appTestMatch[1]);
+    const app = demoGitHubApps.find((item) => item.id === id);
+    if (!app) throw new Error(`Demo GitHub App not found: ${id}`);
+    if (!app.installation_id) {
+      return clone({ data: { ok: false, repo_count: 0, error: "GitHub App 尚未安装" }, meta: demoMeta });
+    }
+    return clone({ data: { ok: true, repo_count: (demoRepositoriesByApp[id] ?? []).length }, meta: demoMeta });
+  }
+
+  const appRepositoriesMatch = url.pathname.match(/^\/v1\/github-apps\/([^/]+)\/repositories$/);
+  if (appRepositoriesMatch && method === "GET") {
+    const id = decodeURIComponent(appRepositoriesMatch[1]);
+    if (!demoGitHubApps.some((app) => app.id === id)) throw new Error(`Demo GitHub App not found: ${id}`);
+    return clone({ data: { items: demoRepositoriesByApp[id] ?? [] }, meta: demoMeta });
+  }
+
+  const appMatch = url.pathname.match(/^\/v1\/github-apps\/([^/]+)$/);
+  if (appMatch) {
+    const id = decodeURIComponent(appMatch[1]);
+    const app = demoGitHubApps.find((item) => item.id === id);
+    if (!app) throw new Error(`Demo GitHub App not found: ${id}`);
+    if (method === "GET") return clone({ data: app, meta: demoMeta });
+    if (method === "DELETE") {
+      const bound = demoOnboardedRepositories.some(
+        (repo) => repo.source_type === "github_app" && repo.github_app_id === id,
+      );
+      if (bound) throw new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
+      demoGitHubApps = demoGitHubApps.filter((item) => item.id !== id);
+      return clone({ data: { deleted: true }, meta: demoMeta });
+    }
+  }
 
   if (url.pathname === "/v1/github-app" && method === "GET") {
-    return clone({ data: demoGitHubApp, meta: demoMeta });
+    return clone({ data: defaultApp, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/github-app" && method === "DELETE") {
@@ -592,18 +678,18 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   }
 
   if (url.pathname === "/v1/github-app:test" && method === "POST") {
-    return clone({ data: { ok: true, repo_count: demoRepositories.length }, meta: demoMeta });
+    return clone({ data: { ok: true, repo_count: defaultRepositories.length }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/repositories" && method === "GET") {
-    return clone({ data: { items: demoRepositories }, meta: demoMeta });
+    return clone({ data: { items: Object.values(demoRepositoriesByApp).flat() }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/repository-onboarding" && method === "GET") {
     return clone({
       data: {
-        github_app: demoGitHubApp,
-        app_repositories: { items: demoRepositories },
+        github_app: defaultApp,
+        app_repositories: { items: defaultRepositories },
         onboarded_repositories: { items: demoOnboardedRepositories },
       },
       meta: demoMeta,
@@ -612,14 +698,21 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
 
   if (url.pathname === "/v1/repositories/github-app" && method === "POST") {
     const body = parseDemoBody(init.body);
+    const githubAppID = typeof body.github_app_id === "string" && body.github_app_id
+      ? body.github_app_id
+      : defaultApp?.id;
+    if (!githubAppID || !demoGitHubApps.some((app) => app.id === githubAppID)) {
+      throw new Error(`Demo GitHub App not found: ${githubAppID ?? ""}`);
+    }
     const fullName = normalizeDemoGitHubRepository(body.repo);
-    const candidate = demoRepositories.find((repo) => repo.full_name === fullName);
+    const candidate = (demoRepositoriesByApp[githubAppID] ?? []).find((repo) => repo.full_name === fullName);
     if (!candidate) {
       throw new Error(`Demo repository not found: ${fullName}`);
     }
     return clone({
       data: upsertDemoOnboardedRepository({
         source_type: "github_app",
+        github_app_id: githubAppID,
         full_name: candidate.full_name,
         default_branch: candidate.default_branch,
         visibility: candidate.visibility,

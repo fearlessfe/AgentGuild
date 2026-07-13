@@ -73,9 +73,11 @@ describe("RepositoryOnboardingScreen", () => {
     vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
       data: summaryFixture({
         github_app: {
+          id: "gha-test",
           app_id: 123,
           app_slug: "agentguild-test",
           installation_id: 0,
+          is_default: true,
           configured: true,
         },
       }),
@@ -152,8 +154,10 @@ describe("RepositoryOnboardingScreen", () => {
 function summaryFixture(overrides: Partial<RepositoryOnboardingSummary> = {}): RepositoryOnboardingSummary {
   return {
     github_app: {
+      id: "gha-test",
       app_id: 123,
       app_slug: "agentguild-test",
+      is_default: true,
       configured: true,
     },
     app_repositories: { items: [] },

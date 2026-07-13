@@ -541,6 +541,7 @@
 }
 
 .provider-name { font-size: 15px; font-weight: 700; }
+.provider-name h2 { margin: 0; font: inherit; }
 
 .perm-list {
   display: grid;
