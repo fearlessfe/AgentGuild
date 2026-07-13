@@ -2,202 +2,248 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
-import type { RepositoryInventoryItem, RepositoryOnboardingSummary } from "../../api/client";
+import type { GitHubAppView, Repository, RepositoryInventoryItem, RepositoryOnboardingSummary } from "../../api/client";
 import { RepositoryOnboardingScreen } from "./RepositoryOnboardingScreen";
+
+const alphaApp: GitHubAppView = {
+  id: "gha-alpha",
+  app_id: 101,
+  app_slug: "agentguild-alpha",
+  installation_id: 1001,
+  installation_account_login: "acme",
+  is_default: true,
+  configured: true,
+};
+const betaApp: GitHubAppView = {
+  id: "gha-beta",
+  app_id: 202,
+  app_slug: "agentguild-beta",
+  installation_id: 2002,
+  installation_account_login: "platform",
+  is_default: false,
+  configured: true,
+};
+const pendingApp: GitHubAppView = {
+  id: "gha-pending",
+  app_id: 303,
+  app_slug: "agentguild-pending",
+  is_default: false,
+  configured: true,
+};
+const apiRepo: Repository = { full_name: "acme/api", default_branch: "main", visibility: "private" };
+const webRepo: Repository = { full_name: "acme/web", default_branch: "develop", visibility: "private" };
 
 describe("RepositoryOnboardingScreen", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
-  });
-
-  it("renders the two-step onboarding areas and added repositories from demo mode", async () => {
-    render(<RepositoryOnboardingScreen />);
-
-    expect(await screen.findByRole("heading", { name: "仓库接入" })).toBeVisible();
-    expect(screen.getByText("Step 1 · GitHub App")).toBeVisible();
-    expect(screen.getByText("Step 2 · 添加仓库")).toBeVisible();
-    expect(await screen.findByText("acme/event-gateway")).toBeVisible();
-
-    const table = await screen.findByRole("table", { name: "已接入仓库列表" });
-    expect(within(table).getByText("acme/billing-service")).toBeVisible();
-    expect(within(table).getByText("vercel/next.js")).toBeVisible();
-    expect(within(table).getByText("GitHub App")).toBeVisible();
-    expect(within(table).getByText("公开仓库")).toBeVisible();
-  });
-
-  it("adds a GitHub App repository candidate to the added repository list", async () => {
-    render(<RepositoryOnboardingScreen />);
-
-    const candidateRow = await screen.findByRole("row", { name: /acme\/event-gateway/ });
-    await userEvent.click(within(candidateRow).getByRole("button", { name: "添加" }));
-
-    const table = await screen.findByRole("table", { name: "已接入仓库列表" });
-    await waitFor(() => expect(within(table).getByText("acme/event-gateway")).toBeVisible());
-  });
-
-  it("sends the summary GitHub App id when adding a repository candidate", async () => {
-    const candidate: RepositoryInventoryItem = {
-      full_name: "acme/service",
-      default_branch: "main",
-      visibility: "private",
-    };
-    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
-      data: summaryFixture({ app_repositories: { items: [candidate] } }),
-      meta: { server_time: "", resource_version: 0 },
-    });
-    const addRepository = vi.spyOn(client, "addGitHubAppRepository").mockResolvedValue({
-      data: { ...candidate, id: "repo-service", source_type: "github_app" },
-      meta: { server_time: "", resource_version: 1 },
-    });
-
-    render(<RepositoryOnboardingScreen />);
-
-    const candidateRow = await screen.findByRole("row", { name: /acme\/service/ });
-    await userEvent.click(within(candidateRow).getByRole("button", { name: "添加" }));
-
-    expect(addRepository).toHaveBeenCalledWith("gha-test", "acme/service");
-  });
-
-  it("adds a public GitHub URL without creating an issue sync rule", async () => {
-    const createSyncRuleSpy = vi.spyOn(client, "createSyncRule");
-
-    render(<RepositoryOnboardingScreen />);
-
-    await userEvent.type(await screen.findByLabelText("公共仓库 URL 或 owner/repo"), "https://github.com/rust-lang/rust");
-    await userEvent.click(screen.getByRole("button", { name: "添加公开仓库" }));
-
-    const table = await screen.findByRole("table", { name: "已接入仓库列表" });
-    await waitFor(() => expect(within(table).getByText("rust-lang/rust")).toBeVisible());
-    expect(createSyncRuleSpy).not.toHaveBeenCalled();
-  });
-
-  it("shows a recovery state when GitHub App repository listing fails", async () => {
-    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
-      data: summaryFixture({
-        app_repositories: { items: [] },
-        app_repositories_error: "GitHub App installation requires re-authentication",
+    vi.spyOn(client, "listGitHubApps").mockResolvedValue(envelope({ items: [alphaApp, betaApp, pendingApp] }));
+    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue(envelope(summaryFixture()));
+    vi.spyOn(client, "listGitHubAppRepositories").mockResolvedValue(envelope({ items: [apiRepo, webRepo] }));
+    vi.spyOn(client, "addGitHubAppRepository").mockImplementation(async (appID, fullName) =>
+      envelope({
+        id: `repo-${fullName}`,
+        source_type: "github_app",
+        github_app_id: appID,
+        ...(fullName === webRepo.full_name ? webRepo : apiRepo),
       }),
-      meta: { server_time: "", resource_version: 0 },
-    });
+    );
+    vi.spyOn(client, "addPublicRepository").mockResolvedValue(
+      envelope({
+        id: "repo-rust",
+        source_type: "public_github",
+        full_name: "rust-lang/rust",
+        default_branch: "master",
+        visibility: "public",
+      }),
+    );
+    vi.spyOn(client, "removeRepository").mockResolvedValue(envelope({ deleted: true }));
+  });
 
+  it("loads plural Apps and only offers installed Apps with slug and account labels", async () => {
     render(<RepositoryOnboardingScreen />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("GitHub App installation requires re-authentication");
+    const appSelect = await screen.findByLabelText("GitHub App");
+    expect(within(appSelect).getByRole("option", { name: "agentguild-alpha · acme" })).toBeVisible();
+    expect(within(appSelect).getByRole("option", { name: "agentguild-beta · platform" })).toBeVisible();
+    expect(within(appSelect).queryByRole("option", { name: /pending/ })).not.toBeInTheDocument();
+    expect(client.listGitHubApps).toHaveBeenCalledOnce();
+    expect(client.getRepositoryOnboarding).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("table", { name: "GitHub App 候选仓库列表" })).not.toBeInTheDocument();
+  });
+
+  it("filters repositories locally without another request", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-beta");
+    const input = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.type(input, "WEB");
+
+    expect(screen.getByRole("option", { name: "acme/web" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "acme/api" })).not.toBeInTheDocument();
+    expect(client.listGitHubAppRepositories).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears repository query and selection when switching Apps", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryOnboardingScreen />);
+    const appSelect = await screen.findByLabelText("GitHub App");
+    await user.selectOptions(appSelect, "gha-alpha");
+    const input = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.click(input);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+    expect(screen.getByText(/默认分支：develop/)).toBeVisible();
+
+    await user.selectOptions(appSelect, "gha-beta");
+
+    expect(await screen.findByRole("combobox", { name: "授权仓库" })).toHaveValue("");
+    expect(screen.queryByText(/默认分支：develop/)).not.toBeInTheDocument();
+  });
+
+  it("reuses successful per-App repository results", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryOnboardingScreen />);
+    const appSelect = await screen.findByLabelText("GitHub App");
+
+    await user.selectOptions(appSelect, "gha-alpha");
+    await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.selectOptions(appSelect, "gha-beta");
+    await waitFor(() => expect(client.listGitHubAppRepositories).toHaveBeenCalledTimes(2));
+    await user.selectOptions(appSelect, "gha-alpha");
+    await user.click(screen.getByRole("combobox", { name: "授权仓库" }));
+
+    expect(screen.getByRole("option", { name: "acme/api" })).toBeVisible();
+    expect(client.listGitHubAppRepositories).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache failures and retries the selected App locally", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.listGitHubAppRepositories)
+      .mockRejectedValueOnce(new Error("installation token expired"))
+      .mockResolvedValueOnce(envelope({ items: [webRepo] }));
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-beta");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("installation token expired");
+    await user.click(screen.getByRole("button", { name: "重试加载仓库" }));
+
+    await user.click(await screen.findByRole("combobox", { name: "授权仓库" }));
+    expect(screen.getByRole("option", { name: "acme/web" })).toBeVisible();
+    expect(client.listGitHubAppRepositories).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a stale slower App response after switching Apps", async () => {
+    const user = userEvent.setup();
+    let resolveAlpha!: (value: ReturnType<typeof envelope<{ items: Repository[] }>>) => void;
+    vi.mocked(client.listGitHubAppRepositories).mockImplementation((appID) => {
+      if (appID === "gha-alpha") return new Promise((resolve) => (resolveAlpha = resolve));
+      return Promise.resolve(envelope({ items: [webRepo] }));
+    });
+    render(<RepositoryOnboardingScreen />);
+    const appSelect = await screen.findByLabelText("GitHub App");
+    await user.selectOptions(appSelect, "gha-alpha");
+    await user.selectOptions(appSelect, "gha-beta");
+    await screen.findByRole("combobox", { name: "授权仓库" });
+    resolveAlpha(envelope({ items: [apiRepo] }));
+    await waitFor(() => expect(client.listGitHubAppRepositories).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("combobox", { name: "授权仓库" }));
+    expect(screen.getByRole("option", { name: "acme/web" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "acme/api" })).not.toBeInTheDocument();
+  });
+
+  it("excludes already-onboarded full names regardless of source", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.getRepositoryOnboarding).mockResolvedValue(
+      envelope(
+        summaryFixture({
+          onboarded_repositories: {
+            items: [{ id: "public-api", source_type: "public_github", ...apiRepo }],
+          },
+        }),
+      ),
+    );
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-alpha");
+    await user.click(await screen.findByRole("combobox", { name: "授权仓库" }));
+
+    expect(screen.queryByRole("option", { name: "acme/api" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "acme/web" })).toBeVisible();
+  });
+
+  it("distinguishes no authorized repositories from no search matches", async () => {
+    const user = userEvent.setup();
+    vi.mocked(client.listGitHubAppRepositories).mockResolvedValueOnce(envelope({ items: [] }));
+    render(<RepositoryOnboardingScreen />);
+    const appSelect = await screen.findByLabelText("GitHub App");
+    await user.selectOptions(appSelect, "gha-alpha");
+    expect(await screen.findByText("此 GitHub App 没有授权仓库")).toBeVisible();
+
+    await user.selectOptions(appSelect, "gha-beta");
+    const input = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.type(input, "missing");
+    expect(screen.getByText("没有匹配的仓库")).toBeVisible();
+  });
+
+  it("adds the selected repository with its App id and removes it from candidates", async () => {
+    const user = userEvent.setup();
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-beta");
+    const input = await screen.findByRole("combobox", { name: "授权仓库" });
+    await user.click(input);
+    await user.click(screen.getByRole("option", { name: "acme/web" }));
+    expect(screen.getByText("默认分支：develop · 可见性：private")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "添加仓库" }));
+
+    expect(client.addGitHubAppRepository).toHaveBeenCalledWith("gha-beta", "acme/web");
+    expect(input).toHaveValue("");
+    await user.click(input);
+    expect(screen.queryByRole("option", { name: "acme/web" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("acme/web")).toBeVisible();
+  });
+
+  it("keeps the public URL flow and clears App selection when switching sources", async () => {
+    const user = userEvent.setup();
+    const createSyncRuleSpy = vi.spyOn(client, "createSyncRule");
+    render(<RepositoryOnboardingScreen />);
+    await user.selectOptions(await screen.findByLabelText("GitHub App"), "gha-beta");
+    await user.click(screen.getByRole("radio", { name: "公开仓库" }));
+
+    await user.type(screen.getByLabelText("公共仓库 URL 或 owner/repo"), "https://github.com/rust-lang/rust");
+    await user.click(screen.getByRole("button", { name: "添加公开仓库" }));
+
+    expect(client.addPublicRepository).toHaveBeenCalledWith("https://github.com/rust-lang/rust");
+    expect(screen.getByLabelText("公共仓库 URL 或 owner/repo")).toHaveValue("");
+    expect(within(screen.getByRole("table", { name: "已接入仓库列表" })).getByText("rust-lang/rust")).toBeVisible();
+    expect(createSyncRuleSpy).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("radio", { name: "GitHub App 授权仓库" }));
+    expect(screen.getByLabelText("GitHub App")).toHaveValue("");
+  });
+
+  it("directs users to Git integration when no installed Apps exist", async () => {
+    vi.mocked(client.listGitHubApps).mockResolvedValue(envelope({ items: [pendingApp] }));
+    render(<RepositoryOnboardingScreen />);
+
+    expect(await screen.findByText("暂无已安装的 GitHub App")).toBeVisible();
     expect(screen.getByRole("button", { name: "打开 Git 接入" })).toBeVisible();
   });
 
-  it("offers direct GitHub App installation when the App was created but not installed", async () => {
-    const originalLocation = window.location;
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: { ...originalLocation, href: "" },
-    });
-    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
-      data: summaryFixture({
-        github_app: {
-          id: "gha-test",
-          app_id: 123,
-          app_slug: "agentguild-test",
-          installation_id: 0,
-          is_default: true,
-          configured: true,
-        },
-      }),
-      meta: { server_time: "", resource_version: 0 },
-    });
-    vi.spyOn(client, "githubInstallUrl").mockReturnValue("/api/oauth/github/app/install");
-
+  it("shows textual loading and top-level errors", async () => {
+    let rejectApps!: (reason: Error) => void;
+    vi.mocked(client.listGitHubApps).mockImplementation(() => new Promise((_, reject) => (rejectApps = reject)));
     render(<RepositoryOnboardingScreen />);
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载仓库接入信息");
+    rejectApps(new Error("apps unavailable"));
 
-    expect(await screen.findByText("已创建，待安装")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "安装 GitHub App" }));
-    expect(window.location.href).toBe("/api/oauth/github/app/install");
-
-    Object.defineProperty(window, "location", {
-      writable: true,
-      value: originalLocation,
-    });
-  });
-
-  it("shows an empty state when a configured GitHub App has no visible repositories", async () => {
-    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
-      data: summaryFixture({ app_repositories: { items: [] } }),
-      meta: { server_time: "", resource_version: 0 },
-    });
-
-    render(<RepositoryOnboardingScreen />);
-
-    expect(await screen.findByText("暂无 GitHub App 可见仓库")).toBeVisible();
-  });
-
-  it("renders the unconfigured state when a legacy summary omits github_app", async () => {
-    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
-      data: {
-        app_repositories: { items: [] },
-        onboarded_repositories: { items: [] },
-      } as unknown as RepositoryOnboardingSummary,
-      meta: { server_time: "", resource_version: 0 },
-    });
-
-    render(<RepositoryOnboardingScreen />);
-
-    expect(await screen.findByText("未配置")).toBeVisible();
-    expect(screen.getByText("请先在 Git 接入页安装或更新 GitHub App。")).toBeVisible();
-  });
-
-  it("keeps public and GitHub App entries separate for the same full name", async () => {
-    const publicRepo: RepositoryInventoryItem = {
-      id: "public-acme-shared",
-      source_type: "public_github",
-      full_name: "acme/shared",
-      default_branch: "main",
-      visibility: "public",
-    };
-    const appRepo: RepositoryInventoryItem = {
-      id: "app-acme-shared",
-      source_type: "github_app",
-      full_name: "acme/shared",
-      default_branch: "main",
-      visibility: "private",
-    };
-    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue({
-      data: summaryFixture({
-        app_repositories: { items: [appRepo] },
-        onboarded_repositories: { items: [publicRepo] },
-      }),
-      meta: { server_time: "", resource_version: 0 },
-    });
-    vi.spyOn(client, "addGitHubAppRepository").mockResolvedValue({
-      data: appRepo,
-      meta: { server_time: "", resource_version: 1 },
-    });
-
-    render(<RepositoryOnboardingScreen />);
-
-    const candidateTable = await screen.findByRole("table", { name: "GitHub App 候选仓库列表" });
-    const candidateRow = within(candidateTable).getByRole("row", { name: /acme\/shared/ });
-    const addButton = within(candidateRow).getByRole("button", { name: "添加" });
-    expect(addButton).toBeEnabled();
-
-    await userEvent.click(addButton);
-
-    const onboardedTable = await screen.findByRole("table", { name: "已接入仓库列表" });
-    await waitFor(() => expect(within(onboardedTable).getAllByText("acme/shared")).toHaveLength(2));
-    expect(within(onboardedTable).getByText("公开仓库")).toBeVisible();
-    expect(within(onboardedTable).getByText("GitHub App")).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent("apps unavailable");
   });
 });
 
+function envelope<T>(data: T) {
+  return { data, meta: { server_time: "", resource_version: 0 } };
+}
+
 function summaryFixture(overrides: Partial<RepositoryOnboardingSummary> = {}): RepositoryOnboardingSummary {
   return {
-    github_app: {
-      id: "gha-test",
-      app_id: 123,
-      app_slug: "agentguild-test",
-      is_default: true,
-      configured: true,
-    },
+    github_app: alphaApp,
     app_repositories: { items: [] },
     onboarded_repositories: { items: [] },
     ...overrides,
