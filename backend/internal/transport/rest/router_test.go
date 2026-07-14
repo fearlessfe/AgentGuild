@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,15 +24,25 @@ import (
 )
 
 type memoryIdempotencyStore struct {
-	mu      sync.Mutex
-	records map[application.IdempotencyKey]*application.IdempotencyRecord
+	mu            sync.Mutex
+	records       map[application.IdempotencyKey]*application.IdempotencyRecord
+	updatedAt     map[application.IdempotencyKey]time.Time
+	leaseDuration time.Duration
+	ownerSequence int
+	renewals      int
+	renewed       chan struct{}
+	renewErr      error
 }
 
 func newMemoryIdempotencyStore() *memoryIdempotencyStore {
-	return &memoryIdempotencyStore{records: make(map[application.IdempotencyKey]*application.IdempotencyRecord)}
+	return &memoryIdempotencyStore{
+		records:       make(map[application.IdempotencyKey]*application.IdempotencyRecord),
+		updatedAt:     make(map[application.IdempotencyKey]time.Time),
+		leaseDuration: 5 * time.Minute,
+	}
 }
 
-func (s *memoryIdempotencyStore) AcquireIdempotency(_ context.Context, key application.IdempotencyKey, hash [32]byte, expires time.Time) (*application.IdempotencyRecord, error) {
+func (s *memoryIdempotencyStore) AcquireMutationIdempotency(_ context.Context, key application.IdempotencyKey, hash [32]byte, ttl time.Duration) (*application.IdempotencyRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing := s.records[key]; existing != nil {
@@ -40,12 +51,45 @@ func (s *memoryIdempotencyStore) AcquireIdempotency(_ context.Context, key appli
 		}
 		copy := *existing
 		copy.ResponseBody = append([]byte(nil), existing.ResponseBody...)
+		copy.Acquired = false
+		copy.OwnerToken = ""
+		if !copy.Completed && !s.updatedAt[key].IsZero() && time.Since(s.updatedAt[key]) >= s.leaseDuration {
+			s.ownerSequence++
+			existing.OwnerToken = fmt.Sprintf("owner-%d", s.ownerSequence)
+			s.updatedAt[key] = time.Now()
+			copy.OwnerToken = existing.OwnerToken
+			copy.Acquired = true
+		}
 		return &copy, nil
 	}
-	record := &application.IdempotencyRecord{Key: key, RequestHash: hash, ExpiresAt: expires, OwnerToken: "owner-token", Acquired: true}
+	s.ownerSequence++
+	record := &application.IdempotencyRecord{Key: key, RequestHash: hash, ExpiresAt: time.Now().Add(ttl), OwnerToken: fmt.Sprintf("owner-%d", s.ownerSequence)}
 	s.records[key] = record
+	s.updatedAt[key] = time.Now()
 	copy := *record
+	copy.Acquired = true
 	return &copy, nil
+}
+
+func (s *memoryIdempotencyStore) RenewIdempotency(_ context.Context, key application.IdempotencyKey, owner string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.renewErr != nil {
+		return s.renewErr
+	}
+	record := s.records[key]
+	if record == nil || record.Completed || record.OwnerToken != owner {
+		return &domain.Error{Code: "idempotency_not_owner", Message: "idempotency record is not pending for this owner"}
+	}
+	s.updatedAt[key] = time.Now()
+	s.renewals++
+	if s.renewed != nil {
+		select {
+		case s.renewed <- struct{}{}:
+		default:
+		}
+	}
+	return nil
 }
 
 func (s *memoryIdempotencyStore) CompleteIdempotency(_ context.Context, key application.IdempotencyKey, owner string, status int, body []byte) error {

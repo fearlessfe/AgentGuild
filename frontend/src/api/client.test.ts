@@ -263,15 +263,18 @@ describe("GitHub issue sync API client", () => {
       .resolves.toMatchObject({ data: { deleted: true } });
   });
 
-  it("resets demo idempotency state explicitly between tests", async () => {
+  it("isolates demo idempotency state by reloading the module without a production reset export", async () => {
     vi.resetModules();
     (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
-    const demoClient = await import("./client");
+    const firstClient = await import("./client");
 
-    await demoClient.addPublicRepository("octo/reset-one", { idempotencyKey: "reset-key" });
-    demoClient.resetDemoIdempotencyForTests();
+    await firstClient.addPublicRepository("octo/reset-one", { idempotencyKey: "reset-key" });
+    expect("resetDemoIdempotencyForTests" in firstClient).toBe(false);
 
-    await expect(demoClient.addPublicRepository("octo/reset-two", { idempotencyKey: "reset-key" })).resolves.toBeDefined();
+    vi.resetModules();
+    const reloadedClient = await import("./client");
+
+    await expect(reloadedClient.addPublicRepository("octo/reset-two", { idempotencyKey: "reset-key" })).resolves.toBeDefined();
   });
 
   it("promotes the default after plural demo deletion and hides the deleted App repositories", async () => {

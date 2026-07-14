@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
@@ -15,12 +16,15 @@ import (
 )
 
 const (
-	mutationIdempotencyTTL    = 24 * time.Hour
-	mutationCompletionTimeout = 5 * time.Second
+	mutationIdempotencyTTL       = 24 * time.Hour
+	mutationCompletionTimeout    = 5 * time.Second
+	mutationHeartbeatInterval    = time.Minute
+	mutationIdempotencyIOTimeout = 5 * time.Second
 )
 
 type mutationIdempotencyStore interface {
-	AcquireIdempotency(context.Context, application.IdempotencyKey, [32]byte, time.Time) (*application.IdempotencyRecord, error)
+	AcquireMutationIdempotency(context.Context, application.IdempotencyKey, [32]byte, time.Duration) (*application.IdempotencyRecord, error)
+	RenewIdempotency(context.Context, application.IdempotencyKey, string) error
 	CompleteIdempotency(context.Context, application.IdempotencyKey, string, int, []byte) error
 }
 
@@ -48,7 +52,7 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 				TenantID: principal.TenantID, ActorID: principal.OwnerID,
 				Operation: operation, RequestID: requestID,
 			}
-			record, err := s.idempotencyStore.AcquireIdempotency(r.Context(), key, CanonicalMutationRequestHash(r.Method, r.URL.Path, body), time.Now().Add(mutationIdempotencyTTL))
+			record, err := s.idempotencyStore.AcquireMutationIdempotency(r.Context(), key, CanonicalMutationRequestHash(r.Method, r.URL.Path, body), mutationIdempotencyTTL)
 			if err != nil {
 				mapDomainError(w, err, principal)
 				return
@@ -64,13 +68,35 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 				return
 			}
 
+			handlerContext, cancelHandler := context.WithCancel(r.Context())
+			heartbeat := startMutationHeartbeat(
+				r.Context(), s.idempotencyStore, key, record.OwnerToken,
+				s.idempotencyHeartbeat, s.idempotencyIOTimeout, cancelHandler,
+			)
+			defer func() {
+				cancelHandler()
+				_ = heartbeat.stopAndWait()
+			}()
 			recorder := newBufferedResponse()
-			next.ServeHTTP(recorder, r)
+			next.ServeHTTP(recorder, r.WithContext(handlerContext))
+			heartbeatErr := heartbeat.stopAndWait()
+			cancelHandler()
+			if heartbeatErr != nil {
+				writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+				return
+			}
 			if recorder.status < http.StatusInternalServerError {
-				completionContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), mutationCompletionTimeout)
+				completionTimeout := mutationCompletionTimeout
+				if s.idempotencyIOTimeout < completionTimeout {
+					completionTimeout = s.idempotencyIOTimeout
+				}
+				completionContext, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), completionTimeout)
 				err := s.idempotencyStore.CompleteIdempotency(completionContext, key, record.OwnerToken, recorder.status, recorder.body.Bytes())
 				cancel()
 				if err != nil {
+					// The heartbeat has stopped, so a failed completion remains
+					// pending only until the last renewal ages past the takeover
+					// lease (or the overall retention expires).
 					writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 					return
 				}
@@ -78,6 +104,52 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 			recorder.copyTo(w)
 		})
 	}
+}
+
+type mutationHeartbeat struct {
+	stopOnce sync.Once
+	stop     chan struct{}
+	done     chan struct{}
+	err      error
+}
+
+func startMutationHeartbeat(
+	requestContext context.Context,
+	store mutationIdempotencyStore,
+	key application.IdempotencyKey,
+	ownerToken string,
+	interval time.Duration,
+	ioTimeout time.Duration,
+	cancelHandler context.CancelFunc,
+) *mutationHeartbeat {
+	heartbeat := &mutationHeartbeat{stop: make(chan struct{}), done: make(chan struct{})}
+	go func() {
+		defer close(heartbeat.done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeat.stop:
+				return
+			case <-ticker.C:
+				renewContext, cancel := context.WithTimeout(context.WithoutCancel(requestContext), ioTimeout)
+				err := store.RenewIdempotency(renewContext, key, ownerToken)
+				cancel()
+				if err != nil {
+					heartbeat.err = err
+					cancelHandler()
+					return
+				}
+			}
+		}
+	}()
+	return heartbeat
+}
+
+func (h *mutationHeartbeat) stopAndWait() error {
+	h.stopOnce.Do(func() { close(h.stop) })
+	<-h.done
+	return h.err
 }
 
 // CanonicalMutationRequestHash makes insignificant JSON whitespace and key

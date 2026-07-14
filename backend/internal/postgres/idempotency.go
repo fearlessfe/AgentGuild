@@ -87,6 +87,9 @@ func (tx *Tx) AcquireIdempotency(
 		}
 		record.RequestHash = requestHash
 		record.ExpiresAt = expiresAt
+		record.ResponseCode = nil
+		record.ResponseBody = nil
+		record.Completed = false
 		return tx.markIdempotencyAcquired(record, ownerToken), nil
 	}
 	if !bytes.Equal(storedHash, requestHash[:]) {
@@ -100,7 +103,7 @@ func (tx *Tx) AcquireIdempotency(
 	if !record.Completed && storedOwner == ownerToken {
 		return tx.markIdempotencyAcquired(record, ownerToken), nil
 	}
-	if !record.Completed && !storedUpdatedAt.After(now.Add(-idempotencyPendingLease)) {
+	if !record.Completed && !storedUpdatedAt.After(now.Add(-tx.pendingIdempotencyLease())) {
 		_, err = tx.tx.Exec(ctx, `
 			UPDATE idempotency_records
 			SET owner_token=$5, updated_at=$6
@@ -113,6 +116,41 @@ func (tx *Tx) AcquireIdempotency(
 		return tx.markIdempotencyAcquired(record, ownerToken), nil
 	}
 	return record, nil
+}
+
+func (tx *Tx) pendingIdempotencyLease() time.Duration {
+	if tx.idempotencyPendingLease > 0 {
+		return tx.idempotencyPendingLease
+	}
+	return idempotencyPendingLease
+}
+
+func (tx *Tx) RenewIdempotency(
+	ctx context.Context,
+	key application.IdempotencyKey,
+	ownerToken string,
+) error {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return err
+	}
+	tag, err := tx.tx.Exec(ctx, `
+		UPDATE idempotency_records
+		SET updated_at=$5
+		WHERE tenant_id=$1 AND actor_id=$2 AND operation=$3 AND request_id=$4
+		  AND owner_token=$6 AND response_code IS NULL`,
+		key.TenantID, key.ActorID, key.Operation, key.RequestID, now, ownerToken,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return &domain.Error{
+			Code:    "idempotency_not_owner",
+			Message: "idempotency record is not pending for this owner",
+		}
+	}
+	return nil
 }
 
 func (tx *Tx) markIdempotencyAcquired(record *application.IdempotencyRecord, ownerToken string) *application.IdempotencyRecord {

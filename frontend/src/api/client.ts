@@ -720,11 +720,6 @@ function sortCanonicalJSON(value: unknown): unknown {
   return value;
 }
 
-/** Test-only isolation for demo idempotency records. */
-export function resetDemoIdempotencyForTests(): void {
-  demoIdempotencyRecords.clear();
-}
-
 function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();

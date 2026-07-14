@@ -3,6 +3,7 @@ package rest_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -88,9 +89,9 @@ func TestOnboardingMutationScopesKeyByTenant(t *testing.T) {
 	body := []byte(`{"repo":"octo/one"}`)
 	hash := rest.CanonicalMutationRequestHash(http.MethodPost, "/v1/repositories/public", body)
 
-	one, err := store.AcquireIdempotency(context.Background(), application.IdempotencyKey{TenantID: "tenant-1", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "shared"}, hash, fixedRepositoryTime())
+	one, err := store.AcquireMutationIdempotency(context.Background(), application.IdempotencyKey{TenantID: "tenant-1", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "shared"}, hash, time.Hour)
 	require.NoError(t, err)
-	two, err := store.AcquireIdempotency(context.Background(), application.IdempotencyKey{TenantID: "tenant-2", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "shared"}, hash, fixedRepositoryTime())
+	two, err := store.AcquireMutationIdempotency(context.Background(), application.IdempotencyKey{TenantID: "tenant-2", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "shared"}, hash, time.Hour)
 
 	require.NoError(t, err)
 	require.True(t, one.Acquired)
@@ -107,9 +108,9 @@ func TestOnboardingMutationScopesKeyByOperation(t *testing.T) {
 	second := base
 	second.Operation = "github_app.delete"
 
-	one, err := store.AcquireIdempotency(context.Background(), first, hash, fixedRepositoryTime())
+	one, err := store.AcquireMutationIdempotency(context.Background(), first, hash, time.Hour)
 	require.NoError(t, err)
-	two, err := store.AcquireIdempotency(context.Background(), second, hash, fixedRepositoryTime())
+	two, err := store.AcquireMutationIdempotency(context.Background(), second, hash, time.Hour)
 
 	require.NoError(t, err)
 	require.True(t, one.Acquired)
@@ -171,6 +172,143 @@ func TestOnboardingMutationReturns500AndLeavesPendingWhenCompletionFails(t *test
 	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "failed-completion"}
 	require.False(t, store.records[key].Completed)
 	require.Nil(t, store.records[key].ResponseCode)
+}
+
+func TestOnboardingMutationRenewsLeaseUntilHandlerCompletes(t *testing.T) {
+	store := newMemoryIdempotencyStore()
+	store.leaseDuration = 35 * time.Millisecond
+	store.renewed = make(chan struct{}, 1)
+	svc := newRepositoryOnboardingService(t)
+	svc.public.repos["octo/hello-world"] = git.Repository{FullName: "octo/hello-world", DefaultBranch: "main", Visibility: "public"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	blocking := &blockingRepositoryOnboardingService{RepositoryOnboardingService: svc.service, started: started, release: release}
+	server := newTestServer(
+		&fakeApplication{},
+		rest.WithRepositoryOnboardingService(blocking),
+		rest.WithIdempotencyStore(store),
+		rest.WithMutationIdempotencyTimings(10*time.Millisecond, 20*time.Millisecond),
+	)
+	cookie := sessionCookie(t, "admin-1", true)
+	firstResult := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		firstResult <- postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, cookie, "Idempotency-Key", "long-running")
+	}()
+	<-started
+	select {
+	case <-store.renewed:
+	case <-time.After(time.Second):
+		t.Fatal("long-running handler lease was not renewed")
+	}
+	time.Sleep(store.leaseDuration + 15*time.Millisecond)
+
+	second := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, cookie, "Idempotency-Key", "long-running")
+	require.Equal(t, http.StatusConflict, second.Code)
+	require.Contains(t, second.Body.String(), "IDEMPOTENCY_IN_PROGRESS")
+	close(release)
+	first := <-firstResult
+	require.Equal(t, http.StatusCreated, first.Code)
+
+	store.mu.Lock()
+	renewalsAfterCompletion := store.renewals
+	store.mu.Unlock()
+	time.Sleep(35 * time.Millisecond)
+	store.mu.Lock()
+	require.Equal(t, renewalsAfterCompletion, store.renewals, "heartbeat continued after completion")
+	store.mu.Unlock()
+}
+
+func TestOnboardingMutationRenewalFailureCancelsHandlerAndReturns500(t *testing.T) {
+	store := newMemoryIdempotencyStore()
+	store.renewErr = errors.New("renewal unavailable")
+	svc := newRepositoryOnboardingService(t)
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	blocking := &blockingRepositoryOnboardingService{RepositoryOnboardingService: svc.service, started: started, cancelled: cancelled}
+	server := newTestServer(
+		&fakeApplication{},
+		rest.WithRepositoryOnboardingService(blocking),
+		rest.WithIdempotencyStore(store),
+		rest.WithMutationIdempotencyTimings(5*time.Millisecond, 20*time.Millisecond),
+	)
+
+	res := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "renew-failure")
+	require.Equal(t, http.StatusInternalServerError, res.Code)
+	require.Contains(t, res.Body.String(), "INTERNAL_ERROR")
+	select {
+	case <-started:
+	default:
+		t.Fatal("handler did not start")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("renewal failure did not cancel handler context")
+	}
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "renew-failure"}
+	store.mu.Lock()
+	require.False(t, store.records[key].Completed)
+	store.mu.Unlock()
+}
+
+func TestOnboardingMutationStopsHeartbeatWhenHandlerPanics(t *testing.T) {
+	store := newMemoryIdempotencyStore()
+	store.renewed = make(chan struct{}, 1)
+	svc := newRepositoryOnboardingService(t)
+	panicking := &panickingRepositoryOnboardingService{RepositoryOnboardingService: svc.service, after: store.renewed}
+	server := newTestServer(
+		&fakeApplication{},
+		rest.WithRepositoryOnboardingService(panicking),
+		rest.WithIdempotencyStore(store),
+		rest.WithMutationIdempotencyTimings(5*time.Millisecond, 20*time.Millisecond),
+	)
+
+	res := postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "panic-stop")
+	require.Equal(t, http.StatusInternalServerError, res.Code)
+	store.mu.Lock()
+	renewalsAfterPanic := store.renewals
+	store.mu.Unlock()
+	time.Sleep(25 * time.Millisecond)
+	store.mu.Lock()
+	require.Equal(t, renewalsAfterPanic, store.renewals, "heartbeat leaked after handler panic")
+	store.mu.Unlock()
+}
+
+type panickingRepositoryOnboardingService struct {
+	*gitapp.RepositoryOnboardingService
+	after <-chan struct{}
+}
+
+func (s *panickingRepositoryOnboardingService) AddPublicRepository(context.Context, gitapp.Principal, string) (gitapp.OnboardedRepositoryView, error) {
+	<-s.after
+	panic("handler panic")
+}
+
+type blockingRepositoryOnboardingService struct {
+	*gitapp.RepositoryOnboardingService
+	started   chan struct{}
+	release   chan struct{}
+	cancelled chan struct{}
+}
+
+func (s *blockingRepositoryOnboardingService) AddPublicRepository(ctx context.Context, principal gitapp.Principal, input string) (gitapp.OnboardedRepositoryView, error) {
+	close(s.started)
+	if s.release != nil {
+		select {
+		case <-s.release:
+			return s.RepositoryOnboardingService.AddPublicRepository(ctx, principal, input)
+		case <-ctx.Done():
+			if s.cancelled != nil {
+				close(s.cancelled)
+			}
+			return gitapp.OnboardedRepositoryView{}, ctx.Err()
+		}
+	}
+	<-ctx.Done()
+	if s.cancelled != nil {
+		close(s.cancelled)
+	}
+	return gitapp.OnboardedRepositoryView{}, fmt.Errorf("handler cancelled: %w", ctx.Err())
 }
 
 type cancelingRepositoryOnboardingService struct {

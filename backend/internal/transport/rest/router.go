@@ -130,6 +130,8 @@ type Server struct {
 	syncEngine           SyncEngine
 	repositoryOnboarding repositoryOnboardingService
 	idempotencyStore     mutationIdempotencyStore
+	idempotencyHeartbeat time.Duration
+	idempotencyIOTimeout time.Duration
 	healthChecker        healthChecker
 }
 
@@ -166,6 +168,19 @@ func WithRepositoryOnboardingService(svc repositoryOnboardingService) Option {
 // WithIdempotencyStore enables durable replay protection for human mutation routes.
 func WithIdempotencyStore(store mutationIdempotencyStore) Option {
 	return func(s *Server) { s.idempotencyStore = store }
+}
+
+// WithMutationIdempotencyTimings overrides heartbeat and bounded I/O timings.
+// It is primarily useful for deterministic concurrency tests.
+func WithMutationIdempotencyTimings(heartbeat, ioTimeout time.Duration) Option {
+	return func(s *Server) {
+		if heartbeat > 0 {
+			s.idempotencyHeartbeat = heartbeat
+		}
+		if ioTimeout > 0 {
+			s.idempotencyIOTimeout = ioTimeout
+		}
+	}
 }
 
 // Option 配置 Server。
@@ -227,9 +242,11 @@ func WithExperienceService(svc experienceService) Option {
 // NewServer 创建 REST server；svc 通常是 *application.Service。
 func NewServer(svc applicationService, verifier auth.TokenVerifier, opts ...Option) *Server {
 	s := &Server{
-		svc:      svc,
-		verifier: verifier,
-		limiter:  noopRateLimiter{},
+		svc:                  svc,
+		verifier:             verifier,
+		limiter:              noopRateLimiter{},
+		idempotencyHeartbeat: mutationHeartbeatInterval,
+		idempotencyIOTimeout: mutationIdempotencyIOTimeout,
 	}
 	for _, opt := range opts {
 		opt(s)
