@@ -17,10 +17,14 @@ import (
 )
 
 func newManifestService(manager gitapp.GitHubAppManager) *gitapp.ManifestService {
-	return gitapp.NewManifestService(manager, gitapp.ManifestOptions{
+	service, err := gitapp.NewManifestService(manager, gitapp.ManifestOptions{
 		PublicBaseURL: "https://agentguild.example",
 		StateSecret:   []byte("test-state-secret"),
 	})
+	if err != nil {
+		panic(err)
+	}
+	return service
 }
 
 func TestGitHubManifest_BuildForm(t *testing.T) {

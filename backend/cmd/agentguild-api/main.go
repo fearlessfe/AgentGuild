@@ -113,10 +113,10 @@ func run() error {
 			DefaultDeadline: cfg.SyncDefaultDeadline,
 		})
 		if cfg.WebEnabled {
-			manifestService = gitapp.NewManifestService(gitAppManager, gitapp.ManifestOptions{
-				PublicBaseURL: cfg.GitHubAppPublicBaseURL,
-				StateSecret:   []byte(cfg.GitHubAppManifestStateSecret),
-			})
+			manifestService, err = gitapp.NewManifestService(gitAppManager, githubManifestOptions(cfg))
+			if err != nil {
+				return fmt.Errorf("build github manifest service: %w", err)
+			}
 		}
 	}
 
@@ -247,6 +247,14 @@ func run() error {
 			return nil
 		}
 		return err
+	}
+}
+
+func githubManifestOptions(cfg config.Config) gitapp.ManifestOptions {
+	return gitapp.ManifestOptions{
+		PublicBaseURL:      cfg.GitHubAppPublicBaseURL,
+		StateSecret:        []byte(cfg.GitHubAppManifestStateSecret),
+		ConversionsBaseURL: cfg.GitHub.BaseURL,
 	}
 }
 

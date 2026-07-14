@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,12 +19,13 @@ import (
 
 func newManifestService(t *testing.T, apps application.GitHubAppManager, conversionsBaseURL string) *application.ManifestService {
 	t.Helper()
-	svc := application.NewManifestService(apps, application.ManifestOptions{
+	svc, err := application.NewManifestService(apps, application.ManifestOptions{
 		PublicBaseURL:      "https://guild.example.com",
 		StateSecret:        []byte("test-state-secret"),
 		ConversionsBaseURL: conversionsBaseURL,
 		Now:                func() time.Time { return time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC) },
 	})
+	require.NoError(t, err)
 	require.NotNil(t, svc)
 	return svc
 }
@@ -31,7 +33,7 @@ func newManifestService(t *testing.T, apps application.GitHubAppManager, convers
 func newManifestServiceWithIDs(t *testing.T, apps application.GitHubAppManager, conversionsBaseURL string, ids ...string) *application.ManifestService {
 	t.Helper()
 	next := 0
-	svc := application.NewManifestService(apps, application.ManifestOptions{
+	svc, err := application.NewManifestService(apps, application.ManifestOptions{
 		PublicBaseURL:      "https://guild.example.com",
 		StateSecret:        []byte("test-state-secret"),
 		ConversionsBaseURL: conversionsBaseURL,
@@ -42,6 +44,7 @@ func newManifestServiceWithIDs(t *testing.T, apps application.GitHubAppManager, 
 			return id
 		},
 	})
+	require.NoError(t, err)
 	require.NotNil(t, svc)
 	return svc
 }
@@ -139,6 +142,89 @@ func TestManifestBuildInstallURLIncludesVerifiableState(t *testing.T) {
 	decoded, err := svc.VerifyState(state, "tenant-1")
 	require.NoError(t, err)
 	require.Equal(t, "gha-2", decoded.GitHubAppID)
+}
+
+func TestManifestUsesSameGitHubEnterpriseInstanceAcrossOnboarding(t *testing.T) {
+	ctx := context.Background()
+	const code = "enterprise-code"
+	const webBaseURL = "https://ghe.example"
+	apiBaseURL := webBaseURL + "/api/v3/"
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "/api/v3/app-manifests/"+code+"/conversions", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":321,"slug":"agentguild-enterprise","pem":"enterprise-private-key"}`)),
+			Request:    r,
+		}, nil
+	})}
+
+	repo := newMemoryGitHubAppRepo()
+	manager, err := application.NewGitHubAppManager(repo)
+	require.NoError(t, err)
+	svc, err := application.NewManifestService(manager, application.ManifestOptions{
+		PublicBaseURL:      "https://guild.example.com",
+		StateSecret:        []byte("test-state-secret"),
+		ConversionsBaseURL: apiBaseURL,
+		HTTPClient:         client,
+		Now:                func() time.Time { return time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC) },
+		NewID:              func() string { return "gha-enterprise" },
+	})
+	require.NoError(t, err)
+
+	_, state, createURL, err := svc.BuildManifest("tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, webBaseURL+"/settings/apps/new", createURL)
+
+	decoded, err := svc.VerifyState(state, "tenant-1")
+	require.NoError(t, err)
+	_, err = svc.ExchangeCode(ctx, "tenant-1", decoded.GitHubAppID, code)
+	require.NoError(t, err)
+
+	record, err := repo.GetByID(ctx, "tenant-1", "gha-enterprise")
+	require.NoError(t, err)
+	require.Equal(t, webBaseURL+"/api/v3", record.BaseURL)
+
+	installURL, err := svc.BuildInstallURL("tenant-1", "gha-enterprise", record.AppSlug)
+	require.NoError(t, err)
+	require.Contains(t, installURL, webBaseURL+"/apps/agentguild-enterprise/installations/new?state=")
+}
+
+func TestNewManifestServiceRejectsUnsafeGitHubBaseURLs(t *testing.T) {
+	unsafeURLs := []string{
+		"/relative",
+		"ftp://ghe.example/api/v3",
+		"https://user@ghe.example/api/v3",
+		"https://ghe.example/api/v3?tenant=1",
+		"https://ghe.example/api/v3#fragment",
+		"https://ghe.example/api/../v3",
+		" https://ghe.example/api/v3",
+	}
+	for _, unsafeURL := range unsafeURLs {
+		t.Run(unsafeURL, func(t *testing.T) {
+			_, err := application.NewManifestService(newGitHubAppManager(t), application.ManifestOptions{
+				PublicBaseURL:      "https://guild.example.com",
+				StateSecret:        []byte("test-state-secret"),
+				ConversionsBaseURL: unsafeURL,
+			})
+			require.Error(t, err)
+		})
+	}
+
+	_, err := application.NewManifestService(newGitHubAppManager(t), application.ManifestOptions{
+		PublicBaseURL:      "https://guild.example.com",
+		StateSecret:        []byte("test-state-secret"),
+		ConversionsBaseURL: "https://ghe.example/api/v3",
+		WebBaseURL:         "https://attacker.example?redirect=1",
+	})
+	require.Error(t, err)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func TestManifestExchangeCodePersistsCredentials(t *testing.T) {

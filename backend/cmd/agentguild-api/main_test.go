@@ -53,6 +53,20 @@ func TestRepeatContinuesAfterPanic(t *testing.T) {
 	}
 }
 
+func TestGitHubManifestOptionsUsesConfiguredAPIBaseURL(t *testing.T) {
+	cfg := config.Config{
+		GitHubAppPublicBaseURL:       "https://agentguild.example",
+		GitHubAppManifestStateSecret: "state-secret",
+	}
+	cfg.GitHub.BaseURL = "https://ghe.example/api/v3/"
+
+	opts := githubManifestOptions(cfg)
+
+	require.Equal(t, cfg.GitHubAppPublicBaseURL, opts.PublicBaseURL)
+	require.Equal(t, cfg.GitHubAppManifestStateSecret, string(opts.StateSecret))
+	require.Equal(t, cfg.GitHub.BaseURL, opts.ConversionsBaseURL)
+}
+
 func TestWaitWorkersReturnsTrueWhenWorkersStop(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
