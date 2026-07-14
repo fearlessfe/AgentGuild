@@ -251,6 +251,46 @@ func TestOnboardingMutationRenewalFailureCancelsHandlerAndReturns500(t *testing.
 	store.mu.Unlock()
 }
 
+func TestOnboardingMutationHandlerCompletionCancelsBlockedRenewal(t *testing.T) {
+	store := &blockingRenewalStore{
+		memoryIdempotencyStore: newMemoryIdempotencyStore(),
+		started:                make(chan struct{}),
+		cancelled:              make(chan struct{}),
+	}
+	svc := newRepositoryOnboardingService(t)
+	svc.public.repos["octo/hello-world"] = git.Repository{FullName: "octo/hello-world", DefaultBranch: "main", Visibility: "public"}
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	blocking := &blockingRepositoryOnboardingService{
+		RepositoryOnboardingService: svc.service,
+		started:                     handlerStarted,
+		release:                     releaseHandler,
+	}
+	server := newTestServer(
+		&fakeApplication{},
+		rest.WithRepositoryOnboardingService(blocking),
+		rest.WithIdempotencyStore(store),
+		rest.WithMutationIdempotencyTimings(time.Millisecond, 200*time.Millisecond),
+	)
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		result <- postJSONWithSession(t, server, "/v1/repositories/public", `{"repo":"octo/hello-world"}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "blocked-renewal")
+	}()
+
+	awaitEvent(t, handlerStarted, "handler did not start")
+	awaitEvent(t, store.started, "renewal did not start")
+	close(releaseHandler)
+	awaitEvent(t, store.cancelled, "handler completion did not cancel the blocked renewal")
+	res := awaitResult(t, result, "request did not finish after cancelling the blocked renewal")
+
+	require.Equal(t, http.StatusCreated, res.Code)
+	require.NotContains(t, res.Body.String(), "INTERNAL_ERROR")
+	key := application.IdempotencyKey{TenantID: "tenant-1", ActorID: "admin-1", Operation: "repository.public.create", RequestID: "blocked-renewal"}
+	store.mu.Lock()
+	require.True(t, store.records[key].Completed)
+	store.mu.Unlock()
+}
+
 func TestOnboardingMutationStopsHeartbeatWhenHandlerPanics(t *testing.T) {
 	store := newMemoryIdempotencyStore()
 	store.renewed = make(chan struct{}, 1)
@@ -325,6 +365,39 @@ func (s *cancelingRepositoryOnboardingService) AddPublicRepository(ctx context.C
 type completionContextStore struct {
 	*memoryIdempotencyStore
 	completionContext chan<- error
+}
+
+type blockingRenewalStore struct {
+	*memoryIdempotencyStore
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (s *blockingRenewalStore) RenewIdempotency(ctx context.Context, _ application.IdempotencyKey, _ string) error {
+	close(s.started)
+	<-ctx.Done()
+	close(s.cancelled)
+	return ctx.Err()
+}
+
+func awaitEvent(t *testing.T, event <-chan struct{}, message string) {
+	t.Helper()
+	select {
+	case <-event:
+	case <-time.After(time.Second):
+		t.Fatal(message)
+	}
+}
+
+func awaitResult(t *testing.T, result <-chan *httptest.ResponseRecorder, message string) *httptest.ResponseRecorder {
+	t.Helper()
+	select {
+	case response := <-result:
+		return response
+	case <-time.After(time.Second):
+		t.Fatal(message)
+		return nil
+	}
 }
 
 type failingCompletionStore struct {

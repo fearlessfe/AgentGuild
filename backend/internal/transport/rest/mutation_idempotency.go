@@ -108,7 +108,7 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 
 type mutationHeartbeat struct {
 	stopOnce sync.Once
-	stop     chan struct{}
+	stop     context.CancelFunc
 	done     chan struct{}
 	err      error
 }
@@ -122,32 +122,54 @@ func startMutationHeartbeat(
 	ioTimeout time.Duration,
 	cancelHandler context.CancelFunc,
 ) *mutationHeartbeat {
-	heartbeat := &mutationHeartbeat{stop: make(chan struct{}), done: make(chan struct{})}
+	lifecycle, stop := context.WithCancel(context.WithoutCancel(requestContext))
+	heartbeat := &mutationHeartbeat{stop: stop, done: make(chan struct{})}
 	go func() {
 		defer close(heartbeat.done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-heartbeat.stop:
-				return
-			case <-ticker.C:
-				renewContext, cancel := context.WithTimeout(context.WithoutCancel(requestContext), ioTimeout)
-				err := store.RenewIdempotency(renewContext, key, ownerToken)
-				cancel()
-				if err != nil {
-					heartbeat.err = err
-					cancelHandler()
-					return
-				}
-			}
-		}
+		heartbeat.err = runMutationHeartbeat(lifecycle, store, key, ownerToken, ticker.C, ioTimeout, cancelHandler)
 	}()
 	return heartbeat
 }
 
+func runMutationHeartbeat(
+	lifecycle context.Context,
+	store mutationIdempotencyStore,
+	key application.IdempotencyKey,
+	ownerToken string,
+	ticks <-chan time.Time,
+	ioTimeout time.Duration,
+	cancelHandler context.CancelFunc,
+) error {
+	for {
+		select {
+		case <-lifecycle.Done():
+			return nil
+		case <-ticks:
+			// Stop and tick may become ready together. Recheck immediately
+			// before starting I/O so normal shutdown wins that race.
+			if lifecycle.Err() != nil {
+				return nil
+			}
+			renewContext, cancel := context.WithTimeout(lifecycle, ioTimeout)
+			err := store.RenewIdempotency(renewContext, key, ownerToken)
+			cancel()
+			if err != nil {
+				// A normal stop cancels an in-flight renewal. It is not a lease
+				// failure and must not cancel or replace the handler response.
+				if lifecycle.Err() != nil {
+					return nil
+				}
+				cancelHandler()
+				return err
+			}
+		}
+	}
+}
+
 func (h *mutationHeartbeat) stopAndWait() error {
-	h.stopOnce.Do(func() { close(h.stop) })
+	h.stopOnce.Do(h.stop)
 	<-h.done
 	return h.err
 }
