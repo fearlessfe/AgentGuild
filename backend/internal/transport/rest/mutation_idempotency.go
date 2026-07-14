@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -147,25 +148,40 @@ func runMutationHeartbeat(
 		case <-lifecycle.Done():
 			return nil
 		case <-ticks:
-			// Stop and tick may become ready together. Recheck immediately
-			// before starting I/O so normal shutdown wins that race.
-			if lifecycle.Err() != nil {
-				return nil
-			}
-			renewContext, cancel := context.WithTimeout(lifecycle, ioTimeout)
-			err := store.RenewIdempotency(renewContext, key, ownerToken)
-			cancel()
+			err := renewMutationHeartbeat(lifecycle, store, key, ownerToken, ioTimeout)
 			if err != nil {
-				// A normal stop cancels an in-flight renewal. It is not a lease
-				// failure and must not cancel or replace the handler response.
-				if lifecycle.Err() != nil {
-					return nil
-				}
 				cancelHandler()
 				return err
 			}
 		}
 	}
+}
+
+func renewMutationHeartbeat(
+	lifecycle context.Context,
+	store mutationIdempotencyStore,
+	key application.IdempotencyKey,
+	ownerToken string,
+	ioTimeout time.Duration,
+) error {
+	// Stop and tick may become ready together. Recheck immediately before
+	// starting I/O so normal shutdown wins that race.
+	if lifecycle.Err() != nil {
+		return nil
+	}
+	renewContext, cancel := context.WithTimeout(lifecycle, ioTimeout)
+	err := store.RenewIdempotency(renewContext, key, ownerToken)
+	cancel()
+	if err == nil {
+		return nil
+	}
+	// Only cancellation produced by normal heartbeat shutdown is benign.
+	// Storage and owner-fencing errors must remain failures even when stop
+	// happens concurrently.
+	if lifecycle.Err() != nil && errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 func (h *mutationHeartbeat) stopAndWait() error {
