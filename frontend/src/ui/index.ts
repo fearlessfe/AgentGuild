@@ -11,6 +11,7 @@ export { MetricGrid } from "./MetricGrid";
 export type { Metric } from "./MetricGrid";
 export { PageHeader } from "./PageHeader";
 export { ProviderCard } from "./ProviderCard";
+export { SearchableSelect } from "./SearchableSelect";
 export { Steps } from "./Steps";
 export type { Step, StepState } from "./Steps";
 export { Timeline } from "./Timeline";

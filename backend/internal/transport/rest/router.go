@@ -89,7 +89,8 @@ type experienceService interface {
 
 type repositoryOnboardingService interface {
 	Summary(ctx context.Context, principal gitapp.Principal) (gitapp.RepositoryOnboardingSummary, error)
-	AddGitHubAppRepository(ctx context.Context, principal gitapp.Principal, fullName string) (gitapp.OnboardedRepositoryView, error)
+	ListGitHubAppRepositories(ctx context.Context, principal gitapp.Principal, appID string) ([]gitapp.RepositoryCandidateView, error)
+	AddGitHubAppRepository(ctx context.Context, principal gitapp.Principal, appID, fullName string) (gitapp.OnboardedRepositoryView, error)
 	AddPublicRepository(ctx context.Context, principal gitapp.Principal, input string) (gitapp.OnboardedRepositoryView, error)
 	Remove(ctx context.Context, principal gitapp.Principal, id string) error
 }
@@ -128,6 +129,9 @@ type Server struct {
 	syncRules            *syncapp.RuleService
 	syncEngine           SyncEngine
 	repositoryOnboarding repositoryOnboardingService
+	idempotencyStore     mutationIdempotencyStore
+	idempotencyHeartbeat time.Duration
+	idempotencyIOTimeout time.Duration
 	healthChecker        healthChecker
 }
 
@@ -159,6 +163,24 @@ func WithSyncEngine(engine SyncEngine) Option {
 // WithRepositoryOnboardingService 挂载仓库 onboarding REST API。
 func WithRepositoryOnboardingService(svc repositoryOnboardingService) Option {
 	return func(s *Server) { s.repositoryOnboarding = svc }
+}
+
+// WithIdempotencyStore enables durable replay protection for human mutation routes.
+func WithIdempotencyStore(store mutationIdempotencyStore) Option {
+	return func(s *Server) { s.idempotencyStore = store }
+}
+
+// WithMutationIdempotencyTimings overrides heartbeat and bounded I/O timings.
+// It is primarily useful for deterministic concurrency tests.
+func WithMutationIdempotencyTimings(heartbeat, ioTimeout time.Duration) Option {
+	return func(s *Server) {
+		if heartbeat > 0 {
+			s.idempotencyHeartbeat = heartbeat
+		}
+		if ioTimeout > 0 {
+			s.idempotencyIOTimeout = ioTimeout
+		}
+	}
 }
 
 // Option 配置 Server。
@@ -220,9 +242,11 @@ func WithExperienceService(svc experienceService) Option {
 // NewServer 创建 REST server；svc 通常是 *application.Service。
 func NewServer(svc applicationService, verifier auth.TokenVerifier, opts ...Option) *Server {
 	s := &Server{
-		svc:      svc,
-		verifier: verifier,
-		limiter:  noopRateLimiter{},
+		svc:                  svc,
+		verifier:             verifier,
+		limiter:              noopRateLimiter{},
+		idempotencyHeartbeat: mutationHeartbeatInterval,
+		idempotencyIOTimeout: mutationIdempotencyIOTimeout,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -366,6 +390,10 @@ func (s *Server) Router() http.Handler {
 			r.With(s.requireSession, s.rateLimit).Post("/github-app", s.upsertGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Delete("/github-app", s.deleteGitHubApp)
 			r.With(s.requireSession, s.rateLimit).Post("/github-app:test", s.testGitHubApp)
+			r.With(s.requireSession, s.rateLimit).Get("/github-apps", s.listGitHubApps)
+			r.With(s.requireSession, s.rateLimit).Get("/github-apps/{id}", s.getGitHubAppByID)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("github_app.delete")).Delete("/github-apps/{id}", s.deleteGitHubAppByID)
+			r.With(s.requireSession, s.rateLimit).Post("/github-apps/{id}:test", s.testGitHubAppByID)
 		}
 		if s.syncRules != nil {
 			r.With(s.requireSession, s.rateLimit).Get("/sync-rules", s.listSyncRules)
@@ -379,9 +407,10 @@ func (s *Server) Router() http.Handler {
 		}
 		if s.repositoryOnboarding != nil {
 			r.With(s.requireSession, s.rateLimit).Get("/repository-onboarding", s.getRepositoryOnboarding)
-			r.With(s.requireSession, s.rateLimit).Post("/repositories/github-app", s.addGitHubAppRepository)
-			r.With(s.requireSession, s.rateLimit).Post("/repositories/public", s.addPublicRepository)
-			r.With(s.requireSession, s.rateLimit).Delete("/repositories/{id}", s.deleteOnboardedRepository)
+			r.With(s.requireSession, s.rateLimit).Get("/github-apps/{id}/repositories", s.listGitHubAppRepositories)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("repository.github_app.create")).Post("/repositories/github-app", s.addGitHubAppRepository)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("repository.public.create")).Post("/repositories/public", s.addPublicRepository)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("repository.delete")).Delete("/repositories/{id}", s.deleteOnboardedRepository)
 		}
 	})
 	return r

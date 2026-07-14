@@ -134,11 +134,13 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	applyMigration(t, db, "000010_issue_task_sync.up.sql")
 	applyMigration(t, db, "000011_sync_rule_source_auth.up.sql")
 	applyMigration(t, db, "000012_repository_onboarding.up.sql")
+	applyMigration(t, db, "000013_multi_github_apps.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000013_multi_github_apps.down.sql")
 	applyMigration(t, db, "000012_repository_onboarding.down.sql")
 	applyMigration(t, db, "000011_sync_rule_source_auth.down.sql")
 	applyMigration(t, db, "000010_issue_task_sync.down.sql")
@@ -167,6 +169,7 @@ func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	applyMigration(t, db, "000010_issue_task_sync.up.sql")
 	applyMigration(t, db, "000011_sync_rule_source_auth.up.sql")
 	applyMigration(t, db, "000012_repository_onboarding.up.sql")
+	applyMigration(t, db, "000013_multi_github_apps.up.sql")
 }
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
 	t.Helper()

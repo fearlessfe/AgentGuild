@@ -1,8 +1,33 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
 import { GitIntegrationScreen } from "./GitIntegrationScreen";
+
+const envelope = <T,>(data: T): client.Envelope<T> => ({
+  data,
+  meta: { server_time: "", resource_version: 0 },
+});
+
+const alphaApp: client.GitHubAppView = {
+  id: "gha-alpha",
+  app_id: 123,
+  installation_id: 456,
+  app_slug: "alpha",
+  installation_account_login: "acme-corp",
+  is_default: true,
+  configured: true,
+};
+
+const betaApp: client.GitHubAppView = {
+  id: "gha-beta",
+  app_id: 789,
+  installation_id: 987,
+  app_slug: "beta",
+  installation_account_login: "labs",
+  is_default: false,
+  configured: true,
+};
 
 describe("GitIntegrationScreen", () => {
   const originalLocation = window.location;
@@ -12,8 +37,14 @@ describe("GitIntegrationScreen", () => {
       writable: true,
       value: { ...originalLocation, href: "" },
     });
+    vi.spyOn(client, "listGitHubApps").mockResolvedValue(envelope({ items: [alphaApp, betaApp] }));
+    vi.spyOn(client, "testGitHubApp").mockResolvedValue(envelope({ ok: true, repo_count: 2 }));
+    vi.spyOn(client, "deleteGitHubApp").mockResolvedValue(envelope({ deleted: true }));
     vi.spyOn(client, "githubManifestUrl").mockReturnValue("/api/oauth/github/app/manifest");
-    vi.spyOn(client, "githubInstallUrl").mockReturnValue("/api/oauth/github/app/install");
+    vi.spyOn(client, "githubInstallUrl").mockImplementation(
+      (id) => `/api/oauth/github/app/install?github_app_id=${encodeURIComponent(id ?? "")}`,
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -24,57 +55,264 @@ describe("GitIntegrationScreen", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows install action after GitHub App creation before installation", async () => {
-    vi.spyOn(client, "getGitHubApp").mockResolvedValue({
-      data: {
-        app_id: 123,
-        app_slug: "agentguild-test",
-        installation_id: 0,
-        configured: true,
-      },
-      meta: { server_time: "", resource_version: 0 },
-    });
-
+  it("lists every App with its automatic label and one global add action", async () => {
     render(<GitIntegrationScreen />);
 
-    expect(await screen.findByText("已创建，待安装")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "安装 GitHub App" }));
-
-    expect(window.location.href).toBe("/api/oauth/github/app/install");
+    expect(await screen.findByText("alpha · acme-corp")).toBeVisible();
+    expect(screen.getByText("beta · labs")).toBeVisible();
+    expect(screen.getByRole("button", { name: "新增 GitHub App" })).toBeVisible();
   });
 
-  it("keeps connection test visible after GitHub App installation", async () => {
-    vi.spyOn(client, "getGitHubApp").mockResolvedValue({
-      data: {
-        app_id: 123,
-        app_slug: "agentguild-test",
-        installation_id: 456,
-        configured: true,
-      },
-      meta: { server_time: "", resource_version: 0 },
-    });
+  it("shows only a retryable error state when loading Apps fails", async () => {
+    vi.mocked(client.listGitHubApps)
+      .mockRejectedValueOnce(new Error("网络不可用"))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    const user = userEvent.setup();
 
     render(<GitIntegrationScreen />);
 
-    expect(await screen.findByText("已安装")).toBeVisible();
-    expect(screen.getByRole("button", { name: "检测连接" })).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent("网络不可用");
+    expect(screen.queryByText(/尚未配置 GitHub App/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试加载 GitHub App" }));
+    expect(await screen.findByText("alpha · acme-corp")).toBeVisible();
+    expect(client.listGitHubApps).toHaveBeenCalledTimes(2);
   });
 
-  it("asks admins to reconnect when an existing App is missing an installable slug", async () => {
-    vi.spyOn(client, "getGitHubApp").mockResolvedValue({
-      data: {
-        app_id: 123,
-        installation_id: 0,
-        configured: true,
-      },
-      meta: { server_time: "", resource_version: 0 },
-    });
+  it("tests and deletes the selected GitHub App by id", async () => {
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "检测 beta" }));
+    expect(client.testGitHubApp).toHaveBeenCalledWith("gha-beta");
+    expect(await screen.findByText("连接成功 · 可访问 2 个仓库")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "删除 beta" }));
+    expect(client.deleteGitHubApp).toHaveBeenCalledWith("gha-beta", { idempotencyKey: expect.any(String) });
+    expect(screen.queryByText("beta · labs")).not.toBeInTheDocument();
+    expect(screen.getByText("alpha · acme-corp")).toBeVisible();
+  });
+
+  it("applies the local deletion and default promotion while awaiting the authoritative refresh", async () => {
+    let resolveRefresh!: (value: client.Envelope<{ items: client.GitHubAppView[] }>) => void;
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("alpha · acme-corp")).not.toBeInTheDocument();
+    const locallyPromotedBetaCard = screen.getByText("beta · labs").closest(".provider-card");
+    expect(within(locallyPromotedBetaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
+    expect(screen.queryByText(/尚未配置 GitHub App/)).not.toBeInTheDocument();
+
+    resolveRefresh(envelope({ items: [{ ...betaApp, is_default: true }] }));
+
+    expect(await screen.findByRole("status", { name: "GitHub App 操作结果" }))
+      .toHaveTextContent("已删除 GitHub App alpha");
+    expect(screen.queryByText("alpha · acme-corp")).not.toBeInTheDocument();
+    const betaCard = screen.getByText("beta · labs").closest(".provider-card");
+    expect(betaCard).not.toBeNull();
+    expect(within(betaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
+  });
+
+  it("keeps the confirmed local deletion when the authoritative refresh fails", async () => {
+    const gammaApp: client.GitHubAppView = {
+      ...betaApp,
+      id: "gha-gamma",
+      app_id: 101,
+      app_slug: "gamma",
+      installation_account_login: "platform",
+      created_at: "2026-07-03T00:00:00Z",
+    };
+    const datedBetaApp = { ...betaApp, created_at: "2026-07-02T00:00:00Z" };
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, gammaApp, datedBetaApp] }))
+      .mockRejectedValueOnce(new Error("网络不可用"));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+
+    expect(await screen.findByRole("status", { name: "GitHub App 操作结果" }))
+      .toHaveTextContent("已删除 GitHub App alpha");
+    expect(screen.queryByText("alpha · acme-corp")).not.toBeInTheDocument();
+    const betaCard = screen.getByText("beta · labs").closest(".provider-card");
+    const gammaCard = screen.getByText("gamma · platform").closest(".provider-card");
+    expect(within(betaCard as HTMLElement).getByText("默认 GitHub App")).toBeVisible();
+    expect(within(gammaCard as HTMLElement).getByText(/^GitHub App$/)).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("删除已成功，但刷新 GitHub App 列表失败：网络不可用");
+    expect(screen.getByRole("button", { name: "重试刷新 GitHub App 列表" })).toBeVisible();
+    expect(screen.queryByText(/删除失败/)).not.toBeInTheDocument();
+  });
+
+  it("never resurrects a confirmed deletion from a stale refresh", async () => {
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 beta" }));
+
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("beta · labs")).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale refresh failure after a newer deletion refresh succeeds", async () => {
+    const gammaApp: client.GitHubAppView = {
+      ...betaApp,
+      id: "gha-gamma",
+      app_id: 101,
+      app_slug: "gamma",
+      installation_account_login: "platform",
+    };
+    let rejectStale!: (reason: Error) => void;
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp, gammaApp] }))
+      .mockReturnValueOnce(new Promise((_, reject) => { rejectStale = reject; }))
+      .mockResolvedValueOnce(envelope({ items: [gammaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "删除 beta" }));
+    await waitFor(() => expect(client.listGitHubApps).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText("gamma · platform")).toBeVisible();
+
+    rejectStale(new Error("stale network failure"));
+
+    await waitFor(() => expect(screen.queryByText(/stale network failure/)).not.toBeInTheDocument());
+    expect(screen.queryByText(/删除已成功，但刷新/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the App id when GitHub has not returned a slug", async () => {
+    vi.mocked(client.listGitHubApps).mockResolvedValueOnce(
+      envelope({ items: [{ ...alphaApp, app_slug: undefined }] }),
+    );
 
     render(<GitIntegrationScreen />);
 
-    expect(await screen.findByText("已创建，待安装")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "重新连接 GitHub" }));
+    expect(await screen.findByText("App 123 · acme-corp")).toBeVisible();
+  });
 
-    expect(window.location.href).toBe("/api/oauth/github/app/manifest");
+  it("exposes an App-scoped busy testing state without disabling other cards", async () => {
+    let resolveTest!: (value: client.Envelope<client.ConnectionTestResult>) => void;
+    vi.mocked(client.testGitHubApp).mockReturnValueOnce(new Promise((resolve) => {
+      resolveTest = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "检测 beta" }));
+
+    const pending = screen.getByRole("button", { name: "正在检测 beta" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "检测 alpha" })).toBeEnabled();
+
+    resolveTest(envelope({ ok: true, repo_count: 2 }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "检测 beta" })).toBeEnabled());
+  });
+
+  it("announces an App-scoped busy deletion and its successful completion", async () => {
+    let resolveDelete!: (value: client.Envelope<{ deleted: boolean }>) => void;
+    vi.mocked(client.deleteGitHubApp).mockReturnValueOnce(new Promise((resolve) => {
+      resolveDelete = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 beta" }));
+
+    const pending = screen.getByRole("button", { name: "正在删除 beta" });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "删除 alpha" })).toBeEnabled();
+
+    resolveDelete(envelope({ deleted: true }));
+    expect(await screen.findByRole("status", { name: "GitHub App 操作结果" }))
+      .toHaveTextContent("已删除 GitHub App beta");
+  });
+
+  it("reuses the delete key after an unknown failure", async () => {
+    vi.spyOn(client, "createIdempotencyKey").mockReturnValueOnce("delete-retry-key");
+    vi.mocked(client.deleteGitHubApp)
+      .mockRejectedValueOnce(new TypeError("network failed"))
+      .mockResolvedValueOnce(envelope({ deleted: true }));
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 beta" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "删除 beta" }));
+
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(1, "gha-beta", { idempotencyKey: "delete-retry-key" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(2, "gha-beta", { idempotencyKey: "delete-retry-key" });
+  });
+
+  it("retains the delete key for 5xx and in-progress, then rotates after a definitive 409", async () => {
+    vi.spyOn(client, "createIdempotencyKey").mockReturnValueOnce("delete-key-one").mockReturnValueOnce("delete-key-two");
+    vi.mocked(client.deleteGitHubApp)
+      .mockRejectedValueOnce(new client.ApiError(500, "INTERNAL_ERROR", "server failed"))
+      .mockRejectedValueOnce(new client.ApiError(409, "IDEMPOTENCY_IN_PROGRESS", "still running"))
+      .mockRejectedValueOnce(new client.ApiError(409, "STATE_CONFLICT", "repository bound"))
+      .mockResolvedValueOnce(envelope({ deleted: true }));
+    vi.mocked(client.listGitHubApps)
+      .mockResolvedValueOnce(envelope({ items: [alphaApp, betaApp] }))
+      .mockResolvedValueOnce(envelope({ items: [alphaApp] }));
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    const deleteBeta = await screen.findByRole("button", { name: "删除 beta" });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await user.click(deleteBeta);
+      if (attempt < 3) await screen.findByRole("alert");
+    }
+
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(1, "gha-beta", { idempotencyKey: "delete-key-one" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(2, "gha-beta", { idempotencyKey: "delete-key-one" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(3, "gha-beta", { idempotencyKey: "delete-key-one" });
+    expect(client.deleteGitHubApp).toHaveBeenNthCalledWith(4, "gha-beta", { idempotencyKey: "delete-key-two" });
+  });
+
+  it("installs only the selected pending App", async () => {
+    vi.mocked(client.listGitHubApps).mockResolvedValue(
+      envelope({ items: [{ ...alphaApp, installation_id: undefined, installation_account_login: undefined }, betaApp] }),
+    );
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    const pendingCard = (await screen.findByText("alpha · 待选择安装账户")).closest(".provider-card");
+    expect(pendingCard).not.toBeNull();
+    expect(within(pendingCard as HTMLElement).getByText("已创建，待安装")).toBeVisible();
+    await user.click(within(pendingCard as HTMLElement).getByRole("button", { name: "安装 alpha" }));
+
+    expect(client.githubInstallUrl).toHaveBeenCalledWith("gha-alpha");
+    expect(window.location.href).toBe("/api/oauth/github/app/install?github_app_id=gha-alpha");
+  });
+
+  it("keeps an App visible and announces a repository-binding delete conflict", async () => {
+    vi.mocked(client.deleteGitHubApp).mockRejectedValueOnce(
+      new Error("该 GitHub App 仍绑定已接入仓库，请先移除仓库"),
+    );
+    const user = userEvent.setup();
+    render(<GitIntegrationScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "删除 alpha" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("该 GitHub App 仍绑定已接入仓库，请先移除仓库");
+    expect(screen.getByText("alpha · acme-corp")).toBeVisible();
   });
 });

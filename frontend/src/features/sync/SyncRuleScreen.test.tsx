@@ -31,7 +31,7 @@ describe("Navigation and sync integration", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "仓库接入" })).toBeVisible();
-    expect(screen.getByText("Step 1 · GitHub App")).toBeVisible();
+    expect(screen.getByRole("group", { name: "仓库来源" })).toBeVisible();
   });
 
   it("keeps GitHub App setup reachable while sending repository setup to /repositories", () => {

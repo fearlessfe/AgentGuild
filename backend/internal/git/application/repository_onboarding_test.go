@@ -30,6 +30,21 @@ func TestRepositoryOnboardingService_AddPublicRepositoryNormalizesGitHubURL(t *t
 	require.Equal(t, "public", view.Visibility)
 }
 
+func TestRepositoryOnboardingService_AddPublicRepositoryRejectsDuplicate(t *testing.T) {
+	store := newMemoryOnboardedRepositoryStore()
+	svc, err := application.NewRepositoryOnboardingService(store, fakeGitHubApps{}, fakePublicRepositoryResolver{}, func() string {
+		return "repo-1"
+	})
+	require.NoError(t, err)
+
+	_, err = svc.AddPublicRepository(context.Background(), adminPrincipal("tenant-1"), "acme/docs")
+	require.NoError(t, err)
+	_, err = svc.AddPublicRepository(context.Background(), adminPrincipal("tenant-1"), "acme/docs")
+
+	require.ErrorIs(t, err, git.ErrRepositoryBindingConflict)
+	require.Len(t, store.records, 1)
+}
+
 func TestRepositoryOnboardingServiceConstructorRejectsNilDependencies(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -94,7 +109,78 @@ func TestRepositoryOnboardingService_AddGitHubAppRepositoryRequiresVisibleRepo(t
 	)
 	require.NoError(t, err)
 
-	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "acme/missing")
+	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-1", "acme/missing")
+
+	require.Error(t, err)
+	require.Equal(t, "not_found", domain.CodeOf(err))
+}
+
+func TestRepositoryOnboardingService_ListGitHubAppRepositoriesUsesSelectedApp(t *testing.T) {
+	svc, err := application.NewRepositoryOnboardingService(
+		newMemoryOnboardedRepositoryStore(),
+		fakeGitHubApps{
+			allowedAppID: "gha-2",
+			repos:        []git.Repository{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}},
+		},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	items, err := svc.ListGitHubAppRepositories(context.Background(), adminPrincipal("tenant-1"), "gha-2")
+
+	require.NoError(t, err)
+	require.Equal(t, []application.RepositoryCandidateView{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}}, items)
+}
+
+func TestRepositoryOnboardingService_AddGitHubAppRepositoryBindsSelectedApp(t *testing.T) {
+	store := newMemoryOnboardedRepositoryStore()
+	svc, err := application.NewRepositoryOnboardingService(
+		store,
+		fakeGitHubApps{
+			allowedAppID: "gha-2",
+			repos:        []git.Repository{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}},
+		},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	view, err := svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-2", "acme/api")
+
+	require.NoError(t, err)
+	require.Equal(t, "gha-2", view.GitHubAppID)
+	require.Equal(t, "gha-2", store.records[0].GitHubAppID)
+}
+
+func TestRepositoryOnboardingService_AddRepositoryRejectsDuplicateAcrossApps(t *testing.T) {
+	store := newMemoryOnboardedRepositoryStore()
+	svc, err := application.NewRepositoryOnboardingService(
+		store,
+		fakeGitHubApps{repos: []git.Repository{{FullName: "acme/api", DefaultBranch: "main", Visibility: "private"}}},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-1", "acme/api")
+	require.NoError(t, err)
+	_, err = svc.AddGitHubAppRepository(context.Background(), adminPrincipal("tenant-1"), "gha-2", "acme/api")
+
+	require.Error(t, err)
+	require.Equal(t, "state_conflict", domain.CodeOf(err))
+}
+
+func TestRepositoryOnboardingService_ForeignAppIsNotFound(t *testing.T) {
+	svc, err := application.NewRepositoryOnboardingService(
+		newMemoryOnboardedRepositoryStore(),
+		fakeGitHubApps{allowedAppID: "gha-owned"},
+		fakePublicRepositoryResolver{},
+		func() string { return "repo-1" },
+	)
+	require.NoError(t, err)
+
+	_, err = svc.ListGitHubAppRepositories(context.Background(), adminPrincipal("tenant-1"), "gha-foreign")
 
 	require.Error(t, err)
 	require.Equal(t, "not_found", domain.CodeOf(err))
@@ -114,7 +200,7 @@ func TestRepositoryOnboardingService_MutationsRequireAdmin(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, "forbidden", domain.CodeOf(err))
 
-	_, err = svc.AddGitHubAppRepository(context.Background(), principal, "acme/api")
+	_, err = svc.AddGitHubAppRepository(context.Background(), principal, "gha-1", "acme/api")
 	require.Error(t, err)
 	require.Equal(t, "forbidden", domain.CodeOf(err))
 
@@ -149,6 +235,23 @@ func TestRepositoryOnboardingService_SummaryReturnsConfiguredAppCandidatesAndOnb
 	require.Empty(t, summary.AppRepositoriesError)
 }
 
+func TestRepositoryOnboardingService_SummaryRedactsOperationalGitHubError(t *testing.T) {
+	secret := "forged-upstream-secret-token"
+	svc, err := application.NewRepositoryOnboardingService(
+		newMemoryOnboardedRepositoryStore(),
+		fakeGitHubApps{view: application.GitHubAppView{Configured: true}, listErr: errors.New("github response contained " + secret)},
+		fakePublicRepositoryResolver{},
+		nil,
+	)
+	require.NoError(t, err)
+
+	summary, err := svc.Summary(context.Background(), adminPrincipal("tenant-1"))
+
+	require.NoError(t, err)
+	require.NotEmpty(t, summary.AppRepositoriesError)
+	require.NotContains(t, summary.AppRepositoriesError, secret)
+}
+
 func TestRepositoryOnboardingService_SummaryReturnsUnconfiguredAppWithoutCandidates(t *testing.T) {
 	svc, err := application.NewRepositoryOnboardingService(
 		newMemoryOnboardedRepositoryStore(),
@@ -166,7 +269,7 @@ func TestRepositoryOnboardingService_SummaryReturnsUnconfiguredAppWithoutCandida
 	require.Empty(t, summary.AppRepositoriesError)
 }
 
-func TestRepositoryOnboardingService_SummaryCapturesAppRepositoryListingError(t *testing.T) {
+func TestRepositoryOnboardingService_SummaryRedactsAppRepositoryListingError(t *testing.T) {
 	svc, err := application.NewRepositoryOnboardingService(
 		newMemoryOnboardedRepositoryStore(),
 		fakeGitHubApps{
@@ -183,7 +286,7 @@ func TestRepositoryOnboardingService_SummaryCapturesAppRepositoryListingError(t 
 	require.NoError(t, err)
 	require.True(t, summary.GitHubApp.Configured)
 	require.Empty(t, summary.AppRepositories)
-	require.Equal(t, "github unavailable", summary.AppRepositoriesError)
+	require.Equal(t, "GitHub App repository inventory is temporarily unavailable", summary.AppRepositoriesError)
 }
 
 func TestRepositoryOnboardingService_RemoveDelegatesTenantScopedDelete(t *testing.T) {
@@ -230,6 +333,28 @@ func (s *memoryOnboardedRepositoryStore) ListOnboardedRepositories(_ context.Con
 	return records, nil
 }
 
+func (s *memoryOnboardedRepositoryStore) GetOnboardedRepositoryByFullName(_ context.Context, tenantID, fullName string) (*application.OnboardedRepositoryRecord, error) {
+	for _, record := range s.records {
+		if record.TenantID == tenantID && record.FullName == fullName {
+			copy := record
+			return &copy, nil
+		}
+	}
+	return nil, errors.New("repository not found")
+}
+
+func (s *memoryOnboardedRepositoryStore) CreateOnboardedRepository(_ context.Context, record *application.OnboardedRepositoryRecord) error {
+	for _, existing := range s.records {
+		if existing.TenantID == record.TenantID && existing.FullName == record.FullName {
+			return git.ErrRepositoryBindingConflict
+		}
+	}
+	record.CreatedAt = s.now
+	record.UpdatedAt = s.now
+	s.records = append(s.records, *record)
+	return nil
+}
+
 func (s *memoryOnboardedRepositoryStore) UpsertOnboardedRepository(_ context.Context, record *application.OnboardedRepositoryRecord) error {
 	record.CreatedAt = s.now
 	record.UpdatedAt = s.now
@@ -255,17 +380,29 @@ func (r fakePublicRepositoryResolver) ResolvePublicRepository(_ context.Context,
 }
 
 type fakeGitHubApps struct {
-	view    application.GitHubAppView
-	getErr  error
-	repos   []git.Repository
-	listErr error
+	view         application.GitHubAppView
+	getErr       error
+	repos        []git.Repository
+	listErr      error
+	allowedAppID string
 }
 
 func (fakeGitHubApps) Driver(context.Context, string) (git.Driver, error) {
 	return nil, nil
 }
 
+func (fakeGitHubApps) DriverForApp(context.Context, string, string) (git.Driver, error) {
+	return nil, nil
+}
+
 func (a fakeGitHubApps) IssueSource(context.Context, string) (git.IssueSource, error) {
+	return fakeIssueSource{repos: a.repos, err: a.listErr}, nil
+}
+
+func (a fakeGitHubApps) IssueSourceForApp(_ context.Context, _, appID string) (git.IssueSource, error) {
+	if a.allowedAppID != "" && appID != a.allowedAppID {
+		return nil, git.ErrGitHubAppNotConfigured
+	}
 	return fakeIssueSource{repos: a.repos, err: a.listErr}, nil
 }
 
@@ -277,6 +414,14 @@ func (a fakeGitHubApps) Install(context.Context, string, int64) (application.Git
 	return a.view, nil
 }
 
+func (a fakeGitHubApps) InstallByID(context.Context, string, string, int64, string) (application.GitHubAppView, error) {
+	return a.view, nil
+}
+
+func (fakeGitHubApps) InstallationAccount(context.Context, string, string, int64) (string, error) {
+	return "", nil
+}
+
 func (a fakeGitHubApps) Get(context.Context, string) (application.GitHubAppView, error) {
 	if a.getErr != nil {
 		return application.GitHubAppView{}, a.getErr
@@ -284,7 +429,22 @@ func (a fakeGitHubApps) Get(context.Context, string) (application.GitHubAppView,
 	return a.view, nil
 }
 
+func (a fakeGitHubApps) GetByID(ctx context.Context, tenantID, _ string) (application.GitHubAppView, error) {
+	return a.Get(ctx, tenantID)
+}
+
+func (a fakeGitHubApps) List(context.Context, string) ([]application.GitHubAppView, error) {
+	if a.getErr != nil {
+		return nil, a.getErr
+	}
+	return []application.GitHubAppView{a.view}, nil
+}
+
 func (fakeGitHubApps) Delete(context.Context, string) error {
+	return nil
+}
+
+func (fakeGitHubApps) DeleteByID(context.Context, string, string) error {
 	return nil
 }
 

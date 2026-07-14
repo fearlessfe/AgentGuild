@@ -90,12 +90,14 @@ paths:
       description: Human session/admin controlled mutation；只把 GitHub App installation 中已可见的仓库加入任务仓库池，不创建 Issue sync rule。
       security:
         - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AddRepositoryRequest'
+              $ref: '#/components/schemas/AddGitHubAppRepositoryRequest'
       responses:
         '201':
           description: 仓库已加入 onboarding 列表
@@ -109,6 +111,137 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps:
+    get:
+      operationId: listGitHubApps
+      summary: 列出当前租户的 GitHub Apps
+      description: 返回当前 tenant 的全部 GitHub App public views，不包含任何密钥材料。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 当前租户的 GitHub Apps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeGitHubAppItems'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Tenant-scoped GitHub App ID
+        schema:
+          type: string
+    get:
+      operationId: getGitHubApp
+      summary: 获取指定 GitHub App
+      description: 仅返回当前 tenant 下指定 App 的公开信息；外部 tenant 的 App ID 返回 NOT_FOUND。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: GitHub App public view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeGitHubApp'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    delete:
+      operationId: deleteGitHubApp
+      summary: 删除指定 GitHub App
+      description: 管理员操作。仅允许删除未被 onboarded 仓库引用的 App；删除默认 App 时原子提升替代默认 App。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: GitHub App 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps/{id}:test:
+    post:
+      operationId: testGitHubApp
+      summary: 检测指定 GitHub App 连接
+      description: 使用当前 tenant 下选定 App 的 installation 列出仓库，并仅返回成功状态、仓库数量及脱敏错误。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Tenant-scoped GitHub App ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 连接检测结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeGitHubAppConnectionTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-apps/{id}/repositories:
+    get:
+      operationId: listGitHubAppRepositories
+      summary: 获取指定 GitHub App installation 可见仓库
+      description: 返回当前 tenant 下指定 App installation 的完整仓库列表；外部 tenant 的 App ID 返回 NOT_FOUND。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 指定 App installation 可见的完整仓库列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRepositoryItems'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -121,6 +254,8 @@ paths:
       description: Human session/admin controlled mutation；解析 public GitHub 仓库元数据后加入任务仓库池，不创建 Issue sync rule。
       security:
         - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -142,6 +277,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -153,6 +290,7 @@ paths:
       security:
         - sessionCookie: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -165,12 +303,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -801,7 +943,9 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: 写操作的幂等键，映射为底层 request_id
+      description: >-
+        写操作的持久幂等键。相同 tenant、human owner、operation、key 与规范请求会重放首次完成的原始 HTTP status/body；
+        相同 key 用于不同请求返回 409 IDEMPOTENCY_MISMATCH，仍在处理的请求返回 409 IDEMPOTENCY_IN_PROGRESS。
       schema:
         type: string
         minLength: 1
@@ -833,6 +977,9 @@ components:
       type: object
       description: GitHub App public view；不会包含 private_key、webhook_secret 或 client_secret。
       properties:
+        id:
+          type: string
+          description: Tenant-scoped GitHub App ID
         tenant_id:
           type: string
         provider:
@@ -847,6 +994,12 @@ components:
           type: string
         app_slug:
           type: string
+        installation_account_login:
+          type: string
+          description: GitHub installation account login returned by GitHub
+        is_default:
+          type: boolean
+          description: Whether singular compatibility routes select this App
         configured:
           type: boolean
         created_at:
@@ -855,6 +1008,31 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    GitHubAppItems:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GitHubAppPublicView'
+
+    GitHubAppConnectionTest:
+      type: object
+      required:
+        - ok
+        - repo_count
+      properties:
+        ok:
+          type: boolean
+        repo_count:
+          type: integer
+          minimum: 0
+        error:
+          type: string
+          description: Stable, redacted error message when ok is false
 
     RepositoryItem:
       type: object
@@ -868,6 +1046,9 @@ components:
           enum:
             - github_app
             - public_github
+        github_app_id:
+          type: string
+          description: GitHub App 来源仓库绑定的 tenant-scoped App ID；public 仓库中为空
         full_name:
           type: string
           example: agentguild/agentguild
@@ -915,6 +1096,21 @@ components:
           description: GitHub 仓库 full name 或 https://github.com/{owner}/{repo} URL
           example: agentguild/agentguild
 
+    AddGitHubAppRepositoryRequest:
+      type: object
+      required:
+        - github_app_id
+        - repo
+      properties:
+        github_app_id:
+          type: string
+          description: 当前 tenant 下已选择的 GitHub App ID
+          example: gha-2
+        repo:
+          type: string
+          description: 该 App installation 授权仓库的精确 full name
+          example: agentguild/agentguild
+
     DeleteResult:
       type: object
       properties:
@@ -929,11 +1125,43 @@ components:
         meta:
           $ref: '#/components/schemas/Meta'
 
+    EnvelopeGitHubApp:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GitHubAppPublicView'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeGitHubAppItems:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GitHubAppItems'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeGitHubAppConnectionTest:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GitHubAppConnectionTest'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
     EnvelopeRepositoryItem:
       type: object
       properties:
         data:
           $ref: '#/components/schemas/RepositoryItem'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeRepositoryItems:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RepositoryItems'
         meta:
           $ref: '#/components/schemas/Meta'
 

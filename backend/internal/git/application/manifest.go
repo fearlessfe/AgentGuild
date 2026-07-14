@@ -9,19 +9,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
-
-// manifestRedirectURL is where GitHub renders the "create App from manifest"
-// form. Only github.com is supported for now.
-const manifestRedirectURL = "https://github.com/settings/apps/new"
 
 // defaultConversionsBaseURL is the GitHub API host used to exchange a manifest
 // code for App credentials.
 const defaultConversionsBaseURL = "https://api.github.com"
 
-const githubAppInstallBaseURL = "https://github.com/apps"
+const defaultGitHubWebBaseURL = "https://github.com"
 
 // stateTTL bounds how long a signed manifest state token stays valid.
 const stateTTL = 15 * time.Minute
@@ -36,11 +33,17 @@ type ManifestOptions struct {
 	// ConversionsBaseURL overrides the GitHub API host for the manifest code
 	// exchange. Defaults to https://api.github.com.
 	ConversionsBaseURL string
+	// WebBaseURL overrides the GitHub web host used to create and install Apps.
+	// When empty it is derived from ConversionsBaseURL, stripping the standard
+	// GitHub Enterprise Server /api/v3 suffix.
+	WebBaseURL string
 	// HTTPClient is used for the conversions call. Defaults to
 	// http.DefaultClient.
 	HTTPClient *http.Client
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
+	// NewID allocates the local GitHub App ID embedded in signed state.
+	NewID func() string
 }
 
 // ManifestService orchestrates GitHub App creation via the manifest flow: it
@@ -52,12 +55,14 @@ type ManifestService struct {
 	publicBaseURL      string
 	stateSecret        []byte
 	conversionsBaseURL string
+	webBaseURL         string
 	httpClient         *http.Client
 	now                func() time.Time
+	newID              func() string
 }
 
 // NewManifestService creates a ManifestService, applying option defaults.
-func NewManifestService(apps GitHubAppManager, opts ManifestOptions) *ManifestService {
+func NewManifestService(apps GitHubAppManager, opts ManifestOptions) (*ManifestService, error) {
 	client := opts.HTTPClient
 	if client == nil {
 		client = http.DefaultClient
@@ -66,24 +71,80 @@ func NewManifestService(apps GitHubAppManager, opts ManifestOptions) *ManifestSe
 	if now == nil {
 		now = time.Now
 	}
-	base := opts.ConversionsBaseURL
-	if base == "" {
-		base = defaultConversionsBaseURL
+	conversionsBaseURL, err := normalizeGitHubBaseURL(opts.ConversionsBaseURL, defaultConversionsBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("conversions base URL: %w", err)
+	}
+	webBaseURL := opts.WebBaseURL
+	if webBaseURL == "" {
+		webBaseURL = deriveGitHubWebBaseURL(conversionsBaseURL)
+	}
+	webBaseURL, err = normalizeGitHubBaseURL(webBaseURL, defaultGitHubWebBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("web base URL: %w", err)
+	}
+	newID := opts.NewID
+	if newID == nil {
+		newID = randomID
 	}
 	return &ManifestService{
 		apps:               apps,
 		publicBaseURL:      strings.TrimRight(opts.PublicBaseURL, "/"),
 		stateSecret:        opts.StateSecret,
-		conversionsBaseURL: strings.TrimRight(base, "/"),
+		conversionsBaseURL: conversionsBaseURL,
+		webBaseURL:         webBaseURL,
 		httpClient:         client,
 		now:                now,
-	}
+		newID:              newID,
+	}, nil
 }
 
-// manifestState is the signed payload embedded in the state token.
-type manifestState struct {
-	TenantID  string    `json:"tenant"`
-	ExpiresAt time.Time `json:"exp"`
+func normalizeGitHubBaseURL(raw, fallback string) (string, error) {
+	if raw == "" {
+		raw = fallback
+	}
+	if raw != strings.TrimSpace(raw) || strings.ContainsAny(raw, "?#") {
+		return "", fmt.Errorf("must be an absolute HTTP(S) URL without credentials, query, or fragment")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+		return "", fmt.Errorf("must be an absolute HTTP(S) URL without credentials, query, or fragment")
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if segment == "." || segment == ".." {
+			return "", fmt.Errorf("must not contain dot path segments")
+		}
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = ""
+	return parsed.String(), nil
+}
+
+func deriveGitHubWebBaseURL(apiBaseURL string) string {
+	if apiBaseURL == defaultConversionsBaseURL {
+		return defaultGitHubWebBaseURL
+	}
+	parsed, err := url.Parse(apiBaseURL)
+	if err != nil {
+		return defaultGitHubWebBaseURL
+	}
+	webPath := ""
+	if strings.HasSuffix(parsed.Path, "/api/v3") {
+		webPath = strings.TrimSuffix(parsed.Path, "/api/v3")
+	}
+	parsed.Path = webPath
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+// ManifestState is the trusted payload recovered from a signed state token.
+type ManifestState struct {
+	TenantID    string    `json:"tenant"`
+	GitHubAppID string    `json:"github_app_id"`
+	ExpiresAt   time.Time `json:"exp"`
 }
 
 // gitHubAppManifest is the JSON body posted to GitHub's manifest form.
@@ -130,62 +191,75 @@ func (m *ManifestService) BuildManifest(tenantID string) (string, string, string
 	if err != nil {
 		return "", "", "", err
 	}
-	state := m.signState(manifestState{
-		TenantID:  tenantID,
-		ExpiresAt: m.now().Add(stateTTL),
+	githubAppID := m.newID()
+	if githubAppID == "" {
+		return "", "", "", invalid("github_app_id")
+	}
+	state := m.signState(ManifestState{
+		TenantID:    tenantID,
+		GitHubAppID: githubAppID,
+		ExpiresAt:   m.now().Add(stateTTL),
 	})
-	return string(body), state, manifestRedirectURL, nil
+	return string(body), state, m.webBaseURL + "/settings/apps/new", nil
 }
 
 // BuildInstallURL returns the GitHub URL for installing an already-created App.
-func (m *ManifestService) BuildInstallURL(tenantID, appSlug string) (string, error) {
+func (m *ManifestService) BuildInstallURL(tenantID, githubAppID, appSlug string) (string, error) {
 	if tenantID == "" {
 		return "", invalid("tenant_id")
+	}
+	if githubAppID == "" {
+		return "", invalid("github_app_id")
 	}
 	appSlug = strings.TrimSpace(appSlug)
 	if appSlug == "" {
 		return "", invalid("app_slug")
 	}
-	state := m.signState(manifestState{
-		TenantID:  tenantID,
-		ExpiresAt: m.now().Add(stateTTL),
+	state := m.signState(ManifestState{
+		TenantID:    tenantID,
+		GitHubAppID: githubAppID,
+		ExpiresAt:   m.now().Add(stateTTL),
 	})
-	return fmt.Sprintf("%s/%s/installations/new?state=%s", githubAppInstallBaseURL, appSlug, state), nil
+	return fmt.Sprintf("%s/apps/%s/installations/new?state=%s", m.webBaseURL, url.PathEscape(appSlug), state), nil
 }
 
 // VerifyState validates a state token against the given tenant: HMAC must be
 // valid, the tenant must match, and the token must not be expired.
-func (m *ManifestService) VerifyState(state, tenantID string) error {
+func (m *ManifestService) VerifyState(state, tenantID string) (ManifestState, error) {
+	var payload ManifestState
 	parts := strings.Split(state, ".")
 	if len(parts) != 2 {
-		return invalid("state")
+		return payload, invalid("state")
 	}
 	body, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return invalid("state")
+		return payload, invalid("state")
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return invalid("state")
+		return payload, invalid("state")
 	}
 	mac := hmac.New(sha256.New, m.stateSecret)
 	_, _ = mac.Write(body)
-	var payload manifestState
 	if !hmac.Equal(signature, mac.Sum(nil)) ||
 		json.Unmarshal(body, &payload) != nil ||
 		payload.TenantID == "" ||
+		payload.GitHubAppID == "" ||
 		payload.TenantID != tenantID ||
 		!m.now().Before(payload.ExpiresAt) {
-		return invalid("state")
+		return ManifestState{}, invalid("state")
 	}
-	return nil
+	return payload, nil
 }
 
 // ExchangeCode exchanges a manifest code for App credentials via the GitHub
 // conversions API, persists them, and returns the resulting public view.
-func (m *ManifestService) ExchangeCode(ctx context.Context, tenantID, code string) (GitHubAppView, error) {
+func (m *ManifestService) ExchangeCode(ctx context.Context, tenantID, githubAppID, code string) (GitHubAppView, error) {
 	if tenantID == "" {
 		return GitHubAppView{}, invalid("tenant_id")
+	}
+	if githubAppID == "" {
+		return GitHubAppView{}, invalid("github_app_id")
 	}
 	if code == "" {
 		return GitHubAppView{}, invalid("code")
@@ -197,11 +271,12 @@ func (m *ManifestService) ExchangeCode(ctx context.Context, tenantID, code strin
 	}
 
 	if err := m.apps.Upsert(ctx, UpsertGitHubApp{
+		ID:             githubAppID,
 		TenantID:       tenantID,
 		AppID:          conversion.ID,
 		InstallationID: 0,
 		PrivateKey:     conversion.PEM,
-		BaseURL:        defaultConversionsBaseURL,
+		BaseURL:        m.conversionsBaseURL,
 		WebhookSecret:  conversion.WebhookSecret,
 		ClientID:       conversion.ClientID,
 		ClientSecret:   conversion.ClientSecret,
@@ -210,7 +285,17 @@ func (m *ManifestService) ExchangeCode(ctx context.Context, tenantID, code strin
 		return GitHubAppView{}, err
 	}
 
-	return m.apps.Get(ctx, tenantID)
+	return m.apps.GetByID(ctx, tenantID, githubAppID)
+}
+
+// Install fetches trusted installation account metadata and records it on the
+// state-selected App.
+func (m *ManifestService) Install(ctx context.Context, tenantID, githubAppID string, installationID int64) (GitHubAppView, error) {
+	login, err := m.apps.InstallationAccount(ctx, tenantID, githubAppID, installationID)
+	if err != nil {
+		return GitHubAppView{}, err
+	}
+	return m.apps.InstallByID(ctx, tenantID, githubAppID, installationID, login)
 }
 
 // exchange performs the POST to GitHub's conversions endpoint.
@@ -247,7 +332,7 @@ func (m *ManifestService) exchange(ctx context.Context, code string) (manifestCo
 }
 
 // signState signs a manifest state payload using the HMAC + base64 pattern.
-func (m *ManifestService) signState(payload manifestState) string {
+func (m *ManifestService) signState(payload ManifestState) string {
 	body, _ := json.Marshal(payload)
 	mac := hmac.New(sha256.New, m.stateSecret)
 	_, _ = mac.Write(body)

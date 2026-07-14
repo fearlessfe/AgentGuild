@@ -71,12 +71,15 @@ export type TaskView = {
 };
 
 export type GitHubAppView = {
+  id: string;
   tenant_id?: string;
   provider?: string;
-  app_id?: number;
+  app_id: number;
   installation_id?: number;
   base_url?: string;
   app_slug?: string;
+  installation_account_login?: string;
+  is_default: boolean;
   configured: boolean;
   created_at?: string;
   updated_at?: string;
@@ -93,6 +96,7 @@ export type RepositorySourceType = "github_app" | "public_github";
 export type RepositoryInventoryItem = {
   id?: string;
   source_type?: RepositorySourceType;
+  github_app_id?: string;
   full_name: string;
   default_branch: string;
   visibility: string;
@@ -152,6 +156,28 @@ export type ConnectionTestResult = {
 type ApiRequestInit = Omit<RequestInit, "body"> & {
   body?: unknown;
 };
+
+export type MutationOptions = { idempotencyKey?: string };
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, public readonly code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function createIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `mutation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function shouldRetainMutationKey(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.code === "IDEMPOTENCY_IN_PROGRESS";
+}
+
+function mutationHeaders(options: MutationOptions = {}): Record<string, string> {
+  return { "Idempotency-Key": options.idempotencyKey ?? createIdempotencyKey() };
+}
 
 type DemoAgent = {
   id: string;
@@ -222,19 +248,21 @@ export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Pr
     if (!pathname.startsWith("/login") && !pathname.startsWith("/oauth/oidc/login")) {
       window.location.href = "/login";
     }
-    throw new Error("未登录");
+    throw new ApiError(401, "UNAUTHORIZED", "未登录");
   }
   if (!response.ok) {
     let message = `API request failed (${response.status})`;
+    let code = "HTTP_ERROR";
     try {
       const body = await response.json();
-      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "message" in body.error && typeof body.error.message === "string") {
-        message = body.error.message;
+      if (body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object") {
+        if ("message" in body.error && typeof body.error.message === "string") message = body.error.message;
+        if ("code" in body.error && typeof body.error.code === "string") code = body.error.code;
       }
     } catch {
       // ignore parse errors and fall back to status message
     }
-    throw new Error(message);
+    throw new ApiError(response.status, code, message);
   }
   return response.json() as Promise<Envelope<T>>;
 }
@@ -269,16 +297,30 @@ export async function getGitHubApp(): Promise<Envelope<GitHubAppView>> {
     meta: { server_time: "", resource_version: 0 },
   };
 }
-export const deleteGitHubApp = () => apiRequest<{ deleted: boolean }>("/v1/github-app", { method: "DELETE" });
-export const testGitHubApp = () => apiRequest<ConnectionTestResult>("/v1/github-app:test", { method: "POST" });
+export const listGitHubApps = () => apiRequest<{ items: GitHubAppView[] }>("/v1/github-apps");
+export const deleteGitHubApp = (id?: string, options: MutationOptions = {}) =>
+  apiRequest<{ deleted: boolean }>(id ? `/v1/github-apps/${encodeURIComponent(id)}` : "/v1/github-app", {
+    method: "DELETE",
+    headers: mutationHeaders(options),
+  });
+export const testGitHubApp = (id?: string) =>
+  apiRequest<ConnectionTestResult>(id ? `/v1/github-apps/${encodeURIComponent(id)}:test` : "/v1/github-app:test", {
+    method: "POST",
+  });
 export const listRepositories = () => apiRequest<{ items: Repository[] }>("/v1/repositories");
+export const listGitHubAppRepositories = (id: string) =>
+  apiRequest<{ items: Repository[] }>(`/v1/github-apps/${encodeURIComponent(id)}/repositories`);
 export const getRepositoryOnboarding = () => apiRequest<RepositoryOnboardingSummary>("/v1/repository-onboarding");
-export const addGitHubAppRepository = (repo: string) =>
-  apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", { method: "POST", body: { repo } });
-export const addPublicRepository = (repo: string) =>
-  apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", body: { repo } });
-export const removeRepository = (id: string) =>
-  apiRequest<{ deleted: boolean }>(`/v1/repositories/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const addGitHubAppRepository = (appID: string, repo: string, options: MutationOptions = {}) =>
+  apiRequest<RepositoryInventoryItem>("/v1/repositories/github-app", {
+    method: "POST",
+    headers: mutationHeaders(options),
+    body: { github_app_id: appID, repo },
+  });
+export const addPublicRepository = (repo: string, options: MutationOptions = {}) =>
+  apiRequest<RepositoryInventoryItem>("/v1/repositories/public", { method: "POST", headers: mutationHeaders(options), body: { repo } });
+export const removeRepository = (id: string, options: MutationOptions = {}) =>
+  apiRequest<{ deleted: boolean }>(`/v1/repositories/${encodeURIComponent(id)}`, { method: "DELETE", headers: mutationHeaders(options) });
 export const listSyncRules = () => apiRequest<{ items: SyncRule[] }>("/v1/sync-rules");
 export const getSyncRule = (id: string) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`);
 export const createSyncRule = (input: SyncRuleInput) => apiRequest<SyncRule>("/v1/sync-rules", { method: "POST", body: input });
@@ -286,7 +328,11 @@ export const updateSyncRule = (id: string, input: SyncRuleInput) => apiRequest<S
 export const deleteSyncRule = (id: string) => apiRequest<{ deleted: boolean }>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const runSyncRule = (id: string) => apiRequest<SyncResult>(`/v1/sync-rules/${encodeURIComponent(id)}:run`, { method: "POST" });
 export const githubManifestUrl = () => `${base}/oauth/github/app/manifest`;
-export const githubInstallUrl = () => `${base}/oauth/github/app/install`;
+export const githubInstallUrl = (id?: string) => {
+  if (!id) return `${base}/oauth/github/app/install`;
+  const query = new URLSearchParams({ github_app_id: id });
+  return `${base}/oauth/github/app/install?${query.toString()}`;
+};
 
 const demoTasks: TaskView[] = [
   ["AG-192", "修复批量退款时的余额竞争条件", "open", "billing-service", "TypeScript"],
@@ -342,27 +388,49 @@ const demoMeta = {
 
 let demoAgentCounter = 4;
 let demoAgents: DemoAgent[] = createDemoAgents();
-const demoGitHubApp: GitHubAppView = {
+let demoGitHubApps: GitHubAppView[] = [{
+  id: "gha-alpha",
   tenant_id: "billing-platform",
   provider: "github",
   app_id: 123456,
   installation_id: 987654,
   base_url: "https://api.github.com",
-  app_slug: "agentguild-billing-platform",
+  app_slug: "alpha",
+  installation_account_login: "acme-corp",
+  is_default: true,
   configured: true,
   created_at: "2026-07-01T08:00:00Z",
   updated_at: "2026-07-02T12:30:00Z",
+}, {
+  id: "gha-beta",
+  tenant_id: "billing-platform",
+  provider: "github",
+  app_id: 654321,
+  installation_id: 456789,
+  base_url: "https://api.github.com",
+  app_slug: "beta",
+  installation_account_login: "acme-labs",
+  is_default: false,
+  configured: true,
+  created_at: "2026-07-03T08:00:00Z",
+  updated_at: "2026-07-03T08:00:00Z",
+}];
+const demoRepositoriesByApp: Record<string, Repository[]> = {
+  "gha-alpha": [
+    { full_name: "acme/billing-service", default_branch: "main", visibility: "private" },
+    { full_name: "acme/event-gateway", default_branch: "main", visibility: "private" },
+  ],
+  "gha-beta": [
+    { full_name: "acme/frontend", default_branch: "main", visibility: "internal" },
+    { full_name: "acme/data-api", default_branch: "main", visibility: "private" },
+  ],
 };
-const demoRepositories: Repository[] = [
-  { full_name: "acme/billing-service", default_branch: "main", visibility: "private" },
-  { full_name: "acme/event-gateway", default_branch: "main", visibility: "private" },
-  { full_name: "acme/frontend", default_branch: "main", visibility: "internal" },
-];
 let demoOnboardedRepositoryCounter = 2;
 let demoOnboardedRepositories: RepositoryInventoryItem[] = [
   {
     id: "repo-inv-1",
     source_type: "github_app",
+    github_app_id: "gha-alpha",
     full_name: "acme/billing-service",
     default_branch: "main",
     visibility: "private",
@@ -379,6 +447,8 @@ let demoOnboardedRepositories: RepositoryInventoryItem[] = [
     updated_at: "2026-07-09T08:10:00Z",
   },
 ];
+const demoIdempotencyRecords = new Map<string, { signature: string; response?: Envelope<unknown>; error?: ApiError }>();
+const demoIdempotencyIdentity = { tenantID: "billing-platform", actorID: "demo-admin" };
 let demoSyncRuleCounter = 2;
 let demoSyncRules: SyncRule[] = [
   {
@@ -562,10 +632,10 @@ function upsertDemoOnboardedRepository(
   input: Omit<RepositoryInventoryItem, "id" | "created_at" | "updated_at">,
 ): RepositoryInventoryItem {
   const existing = demoOnboardedRepositories.find(
-    (repo) => repo.full_name === input.full_name && repo.source_type === input.source_type,
+    (repo) => repo.full_name.toLowerCase() === input.full_name.toLowerCase(),
   );
   if (existing) {
-    return existing;
+    throw new ApiError(409, "STATE_CONFLICT", "该仓库已接入并绑定到现有来源");
   }
   demoOnboardedRepositoryCounter += 1;
   const now = "2026-07-09T08:30:00Z";
@@ -579,31 +649,141 @@ function upsertDemoOnboardedRepository(
   return repo;
 }
 
+function deleteDemoGitHubApp(id: string): void {
+  const target = demoGitHubApps.find((app) => app.id === id);
+  if (!target) throw new Error(`Demo GitHub App not found: ${id}`);
+  const bound = demoOnboardedRepositories.some(
+    (repo) => repo.source_type === "github_app" && repo.github_app_id === id,
+  );
+  if (bound) throw new ApiError(409, "STATE_CONFLICT", "该 GitHub App 仍绑定已接入仓库，请先移除仓库");
+
+  const remaining = demoGitHubApps.filter((app) => app.id !== id);
+  if (!target.is_default) {
+    demoGitHubApps = remaining;
+    return;
+  }
+  const nextDefault = remaining.reduce<GitHubAppView | undefined>((earliest, app) => {
+    if (!earliest) return app;
+    return (app.created_at ?? "") < (earliest.created_at ?? "") ? app : earliest;
+  }, undefined);
+  demoGitHubApps = remaining.map((app) => ({ ...app, is_default: app.id === nextDefault?.id }));
+}
+
 function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const url = new URL(path, "http://demo.local");
   const method = (init.method ?? "GET").toUpperCase();
+  const operation = demoMutationOperation(method, url.pathname);
+  if (!operation) return demoRoute(path, init);
+
+  const key = new Headers(init.headers).get("Idempotency-Key");
+  if (!key) throw new ApiError(400, "INVALID_ARGUMENT", "idempotency_key is required");
+  const scopedKey = [demoIdempotencyIdentity.tenantID, demoIdempotencyIdentity.actorID, operation, key].join("\n");
+  const signature = `${method}\n${url.pathname}\n${canonicalJSONStringify(init.body ?? null)}`;
+  const existing = demoIdempotencyRecords.get(scopedKey);
+  if (existing) {
+    if (existing.signature !== signature) throw new ApiError(409, "IDEMPOTENCY_MISMATCH", "idempotency key was already used with a different request");
+    if (existing.error) throw new ApiError(existing.error.status, existing.error.code, existing.error.message);
+    return clone(existing.response!);
+  }
+  try {
+    const response = demoRoute(path, init);
+    demoIdempotencyRecords.set(scopedKey, { signature, response: clone(response) });
+    return response;
+  } catch (error) {
+    if (error instanceof ApiError) demoIdempotencyRecords.set(scopedKey, { signature, error });
+    throw error;
+  }
+}
+
+function demoMutationOperation(method: string, path: string): string | undefined {
+  if (method === "DELETE" && /^\/v1\/github-apps\/[^/]+$/.test(path)) return "github_app.delete";
+  if (method === "DELETE" && /^\/v1\/repositories\/[^/]+$/.test(path)) return "repository.delete";
+  if (method === "POST" && path === "/v1/repositories/github-app") return "repository.github_app.create";
+  if (method === "POST" && path === "/v1/repositories/public") return "repository.public.create";
+  return undefined;
+}
+
+function canonicalJSONStringify(value: unknown): string {
+  const jsonValue = JSON.parse(JSON.stringify(value)) as unknown;
+  return JSON.stringify(sortCanonicalJSON(jsonValue));
+}
+
+function sortCanonicalJSON(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortCanonicalJSON);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, item]) => [key, sortCanonicalJSON(item)]),
+    );
+  }
+  return value;
+}
+
+function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
+  const url = new URL(path, "http://demo.local");
+  const method = (init.method ?? "GET").toUpperCase();
+  const defaultApp = demoGitHubApps.find((app) => app.is_default) ?? demoGitHubApps[0];
+  const defaultRepositories = defaultApp ? demoRepositoriesByApp[defaultApp.id] ?? [] : [];
+
+  if (url.pathname === "/v1/github-apps" && method === "GET") {
+    return clone({ data: { items: demoGitHubApps }, meta: demoMeta });
+  }
+
+  const appTestMatch = url.pathname.match(/^\/v1\/github-apps\/([^/]+):test$/);
+  if (appTestMatch && method === "POST") {
+    const id = decodeURIComponent(appTestMatch[1]);
+    const app = demoGitHubApps.find((item) => item.id === id);
+    if (!app) throw new Error(`Demo GitHub App not found: ${id}`);
+    if (!app.installation_id) {
+      return clone({ data: { ok: false, repo_count: 0, error: "GitHub App 尚未安装" }, meta: demoMeta });
+    }
+    return clone({ data: { ok: true, repo_count: (demoRepositoriesByApp[id] ?? []).length }, meta: demoMeta });
+  }
+
+  const appRepositoriesMatch = url.pathname.match(/^\/v1\/github-apps\/([^/]+)\/repositories$/);
+  if (appRepositoriesMatch && method === "GET") {
+    const id = decodeURIComponent(appRepositoriesMatch[1]);
+    if (!demoGitHubApps.some((app) => app.id === id)) throw new Error(`Demo GitHub App not found: ${id}`);
+    return clone({ data: { items: demoRepositoriesByApp[id] ?? [] }, meta: demoMeta });
+  }
+
+  const appMatch = url.pathname.match(/^\/v1\/github-apps\/([^/]+)$/);
+  if (appMatch) {
+    const id = decodeURIComponent(appMatch[1]);
+    const app = demoGitHubApps.find((item) => item.id === id);
+    if (!app) throw new Error(`Demo GitHub App not found: ${id}`);
+    if (method === "GET") return clone({ data: app, meta: demoMeta });
+    if (method === "DELETE") {
+      deleteDemoGitHubApp(id);
+      return clone({ data: { deleted: true }, meta: demoMeta });
+    }
+  }
 
   if (url.pathname === "/v1/github-app" && method === "GET") {
-    return clone({ data: demoGitHubApp, meta: demoMeta });
+    return clone({ data: defaultApp, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/github-app" && method === "DELETE") {
+    if (!defaultApp) throw new Error("Demo GitHub App not found");
+    deleteDemoGitHubApp(defaultApp.id);
     return clone({ data: { deleted: true }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/github-app:test" && method === "POST") {
-    return clone({ data: { ok: true, repo_count: demoRepositories.length }, meta: demoMeta });
+    return clone({ data: { ok: true, repo_count: defaultRepositories.length }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/repositories" && method === "GET") {
-    return clone({ data: { items: demoRepositories }, meta: demoMeta });
+    const repositories = demoGitHubApps.flatMap((app) => demoRepositoriesByApp[app.id] ?? []);
+    return clone({ data: { items: repositories }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/repository-onboarding" && method === "GET") {
     return clone({
       data: {
-        github_app: demoGitHubApp,
-        app_repositories: { items: demoRepositories },
+        github_app: defaultApp ?? { configured: false },
+        app_repositories: { items: defaultRepositories },
         onboarded_repositories: { items: demoOnboardedRepositories },
       },
       meta: demoMeta,
@@ -612,14 +792,21 @@ function demo(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
 
   if (url.pathname === "/v1/repositories/github-app" && method === "POST") {
     const body = parseDemoBody(init.body);
+    const githubAppID = typeof body.github_app_id === "string" && body.github_app_id
+      ? body.github_app_id
+      : defaultApp?.id;
+    if (!githubAppID || !demoGitHubApps.some((app) => app.id === githubAppID)) {
+      throw new Error(`Demo GitHub App not found: ${githubAppID ?? ""}`);
+    }
     const fullName = normalizeDemoGitHubRepository(body.repo);
-    const candidate = demoRepositories.find((repo) => repo.full_name === fullName);
+    const candidate = (demoRepositoriesByApp[githubAppID] ?? []).find((repo) => repo.full_name === fullName);
     if (!candidate) {
       throw new Error(`Demo repository not found: ${fullName}`);
     }
     return clone({
       data: upsertDemoOnboardedRepository({
         source_type: "github_app",
+        github_app_id: githubAppID,
         full_name: candidate.full_name,
         default_branch: candidate.default_branch,
         visibility: candidate.visibility,

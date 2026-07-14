@@ -38,7 +38,7 @@ type TaskSink interface {
 }
 
 type IssueSourceProvider interface {
-	IssueSource(ctx context.Context, tenantID, sourceAuth string) (git.IssueSource, error)
+	IssueSource(ctx context.Context, tenantID, repo, sourceAuth string) (git.ResolvedIssueSource, error)
 }
 
 type EngineOptions struct {
@@ -80,12 +80,12 @@ func (e *Engine) RunRule(ctx context.Context, tenantID, ruleID string) (SyncResu
 	if err != nil {
 		return result, err
 	}
-	source, err := e.sources.IssueSource(ctx, tenantID, rule.SourceAuth)
+	resolved, err := e.sources.IssueSource(ctx, tenantID, rule.Repo, rule.SourceAuth)
 	if err != nil {
 		return result, err
 	}
 	now := e.opts.Now()
-	issues, err := source.ListIssues(ctx, rule.Repo, git.IssueFilter{
+	issues, err := resolved.Source.ListIssues(ctx, resolved.FullName, git.IssueFilter{
 		State:  rule.IssueState,
 		Labels: append([]string(nil), rule.IncludeLabels...),
 	}, rule.LastSyncedAt)

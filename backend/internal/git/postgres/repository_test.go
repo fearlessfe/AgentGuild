@@ -161,7 +161,7 @@ func TestGitHubAppRepositoryPersistsManifestColumns(t *testing.T) {
 		WebhookSecret: "ws", ClientID: "cid", ClientSecret: "cs", AppSlug: "my-app",
 	}
 	require.NoError(t, repo.Upsert(ctx, rec))
-	got, err := repo.GetByTenant(ctx, "t1")
+	got, err := repo.GetDefault(ctx, "t1")
 	require.NoError(t, err)
 	require.Equal(t, "ws", got.WebhookSecret)
 	require.Equal(t, "cid", got.ClientID)
@@ -294,8 +294,12 @@ type fakeAppService struct {
 	driver git.Driver
 }
 
-func (f *fakeAppService) Driver(context.Context, string) (git.Driver, error) {
-	return f.driver, nil
+func (f *fakeAppService) Driver(_ context.Context, _, repo string) (git.ResolvedDriver, error) {
+	return git.ResolvedDriver{Driver: f.driver, FullName: repo}, nil
+}
+
+func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.ResolvedIssueSource, error) {
+	return git.ResolvedIssueSource{}, nil
 }
 
 func sequenceIDs(values ...string) func() string {

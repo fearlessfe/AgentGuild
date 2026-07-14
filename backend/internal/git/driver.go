@@ -43,3 +43,10 @@ type Driver interface {
 	CompareCommits(ctx context.Context, repo, base, head string) ([]ChangedFile, error)
 	IsAncestor(ctx context.Context, repo, base, head string) (bool, error)
 }
+
+// ResolvedDriver couples a repository-scoped driver with the canonical
+// owner/repository identity selected by the repository inventory.
+type ResolvedDriver struct {
+	Driver   Driver
+	FullName string
+}

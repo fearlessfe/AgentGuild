@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"agentguild.dev/agentguild/backend/internal/git"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 )
 
 // githubManifest builds a GitHub App manifest + signed state for the current
@@ -16,6 +17,9 @@ import (
 // GitHub's apps/new page.
 func (s *Server) githubManifest(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	manifest, state, redirectURL, err := s.manifest.BuildManifest(principal.TenantID)
 	if err != nil {
 		mapDomainError(w, err, principal)
@@ -44,14 +48,18 @@ func (s *Server) githubManifest(w http.ResponseWriter, r *http.Request) {
 // code for App credentials, persists them, and redirects to the frontend.
 func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 
-	if err := s.manifest.VerifyState(state, principal.TenantID); err != nil {
+	decoded, err := s.manifest.VerifyState(state, principal.TenantID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid manifest state")
 		return
 	}
-	if _, err := s.manifest.ExchangeCode(r.Context(), principal.TenantID, code); err != nil {
+	if _, err := s.manifest.ExchangeCode(r.Context(), decoded.TenantID, decoded.GitHubAppID, code); err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}
@@ -62,12 +70,22 @@ func (s *Server) githubManifestCallback(w http.ResponseWriter, r *http.Request) 
 // already-created App while carrying a fresh signed state token.
 func (s *Server) githubAppInstall(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
-	view, err := s.gitHubAppManager.Get(r.Context(), principal.TenantID)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
+	githubAppID := r.URL.Query().Get("github_app_id")
+	var view gitapp.GitHubAppView
+	var err error
+	if githubAppID == "" {
+		view, err = s.gitHubAppManager.Get(r.Context(), principal.TenantID)
+	} else {
+		view, err = s.gitHubAppManager.GetByID(r.Context(), principal.TenantID, githubAppID)
+	}
 	if err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}
-	installURL, err := s.manifest.BuildInstallURL(principal.TenantID, view.AppSlug)
+	installURL, err := s.manifest.BuildInstallURL(principal.TenantID, view.ID, view.AppSlug)
 	if err != nil {
 		mapDomainError(w, err, principal)
 		return
@@ -79,18 +97,22 @@ func (s *Server) githubAppInstall(w http.ResponseWriter, r *http.Request) {
 // verifies state, and re-persists the tenant's App configuration with it.
 func (s *Server) githubAppInstalled(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
+	if !requireAdminSyncSession(w, principal) {
+		return
+	}
 	state := r.URL.Query().Get("state")
 	installationID, err := strconv.ParseInt(r.URL.Query().Get("installation_id"), 10, 64)
 	if err != nil || installationID == 0 {
 		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "installation_id is invalid", "installation_id")
 		return
 	}
-	if err := s.manifest.VerifyState(state, principal.TenantID); err != nil {
+	decoded, err := s.manifest.VerifyState(state, principal.TenantID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid manifest state")
 		return
 	}
 
-	if _, err := s.gitHubAppManager.Install(r.Context(), principal.TenantID, installationID); err != nil {
+	if _, err := s.manifest.Install(r.Context(), decoded.TenantID, decoded.GitHubAppID, installationID); err != nil {
 		mapDomainError(w, err, principal)
 		return
 	}
@@ -104,19 +126,21 @@ func (s *Server) testGitHubApp(w http.ResponseWriter, r *http.Request) {
 	principal := mustPrincipal(r)
 
 	source, err := s.gitHubAppManager.IssueSource(r.Context(), principal.TenantID)
+	writeJSON(w, http.StatusOK, map[string]any{"data": testGitHubConnection(r, source, err)})
+}
+
+func testGitHubConnection(r *http.Request, source git.IssueSource, err error) map[string]any {
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"data": connectionTestResult(err)})
-		return
+		return connectionTestResult(err)
 	}
 	repos, err := source.ListInstallationRepositories(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"data": connectionTestResult(err)})
-		return
+		return connectionTestResult(err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+	return map[string]any{
 		"ok":         true,
 		"repo_count": len(repos),
-	}})
+	}
 }
 
 // connectionTestResult maps an error to the failure payload, mapping the

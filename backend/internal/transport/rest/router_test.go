@@ -1,9 +1,11 @@
 package rest_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +22,89 @@ import (
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
 	"github.com/stretchr/testify/require"
 )
+
+type memoryIdempotencyStore struct {
+	mu            sync.Mutex
+	records       map[application.IdempotencyKey]*application.IdempotencyRecord
+	updatedAt     map[application.IdempotencyKey]time.Time
+	leaseDuration time.Duration
+	ownerSequence int
+	renewals      int
+	renewed       chan struct{}
+	renewErr      error
+}
+
+func newMemoryIdempotencyStore() *memoryIdempotencyStore {
+	return &memoryIdempotencyStore{
+		records:       make(map[application.IdempotencyKey]*application.IdempotencyRecord),
+		updatedAt:     make(map[application.IdempotencyKey]time.Time),
+		leaseDuration: 5 * time.Minute,
+	}
+}
+
+func (s *memoryIdempotencyStore) AcquireMutationIdempotency(_ context.Context, key application.IdempotencyKey, hash [32]byte, ttl time.Duration) (*application.IdempotencyRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing := s.records[key]; existing != nil {
+		if !bytes.Equal(existing.RequestHash[:], hash[:]) {
+			return nil, &domain.Error{Code: "idempotency_mismatch", Message: "idempotency key was already used with a different request"}
+		}
+		copy := *existing
+		copy.ResponseBody = append([]byte(nil), existing.ResponseBody...)
+		copy.Acquired = false
+		copy.OwnerToken = ""
+		if !copy.Completed && !s.updatedAt[key].IsZero() && time.Since(s.updatedAt[key]) >= s.leaseDuration {
+			s.ownerSequence++
+			existing.OwnerToken = fmt.Sprintf("owner-%d", s.ownerSequence)
+			s.updatedAt[key] = time.Now()
+			copy.OwnerToken = existing.OwnerToken
+			copy.Acquired = true
+		}
+		return &copy, nil
+	}
+	s.ownerSequence++
+	record := &application.IdempotencyRecord{Key: key, RequestHash: hash, ExpiresAt: time.Now().Add(ttl), OwnerToken: fmt.Sprintf("owner-%d", s.ownerSequence)}
+	s.records[key] = record
+	s.updatedAt[key] = time.Now()
+	copy := *record
+	copy.Acquired = true
+	return &copy, nil
+}
+
+func (s *memoryIdempotencyStore) RenewIdempotency(_ context.Context, key application.IdempotencyKey, owner string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.renewErr != nil {
+		return s.renewErr
+	}
+	record := s.records[key]
+	if record == nil || record.Completed || record.OwnerToken != owner {
+		return &domain.Error{Code: "idempotency_not_owner", Message: "idempotency record is not pending for this owner"}
+	}
+	s.updatedAt[key] = time.Now()
+	s.renewals++
+	if s.renewed != nil {
+		select {
+		case s.renewed <- struct{}{}:
+		default:
+		}
+	}
+	return nil
+}
+
+func (s *memoryIdempotencyStore) CompleteIdempotency(_ context.Context, key application.IdempotencyKey, owner string, status int, body []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record := s.records[key]
+	if record == nil || record.Completed || record.OwnerToken != owner {
+		return &domain.Error{Code: "idempotency_not_owner", Message: "idempotency record is not pending for this owner"}
+	}
+	record.ResponseCode = &status
+	record.ResponseBody = append([]byte(nil), body...)
+	record.Completed = true
+	record.Acquired = false
+	return nil
+}
 
 // fakeApplication 记录调用参数并按预置值返回，用于验证 REST 到 Application Service 的映射。
 type fakeApplication struct {
@@ -91,19 +176,19 @@ func (f *fakeApplication) GetExecution(ctx context.Context, p auth.Principal, q 
 
 // fakeReviewService 记录 review 应用服务调用参数并按预置值返回。
 type fakeReviewService struct {
-	calls                 []call
-	createReview          application.Envelope[reviewapp.ReviewView]
-	createReviewErr       error
-	submitDecision        application.Envelope[reviewapp.ReviewView]
-	submitDecisionErr     error
-	addComment            application.Envelope[reviewapp.CommentView]
-	addCommentErr         error
-	getReview             application.Envelope[reviewapp.ReviewView]
-	getReviewErr          error
-	getSubmissionDiff     application.Envelope[[]reviewapp.FileDiff]
-	getSubmissionDiffErr  error
-	submitForReview       application.Envelope[application.ExecutionView]
-	submitForReviewErr    error
+	calls                []call
+	createReview         application.Envelope[reviewapp.ReviewView]
+	createReviewErr      error
+	submitDecision       application.Envelope[reviewapp.ReviewView]
+	submitDecisionErr    error
+	addComment           application.Envelope[reviewapp.CommentView]
+	addCommentErr        error
+	getReview            application.Envelope[reviewapp.ReviewView]
+	getReviewErr         error
+	getSubmissionDiff    application.Envelope[[]reviewapp.FileDiff]
+	getSubmissionDiffErr error
+	submitForReview      application.Envelope[application.ExecutionView]
+	submitForReviewErr   error
 }
 
 func (f *fakeReviewService) CreateReview(ctx context.Context, p auth.Principal, cmd reviewapp.CreateReview) (application.Envelope[reviewapp.ReviewView], error) {
@@ -191,7 +276,7 @@ func (v *tokenVerifier) Verify(ctx context.Context, rawToken string) (auth.Princ
 }
 
 func newTestServer(app *fakeApplication, opts ...rest.Option) http.Handler {
-	opts = append([]rest.Option{rest.WithSession(testSessionSecret, false)}, opts...)
+	opts = append([]rest.Option{rest.WithSession(testSessionSecret, false), rest.WithIdempotencyStore(newMemoryIdempotencyStore())}, opts...)
 	return rest.NewServer(app, &tokenVerifier{}, opts...).Router()
 }
 

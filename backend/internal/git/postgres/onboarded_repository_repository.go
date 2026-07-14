@@ -2,9 +2,14 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
+	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type onboardedRepositoryRepository struct {
@@ -18,7 +23,7 @@ func NewOnboardedRepositoryRepository(pool queryer) application.OnboardedReposit
 
 func (r *onboardedRepositoryRepository) ListOnboardedRepositories(ctx context.Context, tenantID string) ([]application.OnboardedRepositoryRecord, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT id, tenant_id, source_type, full_name, default_branch, visibility, created_at, updated_at
+		SELECT id, tenant_id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
 		FROM onboarded_repositories
 		WHERE tenant_id = $1
 		ORDER BY full_name, source_type, id`, tenantID)
@@ -29,14 +34,11 @@ func (r *onboardedRepositoryRepository) ListOnboardedRepositories(ctx context.Co
 
 	records := make([]application.OnboardedRepositoryRecord, 0)
 	for rows.Next() {
-		var record application.OnboardedRepositoryRecord
-		if err := rows.Scan(
-			&record.ID, &record.TenantID, &record.SourceType, &record.FullName,
-			&record.DefaultBranch, &record.Visibility, &record.CreatedAt, &record.UpdatedAt,
-		); err != nil {
+		record, err := scanOnboardedRepository(rows)
+		if err != nil {
 			return nil, err
 		}
-		records = append(records, record)
+		records = append(records, *record)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -44,21 +46,89 @@ func (r *onboardedRepositoryRepository) ListOnboardedRepositories(ctx context.Co
 	return records, nil
 }
 
+func (r *onboardedRepositoryRepository) GetOnboardedRepositoryByFullName(ctx context.Context, tenantID, fullName string) (*application.OnboardedRepositoryRecord, error) {
+	record, err := scanOnboardedRepository(r.q.QueryRow(ctx, `
+		SELECT id, tenant_id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
+		FROM onboarded_repositories
+		WHERE tenant_id = $1 AND full_name = $2`, tenantID, fullName))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	return record, err
+}
+
+func (r *onboardedRepositoryRepository) CreateOnboardedRepository(ctx context.Context, record *application.OnboardedRepositoryRecord) error {
+	if record == nil {
+		return errors.New("onboarded repository record is nil")
+	}
+	var githubAppID sql.NullString
+	err := r.q.QueryRow(ctx, `
+		INSERT INTO onboarded_repositories (
+			tenant_id, id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp(), clock_timestamp())
+		RETURNING id, github_app_id, created_at, updated_at`,
+		record.TenantID, record.ID, record.SourceType, record.FullName,
+		record.DefaultBranch, record.Visibility, nullString(record.GitHubAppID),
+	).Scan(&record.ID, &githubAppID, &record.CreatedAt, &record.UpdatedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "onboarded_repositories_tenant_full_name_key" {
+			return git.ErrRepositoryBindingConflict
+		}
+		return err
+	}
+	record.GitHubAppID = githubAppID.String
+	return nil
+}
+
 func (r *onboardedRepositoryRepository) UpsertOnboardedRepository(ctx context.Context, record *application.OnboardedRepositoryRecord) error {
 	if record == nil {
 		return errors.New("onboarded repository record is nil")
 	}
-	return r.q.QueryRow(ctx, `
+	var githubAppID sql.NullString
+	err := r.q.QueryRow(ctx, `
 		INSERT INTO onboarded_repositories (
-			tenant_id, id, source_type, full_name, default_branch, visibility, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp(), clock_timestamp())
-		ON CONFLICT (tenant_id, source_type, full_name) DO UPDATE SET
+			tenant_id, id, source_type, full_name, default_branch, visibility, github_app_id, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			CASE WHEN $3 = 'github_app'
+				THEN COALESCE($7, (SELECT id FROM github_apps WHERE tenant_id = $1 AND is_default))
+				ELSE NULL
+			END,
+			clock_timestamp(), clock_timestamp()
+		)
+		ON CONFLICT (tenant_id, full_name) DO UPDATE SET
 			default_branch = EXCLUDED.default_branch,
 			visibility = EXCLUDED.visibility,
 			updated_at = clock_timestamp()
-		RETURNING id, created_at, updated_at`,
-		record.TenantID, record.ID, record.SourceType, record.FullName, record.DefaultBranch, record.Visibility,
-	).Scan(&record.ID, &record.CreatedAt, &record.UpdatedAt)
+		WHERE onboarded_repositories.source_type = EXCLUDED.source_type
+			AND onboarded_repositories.github_app_id IS NOT DISTINCT FROM EXCLUDED.github_app_id
+		RETURNING id, github_app_id, created_at, updated_at`,
+		record.TenantID, record.ID, record.SourceType, record.FullName,
+		record.DefaultBranch, record.Visibility, nullString(record.GitHubAppID),
+	).Scan(&record.ID, &githubAppID, &record.CreatedAt, &record.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return git.ErrRepositoryBindingConflict
+	}
+	if err != nil {
+		return err
+	}
+	record.GitHubAppID = githubAppID.String
+	return nil
+}
+
+func scanOnboardedRepository(row rowScanner) (*application.OnboardedRepositoryRecord, error) {
+	var record application.OnboardedRepositoryRecord
+	var githubAppID sql.NullString
+	err := row.Scan(
+		&record.ID, &record.TenantID, &record.SourceType, &record.FullName,
+		&record.DefaultBranch, &record.Visibility, &githubAppID, &record.CreatedAt, &record.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	record.GitHubAppID = githubAppID.String
+	return &record, nil
 }
 
 func (r *onboardedRepositoryRepository) DeleteOnboardedRepository(ctx context.Context, tenantID, id string) error {

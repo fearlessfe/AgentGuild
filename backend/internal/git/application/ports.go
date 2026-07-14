@@ -15,8 +15,11 @@ type Store interface {
 // GitHubAppRepository persists tenant-level GitHub App configuration.
 type GitHubAppRepository interface {
 	Upsert(context.Context, *GitHubAppRecord) error
-	GetByTenant(context.Context, string) (*GitHubAppRecord, error)
-	Delete(context.Context, string) error
+	ListByTenant(context.Context, string) ([]GitHubAppRecord, error)
+	GetByID(context.Context, string, string) (*GitHubAppRecord, error)
+	GetDefault(context.Context, string) (*GitHubAppRecord, error)
+	Delete(context.Context, string, string) error
+	DeleteAndPromoteDefault(context.Context, string, string) error
 }
 
 var _ ExecutionNotifier = (*NopExecutionNotifier)(nil)

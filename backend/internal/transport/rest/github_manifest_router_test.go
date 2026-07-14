@@ -17,10 +17,14 @@ import (
 )
 
 func newManifestService(manager gitapp.GitHubAppManager) *gitapp.ManifestService {
-	return gitapp.NewManifestService(manager, gitapp.ManifestOptions{
+	service, err := gitapp.NewManifestService(manager, gitapp.ManifestOptions{
 		PublicBaseURL: "https://agentguild.example",
 		StateSecret:   []byte("test-state-secret"),
 	})
+	if err != nil {
+		panic(err)
+	}
+	return service
 }
 
 func TestGitHubManifest_BuildForm(t *testing.T) {
@@ -28,7 +32,7 @@ func TestGitHubManifest_BuildForm(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/manifest", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/manifest", sessionCookie(t, "admin-1", true))
 
 	body := res.Body.String()
 	switch res.Code {
@@ -55,7 +59,7 @@ func TestGitHubManifest_BuildFormIgnoresConflictingForwardedHeaders(t *testing.T
 	req.Header.Set("X-Forwarded-Host", "forwarded-attacker.example")
 	req.Header.Set("X-Forwarded-Proto", "http")
 	req.Header.Set("X-Forwarded-Port", "8080")
-	req.AddCookie(sessionCookie(t, "owner-1", false))
+	req.AddCookie(sessionCookie(t, "admin-1", true))
 	res := httptest.NewRecorder()
 
 	server.ServeHTTP(res, req)
@@ -79,7 +83,7 @@ func TestGitHubManifest_CallbackBadState(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/callback?state=bad&code=x", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/callback?state=bad&code=x", sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusBadRequest, res.Code)
 	for _, call := range manager.calls {
@@ -87,9 +91,10 @@ func TestGitHubManifest_CallbackBadState(t *testing.T) {
 	}
 }
 
-func TestGitHubManifest_InstallRedirectUsesAppSlug(t *testing.T) {
+func TestGitHubAppInstallRedirectUsesScopedApp(t *testing.T) {
 	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{
 		"tenant-1": {
+			ID:             "gha-2",
 			TenantID:       "tenant-1",
 			Provider:       "github",
 			AppID:          123,
@@ -102,18 +107,40 @@ func TestGitHubManifest_InstallRedirectUsesAppSlug(t *testing.T) {
 	svc := newManifestService(manager)
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/install", sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/install?github_app_id=gha-2", sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusFound, res.Code)
 	location := res.Header().Get("Location")
 	require.Contains(t, location, "https://github.com/apps/agentguild-test/installations/new?state=")
 	state := strings.TrimPrefix(location, "https://github.com/apps/agentguild-test/installations/new?state=")
-	require.NoError(t, svc.VerifyState(state, "tenant-1"))
+	decoded, err := svc.VerifyState(state, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, "gha-2", decoded.GitHubAppID)
 }
 
-func TestGitHubManifest_InstalledPreservesExistingAppCredentials(t *testing.T) {
+func TestGitHubAppInstallLegacyRedirectUsesDeterministicDefault(t *testing.T) {
 	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{
 		"tenant-1": {
+			ID: "gha-default", TenantID: "tenant-1", AppID: 123, PrivateKey: "PRIVATE KEY",
+			BaseURL: "https://api.github.com", AppSlug: "agentguild-default", IsDefault: true,
+		},
+	}}
+	svc := newManifestService(manager)
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
+
+	res := getWithSession(t, server, "/oauth/github/app/install", sessionCookie(t, "admin-1", true))
+
+	require.Equal(t, http.StatusFound, res.Code)
+	state := strings.TrimPrefix(res.Header().Get("Location"), "https://github.com/apps/agentguild-default/installations/new?state=")
+	decoded, err := svc.VerifyState(state, "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, "gha-default", decoded.GitHubAppID)
+}
+
+func TestGitHubAppInstalledUsesSignedAppAndPreservesExistingCredentials(t *testing.T) {
+	manager := &fakeGitHubAppManager{installationAccount: "acme-corp", store: map[string]*gitapp.GitHubAppRecord{
+		"tenant-1": {
+			ID:             "gha-2",
 			TenantID:       "tenant-1",
 			Provider:       "github",
 			AppID:          123,
@@ -127,11 +154,12 @@ func TestGitHubManifest_InstalledPreservesExistingAppCredentials(t *testing.T) {
 		},
 	}}
 	svc := newManifestService(manager)
-	_, state, _, err := svc.BuildManifest("tenant-1")
+	installURL, err := svc.BuildInstallURL("tenant-1", "gha-2", "agentguild-test")
 	require.NoError(t, err)
+	state := strings.TrimPrefix(installURL, "https://github.com/apps/agentguild-test/installations/new?state=")
 	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
 
-	res := getWithSession(t, server, "/oauth/github/app/installed?installation_id=456&state="+state, sessionCookie(t, "owner-1", false))
+	res := getWithSession(t, server, "/oauth/github/app/installed?installation_id=456&github_app_id=untrusted&state="+state, sessionCookie(t, "admin-1", true))
 
 	require.Equal(t, http.StatusFound, res.Code)
 	require.Equal(t, "/git-integration?installed=1", res.Header().Get("Location"))
@@ -139,6 +167,9 @@ func TestGitHubManifest_InstalledPreservesExistingAppCredentials(t *testing.T) {
 	require.Equal(t, int64(456), record.InstallationID)
 	require.Equal(t, "PRIVATE KEY", record.PrivateKey)
 	require.Equal(t, "agentguild-test", record.AppSlug)
+	require.Equal(t, "acme-corp", record.InstallationAccountLogin)
+	require.Contains(t, manager.calls, githubAppCall{method: "InstallationAccount", tenantID: "tenant-1", payload: "gha-2"})
+	require.Contains(t, manager.calls, githubAppCall{method: "InstallByID", tenantID: "tenant-1", payload: "gha-2"})
 }
 
 func TestGitHubManifest_TestConnectionOK(t *testing.T) {
@@ -228,4 +259,23 @@ func TestGitHubManifest_RequiresSession(t *testing.T) {
 		res := postJSON(t, server, "/v1/github-app:test", `{}`, "token-publisher")
 		require.Equal(t, http.StatusUnauthorized, res.Code)
 	})
+}
+
+func TestGitHubManifestConfigurationFlowsRequireAdmin(t *testing.T) {
+	manager := &fakeGitHubAppManager{store: map[string]*gitapp.GitHubAppRecord{
+		"tenant-1": {ID: "gha-default", TenantID: "tenant-1", AppSlug: "agentguild-test", IsDefault: true},
+	}}
+	svc := newManifestService(manager)
+	server := newTestServer(&fakeApplication{}, rest.WithGitHubAppManager(manager), rest.WithGitHubManifest(svc))
+	cookie := sessionCookie(t, "owner-1", false)
+
+	manifest := getWithSession(t, server, "/oauth/github/app/manifest", cookie)
+	install := getWithSession(t, server, "/oauth/github/app/install", cookie)
+	callback := getWithSession(t, server, "/oauth/github/app/callback?state=bad&code=x", cookie)
+	installed := getWithSession(t, server, "/oauth/github/app/installed?installation_id=1&state=bad", cookie)
+
+	for _, res := range []*httptest.ResponseRecorder{manifest, install, callback, installed} {
+		require.Equal(t, http.StatusForbidden, res.Code)
+		require.Contains(t, res.Body.String(), "admin session is required")
+	}
 }
