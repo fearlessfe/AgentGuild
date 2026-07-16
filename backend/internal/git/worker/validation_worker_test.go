@@ -32,6 +32,7 @@ func TestValidationWorkerClaimsPendingJob(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStatusSucceeded, got.Status)
 	require.Nil(t, got.ClaimedBy)
+	require.Equal(t, gitdomain.SubmissionStatusValidated, store.submissions["tenant-1/sub-1"].Status)
 }
 
 func TestValidationWorkerReturnsZeroWhenNoJobs(t *testing.T) {
@@ -42,6 +43,32 @@ func TestValidationWorkerReturnsZeroWhenNoJobs(t *testing.T) {
 	processed, err := w.RunOnce(ctx, "tenant-1")
 	require.NoError(t, err)
 	require.Equal(t, 0, processed)
+}
+
+func TestValidationWorkerRetriesTerminalExecutionSync(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
+	require.NoError(t, err)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error { return tx.ValidationJobs().Insert(ctx, job) }))
+
+	notifier := &flakyTerminalNotifier{failures: 1}
+	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, nil, notifier)
+	_, err = w.RunOnce(ctx, "tenant-1")
+	require.ErrorContains(t, err, "execution sync unavailable")
+	got, err := store.getJob("job-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.ValidationStatusSucceeded, got.Status)
+	require.False(t, got.ExecutionStateSynced)
+	require.Equal(t, gitdomain.SubmissionStatusPendingVerification, store.submissions["tenant-1/sub-1"].Status)
+
+	_, err = w.RunOnce(ctx, "tenant-1")
+	require.NoError(t, err)
+	got, err = store.getJob("job-1")
+	require.NoError(t, err)
+	require.True(t, got.ExecutionStateSynced)
+	require.Equal(t, gitdomain.SubmissionStatusValidated, store.submissions["tenant-1/sub-1"].Status)
 }
 
 func TestValidationWorkerRespectsActiveLease(t *testing.T) {
@@ -108,6 +135,7 @@ func TestValidationWorkerRecordFailureAfterMaxAttempts(t *testing.T) {
 	got, err := store.getJob("job-1")
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
+	require.Equal(t, gitdomain.SubmissionStatusValidationFailed, store.submissions["tenant-1/sub-1"].Status)
 	require.Len(t, recorder.calls, 1)
 	require.Equal(t, domain.IntentFailValidation, recorder.calls[0].Intent)
 	require.Equal(t, "exec-1", recorder.calls[0].ExecutionID)
@@ -133,6 +161,7 @@ func TestValidationWorkerRecordsFailureWhenRunnerFails(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
 	require.Equal(t, gitdomain.ValidationStepStatusFailed, got.Steps[0].Status)
+	require.Equal(t, gitdomain.SubmissionStatusValidationFailed, store.submissions["tenant-1/sub-1"].Status)
 	require.Len(t, recorder.calls, 2)
 	require.Equal(t, domain.IntentStartValidation, recorder.calls[0].Intent)
 	require.Equal(t, domain.IntentFailValidation, recorder.calls[1].Intent)
@@ -159,10 +188,46 @@ func TestValidationWorkerSucceedsWhenRunnerPassesAllSteps(t *testing.T) {
 	for _, step := range got.Steps {
 		require.Equal(t, gitdomain.ValidationStepStatusSucceeded, step.Status)
 	}
+	require.Equal(t, gitdomain.SubmissionStatusValidated, store.submissions["tenant-1/sub-1"].Status)
+}
+
+func TestValidationWorkerInvalidatesSubmissionWhenCommitIsNoLongerReachable(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", now, func() string { return "job-1" })
+	require.NoError(t, err)
+	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
+		return tx.ValidationJobs().Insert(ctx, job)
+	}))
+
+	runner := &integrityRunner{reachable: false}
+	recorder := &recordingNotifier{}
+	w := worker.NewValidationWorker(store, "worker-1", 5*time.Minute, 3, runner, recorder)
+	processed, err := w.RunOnce(ctx, "tenant-1")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	got, err := store.getJob("job-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.ValidationStatusFailed, got.Status)
+	require.True(t, got.ExecutionStateSynced)
+	require.Equal(t, gitdomain.SubmissionStatusInvalid, store.submissions["tenant-1/sub-1"].Status)
+	require.Equal(t, domain.IntentFailValidation, recorder.calls[len(recorder.calls)-1].Intent)
 }
 
 type fakeRunner struct {
 	failStep gitdomain.ValidationStep
+}
+
+type integrityRunner struct {
+	fakeRunner
+	reachable bool
+	err       error
+}
+
+func (r *integrityRunner) CheckIntegrity(context.Context, *gitdomain.ValidationJob) (bool, error) {
+	return r.reachable, r.err
 }
 
 func (r *fakeRunner) RunStep(_ context.Context, _ *gitdomain.ValidationJob, step gitdomain.ValidationStep) (gitdomain.Step, error) {
@@ -188,10 +253,11 @@ func (r *fakeRunner) RunStep(_ context.Context, _ *gitdomain.ValidationJob, step
 type memoryStore struct {
 	now            time.Time
 	validationJobs map[string]*gitdomain.ValidationJob
+	submissions    map[string]*gitdomain.Submission
 }
 
 func newMemoryStore(now time.Time) *memoryStore {
-	return &memoryStore{now: now, validationJobs: map[string]*gitdomain.ValidationJob{}}
+	return &memoryStore{now: now, validationJobs: map[string]*gitdomain.ValidationJob{}, submissions: map[string]*gitdomain.Submission{}}
 }
 
 func (s *memoryStore) getJob(id string) (*gitdomain.ValidationJob, error) {
@@ -211,8 +277,10 @@ type memoryTx struct {
 }
 
 func (tx *memoryTx) Credentials() application.CredentialRepository { return nil }
-func (tx *memoryTx) Submissions() application.SubmissionRepository { return nil }
-func (tx *memoryTx) GitHubApps() application.GitHubAppRepository    { return nil }
+func (tx *memoryTx) Submissions() application.SubmissionRepository {
+	return &memorySubmissionRepository{store: tx.store}
+}
+func (tx *memoryTx) GitHubApps() application.GitHubAppRepository { return nil }
 func (tx *memoryTx) ValidationJobs() application.ValidationJobRepository {
 	return &memoryValidationJobRepository{store: tx.store}
 }
@@ -224,6 +292,13 @@ type memoryValidationJobRepository struct {
 
 func (r *memoryValidationJobRepository) Insert(_ context.Context, job *gitdomain.ValidationJob) error {
 	r.store.validationJobs[job.ID] = job
+	key := job.TenantID + "/" + job.SubmissionID
+	if r.store.submissions[key] == nil {
+		r.store.submissions[key] = &gitdomain.Submission{
+			ID: job.SubmissionID, TenantID: job.TenantID, ExecutionID: job.ExecutionID,
+			Status: gitdomain.SubmissionStatusPendingVerification,
+		}
+	}
 	return nil
 }
 
@@ -233,6 +308,36 @@ func (r *memoryValidationJobRepository) GetByID(_ context.Context, tenantID, id 
 		return nil, nil
 	}
 	return job, nil
+}
+
+type memorySubmissionRepository struct {
+	store *memoryStore
+}
+
+func (r *memorySubmissionRepository) Save(_ context.Context, submission *gitdomain.Submission) error {
+	copy := *submission
+	r.store.submissions[submission.TenantID+"/"+submission.ID] = &copy
+	return nil
+}
+
+func (r *memorySubmissionRepository) GetByID(_ context.Context, tenantID, submissionID string) (*gitdomain.Submission, error) {
+	submission := r.store.submissions[tenantID+"/"+submissionID]
+	if submission == nil {
+		return nil, errors.New("submission not found")
+	}
+	copy := *submission
+	return &copy, nil
+}
+
+func (r *memorySubmissionRepository) GetByExecutionID(_ context.Context, tenantID, executionID string) ([]*gitdomain.Submission, error) {
+	var out []*gitdomain.Submission
+	for _, submission := range r.store.submissions {
+		if submission.TenantID == tenantID && submission.ExecutionID == executionID {
+			copy := *submission
+			out = append(out, &copy)
+		}
+	}
+	return out, nil
 }
 
 func (r *memoryValidationJobRepository) GetBySubmissionID(_ context.Context, tenantID, submissionID string) (*gitdomain.ValidationJob, error) {
@@ -249,13 +354,18 @@ func (r *memoryValidationJobRepository) ClaimNextPending(_ context.Context, tena
 		if job.TenantID != tenantID {
 			continue
 		}
-		if job.Status != gitdomain.ValidationStatusPending && job.Status != gitdomain.ValidationStatusRunning {
+		terminalUnsynced := (job.Status == gitdomain.ValidationStatusSucceeded || job.Status == gitdomain.ValidationStatusFailed) && !job.ExecutionStateSynced
+		if job.Status != gitdomain.ValidationStatusPending && job.Status != gitdomain.ValidationStatusRunning && !terminalUnsynced {
 			continue
 		}
 		if job.ClaimedUntil != nil && job.ClaimedUntil.After(now) {
 			continue
 		}
-		if err := job.Claim(workerID, until, now); err != nil {
+		if terminalUnsynced {
+			job.ClaimedBy = &workerID
+			job.ClaimedUntil = &until
+			job.Attempt++
+		} else if err := job.Claim(workerID, until, now); err != nil {
 			continue
 		}
 		return job, nil
@@ -282,9 +392,18 @@ func (r *memoryValidationJobRepository) UpdateStep(_ context.Context, tenantID, 
 	return nil
 }
 
-
 type recordingNotifier struct {
 	calls []application.ExecutionStateCommand
+}
+
+type flakyTerminalNotifier struct{ failures int }
+
+func (n *flakyTerminalNotifier) Notify(_ context.Context, cmd application.ExecutionStateCommand, _ time.Time) error {
+	if cmd.Intent == domain.IntentMarkReviewing && n.failures > 0 {
+		n.failures--
+		return errors.New("execution sync unavailable")
+	}
+	return nil
 }
 
 func (r *recordingNotifier) Notify(_ context.Context, cmd application.ExecutionStateCommand, _ time.Time) error {

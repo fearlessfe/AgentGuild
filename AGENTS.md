@@ -164,10 +164,11 @@ make db-down        # docker compose down
   - `SESSION_COOKIE_SECURE`：cookie secure 标志，默认 `false`
   - `AGENT_RSA_PRIVATE_KEY_PEM` 或 `AGENT_RSA_PRIVATE_KEY_PATH`：用于签发 Agent access token
 - GitHub App（可选；未配置则 git 交付与验证禁用）：
-  - `GITHUB_APP_PUBLIC_BASE_URL`：`WEB_ENABLED=true` 时必填；AgentGuild 的公网 HTTP(S) origin，不包含路径、query 或 fragment（生产示例：`https://agentguild.example.com`）
+  - `GITHUB_APP_PUBLIC_BASE_URL`：`WEB_ENABLED=true` 或 `MCP_ENABLED=true` 时必填；AgentGuild 的公网 HTTP(S) origin，同时作为 branch-enforcing Git proxy 的 clone origin，不包含路径、query 或 fragment（生产必须 HTTPS，示例：`https://agentguild.example.com`）
   - 全局默认：启动时会自动写入 `OIDC_TENANT_ID` 或 `LOCAL_ADMIN_TENANT_ID` 对应的 tenant：
     - `GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY`、`GITHUB_INSTALLATION_ID`
     - `GITHUB_BASE_URL`（默认 `https://api.github.com`）
+    - `GITHUB_ALLOWED_HOSTS`：允许作为 GitHub/GHE API 与 clone 目标的 host CSV；默认仅信任 GitHub.com，GHE 必须由部署方显式加入
   - 按租户配置：通过 `POST /v1/github-app` 为指定 tenant 设置 `provider`、`app_id`、`installation_id`、`private_key`、`base_url`
   - GitHub App Manifest 流程：`WEB_ENABLED=true` 且配置 `GITHUB_APP_PUBLIC_BASE_URL` 时，可通过 `POST /v1/github-manifest` 创建 manifest 并回调 `POST /v1/github-manifest/callback` 完成按租户 onboarding
 - 本地管理员登录（开发环境，仅在 `OIDC_TENANT_ID` 为空且 `LOCAL_ADMIN_PASSWORD` 设置时启用）：
@@ -190,7 +191,9 @@ make db-down        # docker compose down
   - `VALIDATION_WORKER_INTERVAL`（默认 `10s`）
   - `VALIDATION_LEASE`（默认 `5m`）
   - `VALIDATION_MAX_ATTEMPTS`（默认 `3`）
-- `REVIEW_SEED_TENANT_ID`：启动时为指定 tenant 预置默认 review rubric（可选）
+  - `VALIDATION_SANDBOX_IMAGE`：validation worker 使用的受控容器镜像，必须以 `@sha256:<64 hex>` 固定 digest；缺失或未固定时验证 fail closed
+- `REVIEW_SEED_TENANT_ID`：启动时为指定 tenant 预置默认 review rubric 与 reviewer（可选）
+- `REVIEW_SEED_REVIEWER_USER_ID`：预置 reviewer 绑定的人类 session owner ID（默认 `default-reviewer`）
 - `SHUTDOWN_TIMEOUT`：优雅关闭超时，默认 `10s`
 
 启动示例：

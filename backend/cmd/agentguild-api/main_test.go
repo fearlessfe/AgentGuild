@@ -16,6 +16,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/config"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/testdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,6 +66,46 @@ func TestGitHubManifestOptionsUsesConfiguredAPIBaseURL(t *testing.T) {
 	require.Equal(t, cfg.GitHubAppPublicBaseURL, opts.PublicBaseURL)
 	require.Equal(t, cfg.GitHubAppManifestStateSecret, string(opts.StateSecret))
 	require.Equal(t, cfg.GitHub.BaseURL, opts.ConversionsBaseURL)
+}
+
+func TestListValidationWorkerTenantsIncludesTerminalUnsyncedJobs(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	ctx := context.Background()
+	cases := []struct {
+		tenant string
+		status string
+		synced bool
+	}{
+		{tenant: "tenant-failed", status: "failed", synced: false},
+		{tenant: "tenant-pending", status: "pending", synced: false},
+		{tenant: "tenant-succeeded", status: "succeeded", synced: false},
+		{tenant: "tenant-synced", status: "succeeded", synced: true},
+		{tenant: "tenant-cancelled", status: "cancelled", synced: false},
+	}
+	for _, tc := range cases {
+		submissionID := "submission-" + tc.tenant
+		_, err := db.Exec(ctx, `
+			INSERT INTO submissions (
+				tenant_id, id, task_id, execution_id, repo, branch, commit_sha,
+				base_commit_sha, summary, diff_fingerprint, status, created_at, updated_at
+			) VALUES ($1, $2, 'task-1', 'execution-1', 'owner/repo', 'agentguild/execution-1',
+			          'head-sha', 'base-sha', 'summary', 'fingerprint', 'pending_verification',
+			          clock_timestamp(), clock_timestamp())`, tc.tenant, submissionID)
+		require.NoError(t, err)
+		_, err = db.Exec(ctx, `
+			INSERT INTO validation_jobs (
+				tenant_id, id, submission_id, execution_id, repo, branch, commit_sha,
+				status, attempt, config_version, execution_state_synced, created_at, updated_at
+			) VALUES ($1, $2, $3, 'execution-1', 'owner/repo', 'agentguild/execution-1',
+			          'head-sha', $4, 0, 'v1', $5, clock_timestamp(), clock_timestamp())`,
+			tc.tenant, "job-"+tc.tenant, submissionID, tc.status, tc.synced)
+		require.NoError(t, err)
+	}
+
+	tenants, err := listValidationWorkerTenants(ctx, db)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenant-failed", "tenant-pending", "tenant-succeeded"}, tenants)
 }
 
 func TestWaitWorkersReturnsTrueWhenWorkersStop(t *testing.T) {

@@ -28,6 +28,9 @@ func (s *CredentialService) GetCredential(ctx context.Context, principal Princip
 		if err != nil {
 			return err
 		}
+		if err := s.authorizeCredentialRecord(ctx, principal, record, now); err != nil {
+			return err
+		}
 		result = Envelope[CredentialView]{
 			Data: credentialView(record, now),
 			Meta: Meta{ServerTime: now},

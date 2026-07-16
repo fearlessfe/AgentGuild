@@ -25,12 +25,15 @@ type Config struct {
 	ReputationWorkerInterval                               time.Duration
 	SyncWorkerInterval, SyncDefaultDeadline                time.Duration
 	ReviewSeedTenantID                                     string
+	ReviewSeedReviewerUserID                               string
 	ValidationWorkerInterval, ValidationLease              time.Duration
 	ValidationMaxAttempts                                  int
+	ValidationSandboxImage                                 string
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
 	GitHubAppPublicBaseURL, GitHubAppManifestStateSecret   string
+	GitHubAllowedHosts                                     []string
 	GitHub                                                 struct {
 		AppID          int64
 		PrivateKey     string
@@ -61,8 +64,11 @@ func Load(get LookupEnv) (Config, error) {
 		LangfuseBaseURL: get("LANGFUSE_BASE_URL"), LangfusePublicKey: get("LANGFUSE_PUBLIC_KEY"), LangfuseSecretKey: get("LANGFUSE_SECRET_KEY"),
 		LangfuseMode: value(get, "LANGFUSE_MODE", "cloud"), LangfuseMetricsPath: get("LANGFUSE_METRICS_PATH"), LangfuseCompleteTag: get("LANGFUSE_COMPLETE_COVERAGE_TAG"),
 		ReviewSeedTenantID:           get("REVIEW_SEED_TENANT_ID"),
+		ReviewSeedReviewerUserID:     value(get, "REVIEW_SEED_REVIEWER_USER_ID", "default-reviewer"),
+		ValidationSandboxImage:       get("VALIDATION_SANDBOX_IMAGE"),
 		GitHubAppPublicBaseURL:       get("GITHUB_APP_PUBLIC_BASE_URL"),
 		GitHubAppManifestStateSecret: get("SESSION_COOKIE_SECRET"),
+		GitHubAllowedHosts:           splitCSV(get("GITHUB_ALLOWED_HOSTS")),
 		LocalAdmin: struct {
 			TenantID   string
 			OwnerID    string
@@ -83,7 +89,7 @@ func Load(get LookupEnv) (Config, error) {
 	if cfg.WebEnabled, err = boolean(get, "WEB_ENABLED", true); err != nil {
 		return Config{}, err
 	}
-	cfg.GitHubAppPublicBaseURL, err = parseGitHubAppPublicBaseURL(cfg.GitHubAppPublicBaseURL, cfg.WebEnabled)
+	cfg.GitHubAppPublicBaseURL, err = parseGitHubAppPublicBaseURL(cfg.GitHubAppPublicBaseURL, cfg.WebEnabled || cfg.MCPEnabled)
 	if err != nil {
 		return Config{}, err
 	}
@@ -203,7 +209,7 @@ func Load(get LookupEnv) (Config, error) {
 func parseGitHubAppPublicBaseURL(raw string, required bool) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		if required {
-			return "", fmt.Errorf("GITHUB_APP_PUBLIC_BASE_URL is required when WEB_ENABLED=true")
+			return "", fmt.Errorf("GITHUB_APP_PUBLIC_BASE_URL is required when WEB_ENABLED=true or MCP_ENABLED=true")
 		}
 		return "", nil
 	}

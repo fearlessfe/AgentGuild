@@ -29,6 +29,10 @@ type WorkspaceFactory interface {
 	Prepare(ctx context.Context, job *gitdomain.ValidationJob) (dir string, cleanup func(), err error)
 }
 
+type WorkspaceIntegrityChecker interface {
+	CheckIntegrity(context.Context, *gitdomain.ValidationJob) (bool, error)
+}
+
 // Executor runs a command in a working directory.
 type Executor interface {
 	Execute(ctx context.Context, dir string, env map[string]string, args ...string) (output []byte, err error)
@@ -78,7 +82,7 @@ func NewRunner(registry Registry, factory WorkspaceFactory, executor Executor, o
 		factory = &errorWorkspaceFactory{}
 	}
 	if executor == nil {
-		executor = &CommandExecutor{}
+		executor = errorExecutor{}
 	}
 	r := &Runner{
 		registry: registry,
@@ -145,10 +149,10 @@ func (r *Runner) RunStep(ctx context.Context, job *gitdomain.ValidationJob, step
 	elapsed := finishedAt.Sub(startedAt)
 
 	result := gitdomain.Step{
-		Step:       step,
-		HardGate:   stepCfg.HardGate,
-		StartedAt:  &startedAt,
-		FinishedAt: &finishedAt,
+		Step:          step,
+		HardGate:      stepCfg.HardGate,
+		StartedAt:     &startedAt,
+		FinishedAt:    &finishedAt,
 		ResourceUsage: []byte(fmt.Sprintf(`{"elapsed_ms":%d}`, elapsed.Milliseconds())),
 	}
 	if runErr != nil {
@@ -159,6 +163,14 @@ func (r *Runner) RunStep(ctx context.Context, job *gitdomain.ValidationJob, step
 		result.LogSummary = r.redact(r.truncate(string(output), 2000))
 	}
 	return result, nil
+}
+
+func (r *Runner) CheckIntegrity(ctx context.Context, job *gitdomain.ValidationJob) (bool, error) {
+	checker, ok := r.factory.(WorkspaceIntegrityChecker)
+	if !ok {
+		return true, nil
+	}
+	return checker.CheckIntegrity(ctx, job)
 }
 
 func (r *Runner) redact(s string) string {
@@ -196,6 +208,7 @@ func (e *CommandExecutor) Execute(ctx context.Context, dir string, env map[strin
 	}
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = dir
+	cmd.Env = os.Environ()
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
@@ -204,6 +217,12 @@ func (e *CommandExecutor) Execute(ctx context.Context, dir string, env map[strin
 	cmd.Stderr = &buf
 	runErr := cmd.Run()
 	return buf.Bytes(), runErr
+}
+
+type errorExecutor struct{}
+
+func (errorExecutor) Execute(context.Context, string, map[string]string, ...string) ([]byte, error) {
+	return nil, errors.New("validation sandbox executor is not configured")
 }
 
 type errorWorkspaceFactory struct{}
@@ -242,11 +261,11 @@ func DefaultRegistry() Registry {
 	return Registry{
 		"default": {
 			Steps: map[gitdomain.ValidationStep]StepConfig{
-				gitdomain.ValidationStepBuild:          {Command: []string{"make", "build"}, Timeout: 5 * time.Minute, HardGate: true},
-				gitdomain.ValidationStepPublicTests:    {Command: []string{"make", "test-public"}, Timeout: 10 * time.Minute, HardGate: true},
-				gitdomain.ValidationStepHiddenTests:    {Command: []string{"make", "test-hidden"}, Timeout: 10 * time.Minute, HardGate: true},
-				gitdomain.ValidationStepStaticAnalysis: {Command: []string{"make", "lint"}, Timeout: 5 * time.Minute, HardGate: false},
-				gitdomain.ValidationStepSecurityScan:   {Command: []string{"make", "security-scan"}, Timeout: 5 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepBuild:          {Command: []string{"/opt/agentguild/bin/validate", "build"}, Timeout: 5 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepPublicTests:    {Command: []string{"/opt/agentguild/bin/validate", "public-tests"}, Timeout: 10 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepHiddenTests:    {Command: []string{"/opt/agentguild/bin/validate", "hidden-tests"}, Timeout: 10 * time.Minute, HardGate: true},
+				gitdomain.ValidationStepStaticAnalysis: {Command: []string{"/opt/agentguild/bin/validate", "static-analysis"}, Timeout: 5 * time.Minute, HardGate: false},
+				gitdomain.ValidationStepSecurityScan:   {Command: []string{"/opt/agentguild/bin/validate", "security-scan"}, Timeout: 5 * time.Minute, HardGate: true},
 			},
 		},
 	}

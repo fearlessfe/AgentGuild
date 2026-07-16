@@ -40,6 +40,7 @@ type applicationService interface {
 type submissionService interface {
 	CreateSubmission(ctx context.Context, principal gitapp.Principal, command gitapp.CreateSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
 	GetSubmission(ctx context.Context, principal gitapp.Principal, query gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error)
+	ListSubmissions(ctx context.Context, principal gitapp.Principal, query gitapp.ListSubmissions) (gitapp.Envelope[[]gitapp.SubmissionView], error)
 }
 
 type credentialService interface {
@@ -133,6 +134,7 @@ type Server struct {
 	idempotencyHeartbeat time.Duration
 	idempotencyIOTimeout time.Duration
 	healthChecker        healthChecker
+	gitProxy             http.Handler
 }
 
 // WithLocalAdmin 挂载本地管理员 fallback 登录接口。
@@ -211,6 +213,11 @@ func WithCredentialService(credentials credentialService) Option {
 	return func(s *Server) { s.credentials = credentials }
 }
 
+// WithGitProxy mounts the branch-enforcing Git smart HTTP gateway.
+func WithGitProxy(proxy http.Handler) Option {
+	return func(s *Server) { s.gitProxy = proxy }
+}
+
 // WithSession 配置人类管理端的签名 session cookie。
 func WithSession(secret string, secure bool) Option {
 	return func(s *Server) {
@@ -263,6 +270,9 @@ func (s *Server) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(jsonResponse)
 	r.Get("/healthz", s.healthz)
+	if s.gitProxy != nil {
+		r.Handle("/git/*", s.gitProxy)
+	}
 
 	if s.oidc != nil {
 		r.Get("/oauth/oidc/login", s.oidcLogin)
@@ -278,6 +288,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/oauth/local/login", s.localAdmin.login)
 	}
 	r.Get("/.well-known/agentguild", s.getAgentWellKnown)
+	r.Get("/openapi.yaml", serveOpenAPI)
+	r.Get("/skill.md", serveAgentSkill)
 
 	r.Route("/v1", func(r chi.Router) {
 		if s.identity != nil {
@@ -288,6 +300,8 @@ func (s *Server) Router() http.Handler {
 			r.With(s.authenticate, s.rateLimit).Get("/agents/me", s.getSelfAgent)
 
 			// Human management routes (session only)
+			// Registration reveals a one-time activation token. It must never pass
+			// through the generic response-persisting idempotency middleware.
 			r.With(s.requireSession, s.rateLimit).Post("/agents", s.registerAgent)
 			r.With(s.requireSession, s.rateLimit).Get("/agents", s.listAgents)
 			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}", s.getAgent)
@@ -319,6 +333,7 @@ func (s *Server) Router() http.Handler {
 
 			// Shared read-only routes (session or bearer)
 			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/submissions/{id}", s.getSubmission)
+			r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/executions/{id}/submissions", s.listSubmissions)
 		}
 
 		// Human-only write routes (session only)
@@ -327,11 +342,14 @@ func (s *Server) Router() http.Handler {
 		// Shared read-only routes (session or bearer)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/submissions/{id}/diff", s.getSubmissionDiff)
 
-		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/decision", s.submitDecision)
-		r.With(s.authenticate, s.rateLimit).Post("/reviews/{id}/comments", s.addComment)
+		// Review mutations are human governance actions and require a browser
+		// session. Application policy additionally enforces reviewer assignment.
+		r.With(s.requireSession, s.rateLimit).Post("/reviews/{id}/decision", s.submitDecision)
+		r.With(s.requireSession, s.rateLimit).Post("/reviews/{id}/comments", s.addComment)
 
 		// Shared read-only routes (session or bearer)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/reviews/{id}", s.getReview)
+		r.With(s.requireSession, s.rateLimit).Get("/reviews", s.listReviews)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/reputation", s.getReputation)
 
@@ -397,12 +415,12 @@ func (s *Server) Router() http.Handler {
 		}
 		if s.syncRules != nil {
 			r.With(s.requireSession, s.rateLimit).Get("/sync-rules", s.listSyncRules)
-			r.With(s.requireSession, s.rateLimit).Post("/sync-rules", s.createSyncRule)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("sync_rule.create")).Post("/sync-rules", s.createSyncRule)
 			r.With(s.requireSession, s.rateLimit).Get("/sync-rules/{id}", s.getSyncRule)
-			r.With(s.requireSession, s.rateLimit).Put("/sync-rules/{id}", s.updateSyncRule)
-			r.With(s.requireSession, s.rateLimit).Delete("/sync-rules/{id}", s.deleteSyncRule)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("sync_rule.update")).Put("/sync-rules/{id}", s.updateSyncRule)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("sync_rule.delete")).Delete("/sync-rules/{id}", s.deleteSyncRule)
 			if s.syncEngine != nil {
-				r.With(s.requireSession, s.rateLimit).Post("/sync-rules/{id}:run", s.runSyncRule)
+				r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("sync_rule.run")).Post("/sync-rules/{id}:run", s.runSyncRule)
 			}
 		}
 		if s.repositoryOnboarding != nil {

@@ -33,12 +33,12 @@ func (r *reviewRepository) Insert(ctx context.Context, review *domain.Review) er
 		return err
 	}
 	_, err = r.q.Exec(ctx, `
-		INSERT INTO reviews (
-			tenant_id, id, submission_id, reviewer_id, rubric_version_id,
-			rubric_scores, summary, status, final_decision, submitted_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
+			INSERT INTO reviews (
+				tenant_id, id, submission_id, reviewer_id, rubric_version_id,
+				capability, rubric_scores, summary, status, final_decision, submitted_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)`,
 		review.TenantID, review.ID, review.SubmissionID, review.ReviewerID, review.RubricVersionID,
-		scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
+		review.Capability, scores, nullString(review.Summary), review.Status, nullString(string(review.FinalDecision)),
 		nullTime(review.SubmittedAt), now,
 	)
 	return err
@@ -77,13 +77,13 @@ func (r *reviewRepository) GetByID(ctx context.Context, tenantID, reviewID strin
 	var scores []byte
 	err := r.q.QueryRow(ctx, `
 		SELECT tenant_id, id, submission_id, reviewer_id, rubric_version_id,
-		       rubric_scores, summary, status, final_decision, submitted_at, created_at
+		       capability, rubric_scores, summary, status, final_decision, submitted_at, created_at
 		FROM reviews
 		WHERE tenant_id=$1 AND id=$2`,
 		tenantID, reviewID,
 	).Scan(
 		&review.TenantID, &review.ID, &review.SubmissionID, &review.ReviewerID, &review.RubricVersionID,
-		&scores, &summary, &review.Status, &decision, &submittedAt,
+		&review.Capability, &scores, &summary, &review.Status, &decision, &submittedAt,
 		&review.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -106,7 +106,7 @@ func (r *reviewRepository) GetByID(ctx context.Context, tenantID, reviewID strin
 func (r *reviewRepository) ListBySubmission(ctx context.Context, tenantID, submissionID string) ([]domain.Review, error) {
 	rows, err := r.q.Query(ctx, `
 		SELECT tenant_id, id, submission_id, reviewer_id, rubric_version_id,
-		       rubric_scores, summary, status, final_decision, submitted_at, created_at
+		       capability, rubric_scores, summary, status, final_decision, submitted_at, created_at
 		FROM reviews
 		WHERE tenant_id=$1 AND submission_id=$2
 		ORDER BY created_at DESC, id ASC`,
@@ -128,6 +128,34 @@ func (r *reviewRepository) ListBySubmission(ctx context.Context, tenantID, submi
 	return reviews, rows.Err()
 }
 
+func (r *reviewRepository) List(ctx context.Context, tenantID, reviewerID, status string, limit int) ([]domain.Review, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := r.q.Query(ctx, `
+		SELECT tenant_id, id, submission_id, reviewer_id, rubric_version_id,
+		       capability, rubric_scores, summary, status, final_decision, submitted_at, created_at
+		FROM reviews
+		WHERE tenant_id=$1
+		  AND ($2='' OR reviewer_id=$2)
+		  AND ($3='' OR status=$3)
+		ORDER BY created_at DESC, id ASC
+		LIMIT $4`, tenantID, reviewerID, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var reviews []domain.Review
+	for rows.Next() {
+		review, err := scanReview(rows)
+		if err != nil {
+			return nil, err
+		}
+		reviews = append(reviews, *review)
+	}
+	return reviews, rows.Err()
+}
+
 func (r *reviewRepository) ListUnprojected(ctx context.Context, batchSize int) ([]application.ReviewSignalRecord, error) {
 	if batchSize <= 0 {
 		return nil, &appdomain.Error{Code: "invalid_argument", Message: "batch_size is invalid", Field: "batch_size"}
@@ -137,7 +165,7 @@ func (r *reviewRepository) ListUnprojected(ctx context.Context, batchSize int) (
 			r.tenant_id,
 			r.id,
 			e.agent_version_id,
-			COALESCE(rp.capabilities[1], t.type) AS capability,
+			r.capability,
 			t.type AS task_type,
 			r.final_decision,
 			COALESCE((
@@ -151,9 +179,9 @@ func (r *reviewRepository) ListUnprojected(ctx context.Context, batchSize int) (
 			), 0) AS cost_cents,
 			COALESCE(EXTRACT(EPOCH FROM (r.submitted_at - e.started_at)) * 1000, 0)::bigint AS latency_ms
 		FROM reviews r
-		JOIN executions e ON e.tenant_id = r.tenant_id AND e.id = r.submission_id
+		JOIN submissions s ON s.tenant_id = r.tenant_id AND s.id = r.submission_id
+		JOIN executions e ON e.tenant_id = s.tenant_id AND e.id = s.execution_id
 		JOIN tasks t ON t.tenant_id = e.tenant_id AND t.id = e.task_id
-		JOIN reviewer_profiles rp ON rp.tenant_id = r.tenant_id AND rp.id = r.reviewer_id
 		WHERE r.status = 'submitted' AND r.projected_at IS NULL
 		ORDER BY r.tenant_id, r.id
 		LIMIT $1
@@ -217,7 +245,7 @@ func scanReview(row reviewScanner) (*domain.Review, error) {
 	var scores []byte
 	if err := row.Scan(
 		&review.TenantID, &review.ID, &review.SubmissionID, &review.ReviewerID, &review.RubricVersionID,
-		&scores, &summary, &review.Status, &decision, &submittedAt,
+		&review.Capability, &scores, &summary, &review.Status, &decision, &submittedAt,
 		&review.CreatedAt,
 	); err != nil {
 		return nil, err

@@ -61,6 +61,30 @@ func (r *repositoryGitResolver) Driver(ctx context.Context, tenantID, fullName s
 	return git.ResolvedDriver{Driver: driver, FullName: canonical}, nil
 }
 
+func (r *repositoryGitResolver) ResolveBaseCommit(ctx context.Context, tenantID, fullName string) (string, error) {
+	record, canonical, err := r.repository(ctx, tenantID, fullName)
+	if err != nil {
+		return "", err
+	}
+	if record.SourceType != RepositorySourceGitHubApp || record.GitHubAppID == "" || record.DefaultBranch == "" {
+		return "", repositoryAccessConflict()
+	}
+	driver, err := r.apps.DriverForApp(ctx, tenantID, record.GitHubAppID)
+	if err != nil {
+		return "", err
+	}
+	commit, err := driver.GetCommit(ctx, canonical, record.DefaultBranch)
+	if err != nil {
+		return "", err
+	}
+	if commit.SHA == "" {
+		return "", repositoryAccessConflict()
+	}
+	return commit.SHA, nil
+}
+
+var _ RepositoryBaseResolver = (*repositoryGitResolver)(nil)
+
 func (r *repositoryGitResolver) IssueSource(ctx context.Context, tenantID, fullName, sourceAuth string) (git.ResolvedIssueSource, error) {
 	record, canonical, err := r.repository(ctx, tenantID, fullName)
 	if err != nil {

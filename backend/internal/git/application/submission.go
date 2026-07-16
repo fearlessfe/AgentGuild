@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/git"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
 
@@ -17,14 +18,8 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 	if cmd.ExecutionID == "" {
 		return result, invalid("execution_id")
 	}
-	if cmd.TaskID == "" {
-		return result, invalid("task_id")
-	}
 	if cmd.Repo == "" {
 		return result, invalid("repo")
-	}
-	if cmd.Branch == "" {
-		return result, invalid("branch")
 	}
 	if cmd.CommitSHA == "" {
 		return result, invalid("commit_sha")
@@ -41,22 +36,57 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if err != nil {
 			return err
 		}
-
-		// Idempotency: same execution + same commit SHA returns the existing
-		// submission regardless of request id.
+		if s.authorizer == nil {
+			return domain.ErrForbidden
+		}
+		grant, err := s.authorizer.AuthorizeSubmission(ctx, principal, cmd, now)
+		if err != nil {
+			return err
+		}
+		if grant.TaskID == "" || grant.Repo == "" {
+			return domain.ErrForbidden
+		}
+		if !hasRepoScope(principal.RepoScope, grant.Repo) {
+			return domain.ErrForbidden
+		}
+		expectedBranch := restrictedBranchPrefix + cmd.ExecutionID
+		// Idempotency remains available after the proxy credential is revoked.
 		existing, err := tx.Submissions().GetByExecutionID(ctx, principal.TenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
 		}
 		for _, sub := range existing {
 			if sub.CommitSHA == cmd.CommitSHA {
-				result = Envelope[SubmissionView]{
-					Data: submissionView(sub, now),
-					Meta: Meta{ServerTime: now},
+				if cmd.Repo != sub.Repo || cmd.Branch != sub.Branch || cmd.BaseCommitSHA != sub.BaseCommitSHA {
+					return domain.ErrForbidden
 				}
+				result = Envelope[SubmissionView]{Data: submissionView(sub, now), Meta: Meta{ServerTime: now}}
 				return nil
 			}
 		}
+		credential, err := tx.Credentials().GetByExecutionID(ctx, principal.TenantID, cmd.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if credential.Status != gitdomain.CredentialStatusActive || credential.RevokedAt != nil ||
+			!now.Before(credential.ExpiresAt) || credential.Repo != grant.Repo || credential.Branch != expectedBranch {
+			return domain.ErrForbidden
+		}
+		if grant.BaseCommit != "" && credential.BaseCommit != grant.BaseCommit {
+			return domain.ErrForbidden
+		}
+		if cmd.Branch != credential.Branch {
+			return git.ErrInvalidBranch
+		}
+		if cmd.Repo != credential.Repo || cmd.BaseCommitSHA != credential.BaseCommit {
+			return domain.ErrForbidden
+		}
+		cmd.TaskID = grant.TaskID
+		cmd.Repo = credential.Repo
+		cmd.BaseCommitSHA = credential.BaseCommit
+		cmd.Branch = credential.Branch
+		cmd.AllowedPaths = append([]string(nil), grant.AllowedPaths...)
+		cmd.ForbiddenPaths = append([]string(nil), grant.ForbiddenPaths...)
 
 		if err := s.verifier.Verify(ctx, VerifyCommit{
 			TenantID:       principal.TenantID,
@@ -101,6 +131,9 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if err := tx.Submissions().Save(ctx, sub); err != nil {
 			return err
 		}
+		if err := tx.Credentials().Revoke(ctx, principal.TenantID, cmd.ExecutionID); err != nil {
+			return err
+		}
 
 		configVersion := cmd.ConfigVersion
 		if configVersion == "" {
@@ -128,16 +161,16 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		return result, err
 	}
 
-	// Transition the execution to submitted so the task lifecycle reflects the
-	// delivery event. The transition is best-effort: it happens after the
-	// transaction commits so that a notification failure does not roll back the
-	// submission or validation job.
-	_ = s.notifier.Notify(ctx, ExecutionStateCommand{
+	// A failed state transition remains retryable: the idempotent submission
+	// lookup above returns the same record, then retries this notification.
+	if err := s.notifier.Notify(ctx, ExecutionStateCommand{
 		TenantID:    principal.TenantID,
 		ExecutionID: cmd.ExecutionID,
 		Intent:      domain.IntentSubmit,
 		Actor:       domain.Actor{Type: domain.ActorAgent, ID: principal.AgentID},
-	}, time.Now())
+	}, time.Now()); err != nil {
+		return result, err
+	}
 
 	return result, nil
 }
@@ -165,6 +198,35 @@ func (s *SubmissionService) GetSubmission(ctx context.Context, principal Princip
 			Data: submissionView(sub, now),
 			Meta: Meta{ServerTime: now},
 		}
+		return nil
+	})
+	return result, err
+}
+
+// ListSubmissions returns tenant-scoped submissions for an execution. The
+// transport must first authorize access to the owning execution.
+func (s *SubmissionService) ListSubmissions(ctx context.Context, principal Principal, query ListSubmissions) (Envelope[[]SubmissionView], error) {
+	var result Envelope[[]SubmissionView]
+	if err := requireCaller(principal); err != nil {
+		return result, err
+	}
+	if query.ExecutionID == "" {
+		return result, invalid("execution_id")
+	}
+	err := s.store.WithTx(ctx, func(tx Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		submissions, err := tx.Submissions().GetByExecutionID(ctx, principal.TenantID, query.ExecutionID)
+		if err != nil {
+			return err
+		}
+		views := make([]SubmissionView, len(submissions))
+		for i := range submissions {
+			views[i] = submissionView(submissions[i], now)
+		}
+		result = Envelope[[]SubmissionView]{Data: views, Meta: Meta{ServerTime: now}}
 		return nil
 	})
 	return result, err

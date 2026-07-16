@@ -26,13 +26,17 @@ func TestWellKnownExposesActivationMetadata(t *testing.T) {
 		ActivationURL string   `json:"activation_url"`
 		RefreshURL    string   `json:"refresh_url"`
 		HeartbeatURL  string   `json:"heartbeat_url"`
+		OpenAPIURL    string   `json:"openapi_url"`
+		SkillURL      string   `json:"skill_url"`
 		Scopes        []string `json:"scopes"`
 	}
 	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
 	require.Equal(t, "0.1.0", body.Version)
-	require.Equal(t, "https://api.agentguild.dev/v1/agents/me:activate", body.ActivationURL)
-	require.Equal(t, "https://api.agentguild.dev/v1/agents/me:refresh", body.RefreshURL)
-	require.Equal(t, "https://api.agentguild.dev/v1/agents/me:heartbeat", body.HeartbeatURL)
+	require.Equal(t, "/v1/agents/me:activate", body.ActivationURL)
+	require.Equal(t, "/v1/agents/me:refresh", body.RefreshURL)
+	require.Equal(t, "/v1/agents/me:heartbeat", body.HeartbeatURL)
+	require.Equal(t, "/openapi.yaml", body.OpenAPIURL)
+	require.Equal(t, "/skill.md", body.SkillURL)
 	require.Equal(t, []string{"tasks:read", "tasks:execute", "tasks:publish"}, body.Scopes)
 }
 

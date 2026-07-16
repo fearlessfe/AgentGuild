@@ -211,6 +211,11 @@ func (f *fakeReviewService) GetReview(ctx context.Context, p auth.Principal, q r
 	return f.getReview, f.getReviewErr
 }
 
+func (f *fakeReviewService) ListReviews(ctx context.Context, p auth.Principal, q reviewapp.ListReviews) (application.Envelope[[]reviewapp.ReviewView], error) {
+	f.calls = append(f.calls, call{method: "ListReviews", principal: p, payload: q})
+	return application.Envelope[[]reviewapp.ReviewView]{Data: []reviewapp.ReviewView{}}, nil
+}
+
 func (f *fakeReviewService) GetSubmissionDiff(ctx context.Context, p auth.Principal, q reviewapp.GetSubmissionDiff) (application.Envelope[[]reviewapp.FileDiff], error) {
 	f.calls = append(f.calls, call{method: "GetSubmissionDiff", principal: p, payload: q})
 	return f.getSubmissionDiff, f.getSubmissionDiffErr
@@ -633,7 +638,7 @@ func TestSubmitDecision(t *testing.T) {
 	review := &fakeReviewService{}
 	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
 	body := `{"request_id":"req-d","decision":"accepted","scores":[{"dimension":"correctness","score":90}],"summary":"lgtm"}`
-	res := postJSON(t, server, "/v1/reviews/review-1/decision", body, "token-publisher", "Idempotency-Key", "req-d")
+	res := postJSONWithSession(t, server, "/v1/reviews/review-1/decision", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "req-d")
 	require.Equal(t, http.StatusOK, res.Code)
 	require.Len(t, review.calls, 1)
 	cmd := review.calls[0].payload.(reviewapp.SubmitDecision)
@@ -650,7 +655,7 @@ func TestAddComment(t *testing.T) {
 	review := &fakeReviewService{}
 	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
 	body := `{"request_id":"req-c","submission_id":"sub-1","file_path":"main.go","side":"right","line_number":42,"hunk_hash":"h1","diff_fingerprint":"d1","text":"fix this"}`
-	res := postJSON(t, server, "/v1/reviews/review-1/comments", body, "token-publisher", "Idempotency-Key", "req-c")
+	res := postJSONWithSession(t, server, "/v1/reviews/review-1/comments", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "req-c")
 	require.Equal(t, http.StatusCreated, res.Code)
 	require.Len(t, review.calls, 1)
 	cmd := review.calls[0].payload.(reviewapp.AddComment)

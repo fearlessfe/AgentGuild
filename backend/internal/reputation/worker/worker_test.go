@@ -45,7 +45,7 @@ func TestWorkerDoesNotProcessPendingReviews(t *testing.T) {
 	seedReviewableExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
-	review, err := reviewdomain.NewReview("review-1", "tenant-1", "exe-1", reviewerID, rubricID, time.Now())
+	review, err := reviewdomain.NewReview("review-1", "tenant-1", "exe-1", reviewerID, rubricID, "code-review", time.Now())
 	require.NoError(t, err)
 	require.NoError(t, reviewpostgres.NewReviewRepository(db).Insert(ctx, review))
 
@@ -163,7 +163,7 @@ func seedReviewableExecution(t *testing.T, db *pgxpool.Pool, tenantID, taskID, e
 func submitReview(t *testing.T, db *pgxpool.Pool, tenantID, reviewID, submissionID, reviewerID, rubricVersionID string, decision reviewdomain.Decision) *reviewdomain.Review {
 	t.Helper()
 	ctx := context.Background()
-	review, err := reviewdomain.NewReview(reviewID, tenantID, submissionID, reviewerID, rubricVersionID, time.Now())
+	review, err := reviewdomain.NewReview(reviewID, tenantID, submissionID, reviewerID, rubricVersionID, "code-review", time.Now())
 	require.NoError(t, err)
 	rubric := newRubricVersion(rubricVersionID, tenantID, 1)
 	require.NoError(t, review.Submit(decision, []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}}, rubric, time.Now()))

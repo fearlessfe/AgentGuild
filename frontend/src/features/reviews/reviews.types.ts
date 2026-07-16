@@ -72,6 +72,7 @@ export type ReviewView = {
   submission_id: string;
   reviewer_id: string;
   rubric_version_id: string;
+  capability: string;
   status: ReviewStatus;
   final_decision?: Decision;
   rubric_scores: RubricScore[];

@@ -11,17 +11,19 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 )
 
 // Service orchestrates the code-review lifecycle.
 type Service struct {
-	store      application.Store
-	policy     Policy
-	allocator  Allocator
-	diff       DiffProvider
-	validation ValidationProvider
-	newID      func() string
+	store       application.Store
+	submissions gitapp.SubmissionRepository
+	policy      Policy
+	allocator   Allocator
+	diff        DiffProvider
+	validation  ValidationProvider
+	newID       func() string
 }
 
 // Options configures a new Service.
@@ -30,9 +32,12 @@ type Options struct {
 }
 
 // NewService creates a review application service.
-func NewService(store application.Store, diff DiffProvider, validation ValidationProvider, options Options) (*Service, error) {
+func NewService(store application.Store, submissions gitapp.SubmissionRepository, diff DiffProvider, validation ValidationProvider, options Options) (*Service, error) {
 	if store == nil {
 		return nil, invalid("store")
+	}
+	if submissions == nil {
+		return nil, invalid("submission_repository")
 	}
 	if diff == nil {
 		return nil, invalid("diff_provider")
@@ -44,12 +49,13 @@ func NewService(store application.Store, diff DiffProvider, validation Validatio
 		options.NewID = randomID
 	}
 	return &Service{
-		store:      store,
-		policy:     Policy{},
-		allocator:  Allocator{},
-		diff:       diff,
-		validation: validation,
-		newID:      options.NewID,
+		store:       store,
+		submissions: submissions,
+		policy:      Policy{},
+		allocator:   Allocator{},
+		diff:        diff,
+		validation:  validation,
+		newID:       options.NewID,
 	}, nil
 }
 
@@ -100,18 +106,65 @@ type SubmitForReview struct {
 
 // ReviewView is the serialized representation of a review.
 type ReviewView struct {
-	ID              string                 `json:"id"`
-	TenantID        string                 `json:"tenant_id"`
-	SubmissionID    string                 `json:"submission_id"`
-	ReviewerID      string                 `json:"reviewer_id"`
-	RubricVersionID string                 `json:"rubric_version_id"`
+	ID              string                     `json:"id"`
+	TenantID        string                     `json:"tenant_id"`
+	SubmissionID    string                     `json:"submission_id"`
+	ReviewerID      string                     `json:"reviewer_id"`
+	RubricVersionID string                     `json:"rubric_version_id"`
+	Capability      string                     `json:"capability"`
 	RubricScores    []reviewdomain.RubricScore `json:"rubric_scores"`
-	Summary         string                 `json:"summary,omitempty"`
-	Status          string                 `json:"status"`
-	FinalDecision   string                 `json:"final_decision,omitempty"`
-	SubmittedAt     time.Time              `json:"submitted_at,omitempty"`
-	CreatedAt       time.Time              `json:"created_at"`
-	LineComments    []CommentView          `json:"line_comments"`
+	Summary         string                     `json:"summary,omitempty"`
+	Status          string                     `json:"status"`
+	FinalDecision   string                     `json:"final_decision,omitempty"`
+	SubmittedAt     time.Time                  `json:"submitted_at,omitempty"`
+	CreatedAt       time.Time                  `json:"created_at"`
+	LineComments    []CommentView              `json:"line_comments"`
+}
+
+type ListReviews struct {
+	Status string
+	Limit  int
+}
+
+func (s *Service) ListReviews(ctx context.Context, principal auth.Principal, query ListReviews) (application.Envelope[[]ReviewView], error) {
+	var result application.Envelope[[]ReviewView]
+	if principal.Type != auth.PrincipalTypeHuman || principal.TenantID == "" {
+		return result, domain.ErrForbidden
+	}
+	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		reviewerID := ""
+		if !principal.IsAdmin {
+			profiles, err := tx.Reviewers().ListActive(ctx, principal.TenantID, 1000)
+			if err != nil {
+				return err
+			}
+			for i := range profiles {
+				if profiles[i].UserID == principal.OwnerID {
+					reviewerID = profiles[i].ID
+					break
+				}
+			}
+			if reviewerID == "" {
+				result = application.Envelope[[]ReviewView]{Data: []ReviewView{}, Meta: application.Meta{ServerTime: now}}
+				return nil
+			}
+		}
+		reviews, err := tx.Reviews().List(ctx, principal.TenantID, reviewerID, query.Status, query.Limit)
+		if err != nil {
+			return err
+		}
+		views := make([]ReviewView, len(reviews))
+		for i := range reviews {
+			views[i] = reviewView(&reviews[i], nil)
+		}
+		result = application.Envelope[[]ReviewView]{Data: views, Meta: application.Meta{ServerTime: now}}
+		return nil
+	})
+	return result, err
 }
 
 // RubricDimensionView is the serialized representation of a rubric dimension.
@@ -122,15 +175,15 @@ type RubricDimensionView struct {
 
 // RubricView is the serialized representation of the active rubric.
 type RubricView struct {
-	ID               string                 `json:"id"`
-	TenantID         string                 `json:"tenant_id"`
-	VersionNumber    int                    `json:"version_number"`
-	Name             string                 `json:"name"`
-	Dimensions       []RubricDimensionView  `json:"dimensions"`
-	Weights          map[string]float64     `json:"weights"`
-	AlgorithmVersion string                 `json:"algorithm_version"`
-	IsActive         bool                   `json:"is_active"`
-	CreatedAt        time.Time              `json:"created_at"`
+	ID               string                `json:"id"`
+	TenantID         string                `json:"tenant_id"`
+	VersionNumber    int                   `json:"version_number"`
+	Name             string                `json:"name"`
+	Dimensions       []RubricDimensionView `json:"dimensions"`
+	Weights          map[string]float64    `json:"weights"`
+	AlgorithmVersion string                `json:"algorithm_version"`
+	IsActive         bool                  `json:"is_active"`
+	CreatedAt        time.Time             `json:"created_at"`
 }
 
 // CommentView is the serialized representation of a line comment.
@@ -172,7 +225,7 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return &domain.Error{Code: "state_conflict", Message: "idempotency request is already in progress"}
 		}
 
-		execution, _, err := tx.GetExecution(ctx, principal.TenantID, cmd.SubmissionID)
+		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, cmd.SubmissionID)
 		if err != nil {
 			if domain.CodeOf(err) == "not_found" {
 				return domain.ErrNotFound
@@ -206,7 +259,11 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return err
 		}
 
-		review, err := reviewdomain.NewReview(s.newID(), principal.TenantID, cmd.SubmissionID, reviewerID, rubric.ID, now)
+		capability := task.Type
+		if len(cmd.Capabilities) > 0 {
+			capability = cmd.Capabilities[0]
+		}
+		review, err := reviewdomain.NewReview(s.newID(), principal.TenantID, cmd.SubmissionID, reviewerID, rubric.ID, capability, now)
 		if err != nil {
 			return err
 		}
@@ -263,7 +320,7 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 		}
 
 		if cmd.Decision == reviewdomain.DecisionAccepted {
-			status, err := s.validation.GetValidationStatus(ctx, review.SubmissionID)
+			status, err := s.validation.GetValidationStatus(ctx, principal.TenantID, review.SubmissionID)
 			if err != nil {
 				return err
 			}
@@ -280,6 +337,7 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 		if err := review.Submit(cmd.Decision, cmd.Scores, rubric, now); err != nil {
 			return err
 		}
+		review.Summary = cmd.Summary
 
 		if err := tx.Reviews().Update(ctx, review); err != nil {
 			return err
@@ -289,7 +347,7 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			return err
 		}
 
-		if err := applyDecisionToExecution(ctx, tx, review, now); err != nil {
+		if err := s.applyDecisionToExecution(ctx, tx, review, now); err != nil {
 			return err
 		}
 
@@ -373,7 +431,7 @@ func (s *Service) GetActiveRubric(ctx context.Context, principal auth.Principal)
 	if err := requireTenant(principal); err != nil {
 		return result, err
 	}
-	if err := requireScope(principal, "reviews:read"); err != nil {
+	if err := requireHumanOrScope(principal, "reviews:read"); err != nil {
 		return result, err
 	}
 	err := s.store.WithTx(ctx, func(tx application.Tx) error {
@@ -412,7 +470,7 @@ func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query
 			return err
 		}
 
-		execution, _, err := tx.GetExecution(ctx, principal.TenantID, review.SubmissionID)
+		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, review.SubmissionID)
 		if err != nil {
 			return err
 		}
@@ -449,8 +507,12 @@ func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query
 	return result, err
 }
 
-func applyDecisionToExecution(ctx context.Context, tx application.Tx, review *reviewdomain.Review, now time.Time) error {
-	execution, version, err := tx.GetExecutionForUpdate(ctx, review.TenantID, review.SubmissionID)
+func (s *Service) applyDecisionToExecution(ctx context.Context, tx application.Tx, review *reviewdomain.Review, now time.Time) error {
+	submission, err := s.submissions.GetByID(ctx, review.TenantID, review.SubmissionID)
+	if err != nil {
+		return err
+	}
+	execution, version, err := tx.GetExecutionForUpdate(ctx, review.TenantID, submission.ExecutionID)
 	if err != nil {
 		return err
 	}
@@ -460,6 +522,26 @@ func applyDecisionToExecution(ctx context.Context, tx application.Tx, review *re
 	case reviewdomain.DecisionAccepted:
 		if err := execution.Accept(actor, now); err != nil {
 			return err
+		}
+		taskRecord, err := tx.GetTask(ctx, review.TenantID, execution.TaskID)
+		if err != nil {
+			return err
+		}
+		task := &domain.Task{
+			ID: taskRecord.ID, TenantID: taskRecord.TenantID,
+			PublisherID: taskRecord.PublisherAgentVersionID, Deadline: taskRecord.Deadline,
+			Status: taskRecord.Status, ClaimedBy: taskRecord.ClaimedBy,
+		}
+		if err := task.Apply(domain.IntentComplete, actor, now); err != nil {
+			return err
+		}
+		taskRecord.Status = task.Status
+		updatedTask, err := tx.UpdateTask(ctx, *taskRecord, taskRecord.StateVersion, execution.ID)
+		if err != nil {
+			return err
+		}
+		if !updatedTask {
+			return &domain.Error{Code: "state_conflict", Message: "task changed concurrently"}
 		}
 	case reviewdomain.DecisionRejected:
 		if err := execution.Reject(actor, now); err != nil {
@@ -479,6 +561,15 @@ func applyDecisionToExecution(ctx context.Context, tx application.Tx, review *re
 		return &domain.Error{Code: "state_conflict", Message: "execution changed concurrently"}
 	}
 	return nil
+}
+
+func (s *Service) executionForSubmission(ctx context.Context, tx application.Tx, tenantID, submissionID string) (*domain.Execution, error) {
+	submission, err := s.submissions.GetByID(ctx, tenantID, submissionID)
+	if err != nil {
+		return nil, err
+	}
+	execution, _, err := tx.GetExecution(ctx, tenantID, submission.ExecutionID)
+	return execution, err
 }
 
 func reviewRecord(review *reviewdomain.Review, reviewer *reviewdomain.ReviewerProfile) ReviewRecord {
@@ -514,21 +605,21 @@ func (s *Service) GetSubmissionDiff(ctx context.Context, principal auth.Principa
 			return err
 		}
 
-		execution, _, err := tx.GetExecution(ctx, principal.TenantID, query.SubmissionID)
+		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
 
-		_, err = tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
 		if err != nil {
 			return err
 		}
 
-		if err := s.policy.CanViewSubmission(principal); err != nil {
+		if err := s.canViewSubmissionDiff(ctx, tx, principal, query.SubmissionID, task, execution); err != nil {
 			return err
 		}
 
-		diff, err := s.diff.GetDiff(ctx, query.SubmissionID)
+		diff, err := s.diff.GetDiff(ctx, principal.TenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
@@ -540,6 +631,26 @@ func (s *Service) GetSubmissionDiff(ctx context.Context, principal auth.Principa
 		return nil
 	})
 	return result, err
+}
+
+func (s *Service) canViewSubmissionDiff(ctx context.Context, tx application.Tx, principal auth.Principal, submissionID string, task *application.TaskRecord, execution *domain.Execution) error {
+	if principal.IsAdmin && principal.TenantID == task.TenantID {
+		return nil
+	}
+	reviews, err := tx.Reviews().ListBySubmission(ctx, principal.TenantID, submissionID)
+	if err != nil {
+		return err
+	}
+	for i := range reviews {
+		reviewer, err := tx.Reviewers().GetByID(ctx, principal.TenantID, reviews[i].ReviewerID)
+		if err != nil {
+			return err
+		}
+		if s.policy.CanViewReview(ctx, principal, reviewRecord(&reviews[i], reviewer), taskSummary(task, execution)) == nil {
+			return nil
+		}
+	}
+	return domain.ErrForbidden
 }
 
 // SubmitForReview moves a running execution to the reviewing state.
@@ -654,6 +765,7 @@ func reviewView(review *reviewdomain.Review, comments []CommentView) ReviewView 
 		SubmissionID:    review.SubmissionID,
 		ReviewerID:      review.ReviewerID,
 		RubricVersionID: review.RubricVersionID,
+		Capability:      review.Capability,
 		RubricScores:    append([]reviewdomain.RubricScore(nil), review.RubricScores...),
 		Summary:         review.Summary,
 		Status:          string(review.Status),

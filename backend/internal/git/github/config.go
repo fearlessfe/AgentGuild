@@ -6,14 +6,18 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 )
 
 // Config holds the parameters required to act as a GitHub App installation.
 type Config struct {
-	AppID          int64
-	PrivateKey     string
-	InstallationID int64
-	BaseURL        string
+	AppID             int64
+	PrivateKey        string
+	InstallationID    int64
+	BaseURL           string
+	AllowedHosts      []string
+	AllowInsecureHTTP bool
 }
 
 // Validate checks that the configuration contains the mandatory values and
@@ -30,6 +34,27 @@ func (c Config) Validate() error {
 	}
 	if c.BaseURL == "" {
 		c.BaseURL = "https://api.github.com"
+	}
+	allowed := c.AllowedHosts
+	if len(allowed) == 0 {
+		allowed = []string{"api.github.com"}
+	}
+	if c.AllowInsecureHTTP {
+		u, err := url.Parse(c.BaseURL)
+		if err != nil || u.Scheme != "http" || u.Host == "" || u.User != nil {
+			return errors.New("insecure github test URL is invalid")
+		}
+		matched := false
+		for _, host := range allowed {
+			if strings.EqualFold(strings.TrimSpace(host), u.Hostname()) {
+				matched = true
+			}
+		}
+		if !matched {
+			return errors.New("insecure github test host is not allowed")
+		}
+	} else if _, err := ValidateBaseURL(c.BaseURL, allowed); err != nil {
+		return err
 	}
 	return nil
 }

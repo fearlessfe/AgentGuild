@@ -95,6 +95,7 @@ type GetSubmissionInput struct {
 
 // IssueCredentialInput 是 credential_issue 工具的输入。
 type IssueCredentialInput struct {
+	RequestID   string `json:"request_id" jsonschema:"idempotency key for this issuance attempt"`
 	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
 	Repo        string `json:"repo" jsonschema:"repository in owner/name format"`
 	Branch      string `json:"branch,omitempty" jsonschema:"optional restricted branch"`
@@ -294,6 +295,7 @@ func registerTools(server *mcp.Server, svc applicationService, submissions submi
 			Description: "为执行签发短期 Git 凭证",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input IssueCredentialInput) (*mcp.CallToolResult, any, error) {
 			result, err := credentials.IssueCredential(ctx, gitPrincipal(principal), gitapp.IssueCredential{
+				RequestID:   input.RequestID,
 				ExecutionID: input.ExecutionID,
 				Repo:        input.Repo,
 				Branch:      input.Branch,

@@ -1,6 +1,9 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as client from "../../api/client";
+import type { Envelope, SyncRule } from "../../api/client";
 import { AppShell } from "../../app/AppShell";
 import { OnboardingScreen } from "../onboarding/OnboardingScreen";
 import { SyncRuleScreen } from "./SyncRuleScreen";
@@ -54,7 +57,90 @@ describe("Navigation and sync integration", () => {
 
     expect(await screen.findByRole("table", { name: "同步规则列表" })).toBeVisible();
     expect(screen.queryByText("公共仓库同步")).toBeNull();
-    expect(screen.queryByRole("button", { name: "添加公共规则" })).toBeNull();
+    expect(screen.getByRole("button", { name: "创建规则" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "仓库接入" })).toHaveAttribute("href", "/repositories");
   });
 });
+
+describe("SyncRuleScreen repository inventory", () => {
+  const onboardedRepository = {
+    id: "repo-platform-api",
+    source_type: "github_app" as const,
+    github_app_id: "gha-platform",
+    full_name: "company/platform-api",
+    default_branch: "main",
+    visibility: "private",
+  };
+
+  beforeEach(() => {
+    delete (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE;
+    vi.spyOn(client, "getRepositoryOnboarding").mockResolvedValue(envelope({
+      github_app: { id: "gha-platform", app_id: 101, configured: true, is_default: true },
+      app_repositories: {
+        items: [
+          onboardedRepository,
+          { full_name: "company/not-onboarded", default_branch: "main", visibility: "private" },
+        ],
+      },
+      onboarded_repositories: { items: [onboardedRepository] },
+    }));
+    vi.spyOn(client, "listSyncRules").mockResolvedValue(envelope({ items: [] }));
+    vi.spyOn(client, "createSyncRule").mockImplementation(async (input) => envelope(syncRule(input.repo)));
+    vi.spyOn(client, "runSyncRule").mockResolvedValue(envelope({
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      cancelled: 0,
+      failed: 0,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE;
+  });
+
+  it("creates a rule only from the tenant's onboarded repositories", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SyncRuleScreen />
+      </MemoryRouter>,
+    );
+
+    const repo = await screen.findByLabelText("仓库");
+    expect(repo).toHaveValue("company/platform-api");
+    expect(within(repo).getByRole("option", { name: "company/platform-api" })).toBeVisible();
+    expect(within(repo).queryByRole("option", { name: "company/not-onboarded" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("仓库来源")).toHaveValue("GitHub App");
+    expect(screen.getByLabelText("Issue 访问")).toHaveValue("app");
+
+    await user.click(screen.getByRole("button", { name: "创建规则" }));
+    expect(client.createSyncRule).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: "company/platform-api", source_auth: "app" }),
+      { idempotencyKey: expect.any(String) },
+    );
+    expect(await screen.findByRole("heading", { name: "同步结果" })).toBeVisible();
+  });
+});
+
+function envelope<T>(data: T): Envelope<T> {
+  return { data, meta: { server_time: "2026-07-16T00:00:00Z", resource_version: 1 } };
+}
+
+function syncRule(repo: string): SyncRule {
+  return {
+    id: "rule-platform-api",
+    repo,
+    include_labels: ["agent-task"],
+    exclude_labels: ["blocked", "wontfix"],
+    issue_state: "open",
+    task_type: "coding",
+    default_priority: "normal",
+    dedupe_strategy: "update",
+    source_auth: "app",
+    enabled: true,
+    created_at: "2026-07-16T00:00:00Z",
+    updated_at: "2026-07-16T00:00:00Z",
+  };
+}

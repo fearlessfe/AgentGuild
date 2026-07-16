@@ -59,6 +59,7 @@ func TestReviewUpdatePersistsSubmissionAndScores(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, domain.ReviewSubmitted, got.Status)
 	require.Equal(t, domain.DecisionAccepted, got.FinalDecision)
+	require.Equal(t, "code-review", got.Capability)
 	require.Len(t, got.RubricScores, 1)
 	require.Equal(t, 90, got.RubricScores[0].Score)
 	require.False(t, got.SubmittedAt.IsZero())
@@ -310,7 +311,7 @@ func TestReviewInsertUsesTransactionTime(t *testing.T) {
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
 	past := time.Now().Add(-24 * time.Hour)
-	review, err := domain.NewReview("review-time", "tenant-1", "sub-time", reviewerID, rubricID, past)
+	review, err := domain.NewReview("review-time", "tenant-1", "sub-time", reviewerID, rubricID, "code-review", past)
 	require.NoError(t, err)
 
 	var txNow time.Time
@@ -380,6 +381,7 @@ func TestListUnprojectedReturnsSubmittedReviewsWithExecutionMetadata(t *testing.
 	require.Equal(t, "tenant-1", records[0].TenantID)
 	require.Equal(t, review.ID, records[0].ReviewID)
 	require.Equal(t, "agent-v1", records[0].AgentVersionID)
+	require.Equal(t, "code-review", records[0].Capability)
 	require.Equal(t, "code", records[0].TaskType)
 	require.Equal(t, domain.DecisionAccepted, records[0].Decision)
 }
@@ -471,7 +473,7 @@ func submitReviewWithRubric(t *testing.T, db *pgxpool.Pool, tenantID, reviewID, 
 }
 
 func newReview(id, tenantID, submissionID, reviewerID, rubricVersionID string) *domain.Review {
-	review, err := domain.NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID, time.Now())
+	review, err := domain.NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID, "code-review", time.Now())
 	if err != nil {
 		panic(err)
 	}

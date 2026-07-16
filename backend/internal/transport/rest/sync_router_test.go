@@ -29,7 +29,7 @@ func TestSyncCreateRuleAdminSessionReturnsCreatedView(t *testing.T) {
 		"task_type":"coding",
 		"default_priority":"normal",
 		"dedupe_strategy":"update"
-	}`, sessionCookie(t, "admin-1", true))
+	}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "sync-create-1")
 
 	require.Equal(t, http.StatusCreated, res.Code)
 	var body struct {
@@ -47,6 +47,35 @@ func TestSyncCreateRuleAdminSessionReturnsCreatedView(t *testing.T) {
 	require.True(t, body.Data.Enabled)
 }
 
+func TestSyncCreateRuleRequiresIdempotencyKey(t *testing.T) {
+	rules := newSyncRuleService(t)
+	server := newTestServer(&fakeApplication{}, rest.WithSyncRuleService(rules))
+
+	res := postJSONWithSession(t, server, "/v1/sync-rules", `{
+		"repo":"agentguild/agentguild",
+		"issue_state":"open",
+		"task_type":"coding",
+		"dedupe_strategy":"update"
+	}`, sessionCookie(t, "admin-1", true))
+
+	require.Equal(t, http.StatusBadRequest, res.Code)
+	require.Contains(t, res.Body.String(), "idempotency_key")
+}
+
+func TestSyncCreateRuleReplaysCompletedResponse(t *testing.T) {
+	rules := newSyncRuleService(t)
+	server := newTestServer(&fakeApplication{}, rest.WithSyncRuleService(rules))
+	cookie := sessionCookie(t, "admin-1", true)
+	body := `{"repo":"agentguild/agentguild","issue_state":"open","task_type":"coding","dedupe_strategy":"update"}`
+
+	first := postJSONWithSession(t, server, "/v1/sync-rules", body, cookie, "Idempotency-Key", "sync-replay")
+	second := postJSONWithSession(t, server, "/v1/sync-rules", body, cookie, "Idempotency-Key", "sync-replay")
+
+	require.Equal(t, http.StatusCreated, first.Code)
+	require.Equal(t, first.Code, second.Code)
+	require.JSONEq(t, first.Body.String(), second.Body.String())
+}
+
 func TestSyncCreateRuleAcceptsPublicSourceAuth(t *testing.T) {
 	rules := newSyncRuleService(t)
 	server := newTestServer(&fakeApplication{}, rest.WithSyncRuleService(rules))
@@ -58,7 +87,7 @@ func TestSyncCreateRuleAcceptsPublicSourceAuth(t *testing.T) {
 		"task_type":"coding",
 		"dedupe_strategy":"update",
 		"source_auth":"public"
-	}`, sessionCookie(t, "admin-1", true))
+	}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "sync-create-public")
 
 	require.Equal(t, http.StatusCreated, res.Code)
 	var body struct {
@@ -77,7 +106,7 @@ func TestSyncCreateRuleRejectsNonAdminHuman(t *testing.T) {
 		"issue_state":"open",
 		"task_type":"coding",
 		"dedupe_strategy":"update"
-	}`, sessionCookie(t, "owner-1", false))
+	}`, sessionCookie(t, "owner-1", false), "Idempotency-Key", "sync-create-forbidden")
 
 	require.Equal(t, http.StatusForbidden, res.Code)
 	require.JSONEq(t, `{"error":{"code":"FORBIDDEN","message":"admin session is required"}}`, res.Body.String())
@@ -106,7 +135,7 @@ func TestSyncUpdateRuleCanToggleEnabled(t *testing.T) {
 		"issue_state":"open",
 		"task_type":"coding",
 		"dedupe_strategy":"update"
-	}`, cookie)
+	}`, cookie, "Idempotency-Key", "sync-create-toggle")
 	require.Equal(t, http.StatusCreated, created.Code)
 	var createdBody struct {
 		Data syncapp.RuleView `json:"data"`
@@ -119,7 +148,7 @@ func TestSyncUpdateRuleCanToggleEnabled(t *testing.T) {
 		"task_type":"coding",
 		"dedupe_strategy":"update",
 		"enabled":false
-	}`, cookie)
+	}`, cookie, "Idempotency-Key", "sync-update-toggle")
 
 	require.Equal(t, http.StatusOK, updated.Code)
 	var updatedBody struct {
@@ -172,7 +201,7 @@ func TestSyncRunRuleReturnsSummary(t *testing.T) {
 		rest.WithSyncEngine(engine),
 	)
 
-	res := postJSONWithSession(t, server, "/v1/sync-rules/rule-123:run", `{}`, sessionCookie(t, "admin-1", true))
+	res := postJSONWithSession(t, server, "/v1/sync-rules/rule-123:run", `{}`, sessionCookie(t, "admin-1", true), "Idempotency-Key", "sync-run-1")
 
 	require.Equal(t, http.StatusOK, res.Code)
 	var body struct {
@@ -235,10 +264,13 @@ func newSyncRuleService(t *testing.T) *syncapp.RuleService {
 	return svc
 }
 
-func putJSONWithSession(t *testing.T, server http.Handler, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+func putJSONWithSession(t *testing.T, server http.Handler, path, body string, cookie *http.Cookie, headers ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)

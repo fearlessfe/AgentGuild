@@ -1,49 +1,51 @@
-import { PageHeader, Card, StatusChip, MetricGrid, ApiNote } from "../../ui";
-import type { Metric } from "../../ui";
-import { sharedData } from "../shared/mockData";
-
-const OUTCOME_METRICS: Metric[] = [
-  { label: "审核评分", value: sharedData.reviewScore, positive: true },
-  { label: "声望", value: sharedData.reputationDelta, positive: true },
-  { label: "Issue 回写", value: "成功", positive: true },
-  { label: "经验候选", value: "已创建" },
-];
+import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
+import { getExecution, getTask } from "../../api/client";
+import { ButtonLink, Card, PageHeader, StatusChip } from "../../ui";
 
 export function OutcomeScreen() {
+  const [params] = useSearchParams();
+  const taskId = params.get("task_id") ?? "";
+  const task = useQuery({ queryKey: ["task", taskId], queryFn: () => getTask(taskId), enabled: !!taskId });
+  const executionId = task.data?.data.active_execution_id ?? "";
+  const execution = useQuery({
+    queryKey: ["execution", executionId],
+    queryFn: () => getExecution(executionId),
+    enabled: !!executionId,
+  });
+
+  if (!taskId) {
+    return (
+      <div className="stack">
+        <PageHeader title="结果闭环" sub="查看任务与执行的最终治理状态" />
+        <Card title="选择任务">
+          <p className="text-sm muted">从任务详情进入结果页，平台将展示真实 Task 与 Execution 状态。</p>
+          <ButtonLink to="/tasks">查看任务</ButtonLink>
+        </Card>
+      </div>
+    );
+  }
+
+  if (task.isLoading || execution.isLoading) return <Card title="结果闭环">加载中...</Card>;
+  if (task.isError || execution.isError || !task.data) return <Card title="结果闭环">结果加载失败。</Card>;
+
+  const taskView = task.data.data;
+  const executionView = execution.data?.data;
+  const accepted = taskView.status === "completed" && executionView?.status === "accepted";
   return (
     <div className="stack">
-      <PageHeader title="结果闭环" sub={`${sharedData.taskId} · 已接受路径为主状态`} />
-      <Card title="已接受" head={<StatusChip tone="success">已完成</StatusChip>}>
-        <div className="stack">
-          <MetricGrid metrics={OUTCOME_METRICS} />
-          <ul className="perm-list">
-            <li>Task 已完成，Execution 已接受</li>
-            <li>GitHub Issue 回写成功（#412 已关闭并评论）</li>
-            <li>经验候选已创建，等待评测</li>
-          </ul>
+      <PageHeader title="结果闭环" sub={taskView.id} actions={<ButtonLink to={`/tasks/${encodeURIComponent(taskView.id)}`}>返回任务</ButtonLink>} />
+      <Card
+        title={accepted ? "已接受" : "处理中"}
+        head={<StatusChip tone={accepted ? "success" : "warning"}>{taskView.status}</StatusChip>}
+      >
+        <div className="fact-grid">
+          <div className="fact"><span className="ctx-label">Task</span><b>{taskView.status}</b></div>
+          <div className="fact"><span className="ctx-label">Execution</span><b>{executionView?.status ?? "无"}</b></div>
+          <div className="fact"><span className="ctx-label">Agent Version</span><span>{executionView?.agent_version_id ?? "-"}</span></div>
+          <div className="fact"><span className="ctx-label">状态版本</span><span>v{taskView.state_version}</span></div>
         </div>
       </Card>
-      <div className="split-2">
-        <div className="col">
-          <Card title="返工分支">
-            <div className="stack-sm">
-              <div className="row-between">
-                <strong>返工请求（并列状态）</strong>
-                <StatusChip tone="warning">待返工</StatusChip>
-              </div>
-              <ul className="perm-list">
-                <li>2 条未解决审核评论</li>
-                <li>Agent 正在准备下一版修订</li>
-                <li>尚未提交新的 revision</li>
-              </ul>
-            </div>
-          </Card>
-        </div>
-        <div className="col">
-          <ApiNote status="partial">GET /v1/reputation 与 Agent 经验/评测接口可查声望与经验。</ApiNote>
-          <ApiNote status="planned">outcome 聚合、Issue 回写状态与审计时间线待补。</ApiNote>
-        </div>
-      </div>
     </div>
   );
 }

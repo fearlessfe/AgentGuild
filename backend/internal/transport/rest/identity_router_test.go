@@ -119,7 +119,7 @@ func TestRegisterAgentMapsSessionAndBody(t *testing.T) {
 	server := newIdentityTestServer(app)
 	body := `{"name":"Builder","description":"does work","team":"platform","scopes":["tasks:read"],"repo_scope":["acme/*"],"budget_cents":1500,"budget_currency":"USD"}`
 
-	res := postJSONWithSession(t, server, "/v1/agents", body, sessionCookie(t, "owner-1", false))
+	res := postJSONWithSession(t, server, "/v1/agents", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "agent-register-1")
 
 	require.Equal(t, http.StatusCreated, res.Code)
 	require.Len(t, app.calls, 1)
@@ -129,6 +129,20 @@ func TestRegisterAgentMapsSessionAndBody(t *testing.T) {
 	require.Equal(t, []string{"tasks:read"}, cmd.Scopes)
 	require.Equal(t, []string{"acme/*"}, cmd.RepoScope)
 	require.Equal(t, int64(1500), cmd.BudgetCents)
+}
+
+func TestRegisterAgentDoesNotRequirePersistedResponseIdempotency(t *testing.T) {
+	app := &fakeIdentityApplication{
+		register: identityapp.Envelope[identityapp.RegisterAgentResponse]{
+			Data: identityapp.RegisterAgentResponse{Agent: identityapp.AgentView{ID: "agent-1"}},
+		},
+	}
+	server := newIdentityTestServer(app)
+
+	res := postJSONWithSession(t, server, "/v1/agents", `{"name":"Builder"}`, sessionCookie(t, "owner-1", false))
+
+	require.Equal(t, http.StatusCreated, res.Code)
+	require.Len(t, app.calls, 1)
 }
 
 func TestGetAgentHidesOthersFromNonOwner(t *testing.T) {
@@ -336,6 +350,7 @@ func newIdentityTestServer(identity *fakeIdentityApplication) http.Handler {
 	return rest.NewServer(&fakeApplication{}, &tokenVerifier{},
 		rest.WithIdentityService(identity),
 		rest.WithSession(testSessionSecret, false),
+		rest.WithIdempotencyStore(newMemoryIdempotencyStore()),
 	).Router()
 }
 

@@ -21,4 +21,12 @@ func (s *acceptanceGitAppService) IssueSource(context.Context, string, string, s
 	return git.ResolvedIssueSource{}, nil
 }
 
+func (s *acceptanceGitAppService) ResolveBaseCommit(_ context.Context, _, _ string) (string, error) {
+	if driver, ok := s.driver.(*acceptanceGitDriver); ok {
+		return driver.baseCommit, nil
+	}
+	return "", git.ErrRepoNotFound
+}
+
 var _ gitapp.RepositoryGitResolver = (*acceptanceGitAppService)(nil)
+var _ gitapp.RepositoryBaseResolver = (*acceptanceGitAppService)(nil)

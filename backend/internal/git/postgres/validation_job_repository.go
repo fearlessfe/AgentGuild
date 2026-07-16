@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -29,17 +28,13 @@ func NewValidationJobRepository(pool *pgxpool.Pool) application.ValidationJobRep
 }
 
 func (r *validationJobRepository) Insert(ctx context.Context, job *gitdomain.ValidationJob) error {
-	stepsJSON, err := marshalSteps(job.Steps)
-	if err != nil {
-		return err
-	}
-	_, err = r.q.Exec(ctx, `
-		INSERT INTO validation_jobs (
-			id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
-			claimed_until, claimed_by, config_version, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		job.ID, job.TenantID, job.SubmissionID, job.Repo, job.Branch, job.CommitSHA, string(job.Status), job.Attempt,
-		job.ClaimedUntil, job.ClaimedBy, job.ConfigVersion, job.CreatedAt, job.UpdatedAt,
+	_, err := r.q.Exec(ctx, `
+			INSERT INTO validation_jobs (
+				id, tenant_id, submission_id, execution_id, repo, branch, commit_sha, status, attempt,
+				claimed_until, claimed_by, config_version, execution_state_synced, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		job.ID, job.TenantID, job.SubmissionID, job.ExecutionID, job.Repo, job.Branch, job.CommitSHA, string(job.Status), job.Attempt,
+		job.ClaimedUntil, job.ClaimedBy, job.ConfigVersion, job.ExecutionStateSynced, job.CreatedAt, job.UpdatedAt,
 	)
 	if err != nil {
 		return &domain.Error{Code: "internal", Message: "failed to insert validation job: " + err.Error()}
@@ -49,14 +44,13 @@ func (r *validationJobRepository) Insert(ctx context.Context, job *gitdomain.Val
 			return err
 		}
 	}
-	_ = stepsJSON
 	return nil
 }
 
 func (r *validationJobRepository) GetByID(ctx context.Context, tenantID, id string) (*gitdomain.ValidationJob, error) {
 	job, err := r.scanJob(r.q.QueryRow(ctx, `
-		SELECT id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
-		       claimed_until, claimed_by, config_version, created_at, updated_at
+		SELECT id, tenant_id, submission_id, execution_id, repo, branch, commit_sha, status, attempt,
+		       claimed_until, claimed_by, config_version, execution_state_synced, created_at, updated_at
 		FROM validation_jobs
 		WHERE tenant_id=$1 AND id=$2`,
 		tenantID, id,
@@ -77,8 +71,8 @@ func (r *validationJobRepository) GetByID(ctx context.Context, tenantID, id stri
 
 func (r *validationJobRepository) GetBySubmissionID(ctx context.Context, tenantID, submissionID string) (*gitdomain.ValidationJob, error) {
 	job, err := r.scanJob(r.q.QueryRow(ctx, `
-		SELECT id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
-		       claimed_until, claimed_by, config_version, created_at, updated_at
+		SELECT id, tenant_id, submission_id, execution_id, repo, branch, commit_sha, status, attempt,
+		       claimed_until, claimed_by, config_version, execution_state_synced, created_at, updated_at
 		FROM validation_jobs
 		WHERE tenant_id=$1 AND submission_id=$2`,
 		tenantID, submissionID,
@@ -104,18 +98,20 @@ func (r *validationJobRepository) ClaimNextPending(ctx context.Context, tenantID
 	}
 	job, err := r.scanJob(pgxTx.QueryRow(ctx, `
 		UPDATE validation_jobs
-		SET status='running', attempt=attempt+1, claimed_until=$3, claimed_by=$4, updated_at=$3
+		SET status=CASE WHEN status IN ('succeeded', 'failed') THEN status ELSE 'running' END,
+		    attempt=attempt+1, claimed_until=$3, claimed_by=$4, updated_at=$2
 		WHERE tenant_id=$1 AND id=(
 			SELECT id FROM validation_jobs
 			WHERE tenant_id=$1
-			  AND status IN ('pending', 'running')
+			  AND (status IN ('pending', 'running') OR
+			       (status IN ('succeeded', 'failed') AND execution_state_synced=FALSE))
 			  AND (claimed_until IS NULL OR claimed_until <= $2)
 			ORDER BY created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
 		)
-		RETURNING id, tenant_id, submission_id, repo, branch, commit_sha, status, attempt,
-		          claimed_until, claimed_by, config_version, created_at, updated_at`,
+			RETURNING id, tenant_id, submission_id, execution_id, repo, branch, commit_sha, status, attempt,
+		          claimed_until, claimed_by, config_version, execution_state_synced, created_at, updated_at`,
 		tenantID, now, until, workerID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -135,10 +131,11 @@ func (r *validationJobRepository) ClaimNextPending(ctx context.Context, tenantID
 func (r *validationJobRepository) Update(ctx context.Context, job *gitdomain.ValidationJob) error {
 	_, err := r.q.Exec(ctx, `
 		UPDATE validation_jobs
-		SET status=$3, attempt=$4, claimed_until=$5, claimed_by=$6, updated_at=$7
+		SET status=$3, attempt=$4, claimed_until=$5, claimed_by=$6,
+		    execution_state_synced=$7, updated_at=$8
 		WHERE tenant_id=$1 AND id=$2`,
 		job.TenantID, job.ID, string(job.Status), job.Attempt,
-		job.ClaimedUntil, job.ClaimedBy, job.UpdatedAt,
+		job.ClaimedUntil, job.ClaimedBy, job.ExecutionStateSynced, job.UpdatedAt,
 	)
 	if err != nil {
 		return &domain.Error{Code: "internal", Message: "failed to update validation job: " + err.Error()}
@@ -149,9 +146,9 @@ func (r *validationJobRepository) Update(ctx context.Context, job *gitdomain.Val
 func (r *validationJobRepository) UpdateStep(ctx context.Context, tenantID, jobID string, step gitdomain.Step) error {
 	_, err := r.q.Exec(ctx, `
 		UPDATE validation_steps
-		SET status=$4, log_summary=$5, resource_usage=$6, started_at=$7, finished_at=$8
-		WHERE tenant_id=$1 AND job_id=$2 AND step=$3`,
-		tenantID, jobID, string(step.Step), string(step.Status), step.LogSummary, step.ResourceUsage, step.StartedAt, step.FinishedAt,
+			SET status=$4, hard_gate=$5, log_summary=$6, resource_usage=$7, started_at=$8, finished_at=$9
+			WHERE tenant_id=$1 AND job_id=$2 AND step=$3`,
+		tenantID, jobID, string(step.Step), string(step.Status), step.HardGate, step.LogSummary, step.ResourceUsage, step.StartedAt, step.FinishedAt,
 	)
 	if err != nil {
 		return &domain.Error{Code: "internal", Message: "failed to update validation step: " + err.Error()}
@@ -163,10 +160,10 @@ func (r *validationJobRepository) insertStep(ctx context.Context, tenantID, jobI
 	_, err := r.q.Exec(ctx, `
 		INSERT INTO validation_steps (
 			tenant_id, job_id, step, status, log_summary, resource_usage,
-			started_at, finished_at, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+				hard_gate, started_at, finished_at, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		tenantID, jobID, string(step.Step), string(step.Status), step.LogSummary,
-		step.ResourceUsage, step.StartedAt, step.FinishedAt, step.CreatedAt,
+		step.ResourceUsage, step.HardGate, step.StartedAt, step.FinishedAt, step.CreatedAt,
 	)
 	if err != nil {
 		return &domain.Error{Code: "internal", Message: "failed to insert validation step: " + err.Error()}
@@ -176,7 +173,7 @@ func (r *validationJobRepository) insertStep(ctx context.Context, tenantID, jobI
 
 func (r *validationJobRepository) loadSteps(ctx context.Context, tenantID, jobID string) ([]gitdomain.Step, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT step, status, log_summary, resource_usage, started_at, finished_at, created_at
+		SELECT step, status, hard_gate, log_summary, resource_usage, started_at, finished_at, created_at
 		FROM validation_steps
 		WHERE tenant_id=$1 AND job_id=$2
 		ORDER BY id ASC`,
@@ -191,7 +188,7 @@ func (r *validationJobRepository) loadSteps(ctx context.Context, tenantID, jobID
 	for rows.Next() {
 		var step gitdomain.Step
 		var status, name string
-		if err := rows.Scan(&name, &status, &step.LogSummary, &step.ResourceUsage, &step.StartedAt, &step.FinishedAt, &step.CreatedAt); err != nil {
+		if err := rows.Scan(&name, &status, &step.HardGate, &step.LogSummary, &step.ResourceUsage, &step.StartedAt, &step.FinishedAt, &step.CreatedAt); err != nil {
 			return nil, err
 		}
 		step.Step = gitdomain.ValidationStep(name)
@@ -208,18 +205,14 @@ func (r *validationJobRepository) scanJob(row scanner) (*gitdomain.ValidationJob
 	var job gitdomain.ValidationJob
 	var status string
 	err := row.Scan(
-		&job.ID, &job.TenantID, &job.SubmissionID, &job.Repo, &job.Branch, &job.CommitSHA, &status, &job.Attempt,
-		&job.ClaimedUntil, &job.ClaimedBy, &job.ConfigVersion, &job.CreatedAt, &job.UpdatedAt,
+		&job.ID, &job.TenantID, &job.SubmissionID, &job.ExecutionID, &job.Repo, &job.Branch, &job.CommitSHA, &status, &job.Attempt,
+		&job.ClaimedUntil, &job.ClaimedBy, &job.ConfigVersion, &job.ExecutionStateSynced, &job.CreatedAt, &job.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	job.Status = gitdomain.ValidationStatus(status)
 	return &job, nil
-}
-
-func marshalSteps(steps []gitdomain.Step) ([]byte, error) {
-	return json.Marshal(steps)
 }
 
 var _ application.ValidationJobRepository = (*validationJobRepository)(nil)

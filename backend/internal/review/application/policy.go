@@ -29,7 +29,7 @@ type ReviewRecord struct {
 // context; the current model checks the executing agent itself using the
 // agent version ID recorded on the execution.
 func (p Policy) CanViewReview(ctx context.Context, principal auth.Principal, review ReviewRecord, task application.TaskSummary) error {
-	if err := requireScope(principal, "reviews:read"); err != nil {
+	if err := requireHumanOrScope(principal, "reviews:read"); err != nil {
 		return err
 	}
 	if principal.TenantID == "" {
@@ -56,7 +56,7 @@ func (p Policy) CanViewReview(ctx context.Context, principal auth.Principal, rev
 // CanSubmitDecision decides whether the principal may submit a review decision.
 // Only the assigned reviewer (or an admin) may submit.
 func (p Policy) CanSubmitDecision(principal auth.Principal, review ReviewRecord) error {
-	if err := requireScope(principal, "reviews:write"); err != nil {
+	if err := requireHumanOrScope(principal, "reviews:write"); err != nil {
 		return err
 	}
 	if principal.TenantID == "" {
@@ -132,4 +132,11 @@ func requireScope(principal auth.Principal, scope string) error {
 		return domain.ErrForbidden
 	}
 	return (auth.ScopePolicy{}).Require(principal, scope)
+}
+
+func requireHumanOrScope(principal auth.Principal, scope string) error {
+	if principal.Type == auth.PrincipalTypeHuman && principal.TenantID != "" {
+		return nil
+	}
+	return requireScope(principal, scope)
 }

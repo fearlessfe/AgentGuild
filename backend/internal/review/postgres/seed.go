@@ -10,7 +10,7 @@ import (
 
 // SeedReviewDefaults inserts a default active rubric version and reviewer profile
 // for the supplied tenant if none exist. It is safe to call multiple times.
-func SeedReviewDefaults(ctx context.Context, pool *pgxpool.Pool, tenantID string) error {
+func SeedReviewDefaults(ctx context.Context, pool *pgxpool.Pool, tenantID, reviewerUserID string) error {
 	repo := NewRubricRepository(pool)
 	if _, err := repo.GetActive(ctx, tenantID); err != nil {
 		version, err := reviewdomain.NewRubricVersion(
@@ -33,8 +33,11 @@ func SeedReviewDefaults(ctx context.Context, pool *pgxpool.Pool, tenantID string
 		return err
 	}
 	if len(profiles) == 0 {
+		if reviewerUserID == "" {
+			reviewerUserID = "default-reviewer"
+		}
 		profile, err := reviewdomain.NewReviewerProfile(
-			"default-reviewer", tenantID, "default-reviewer", []string{"default"}, time.Now(),
+			"default-reviewer", tenantID, reviewerUserID, []string{"default", "code-review"}, time.Now(),
 		)
 		if err != nil {
 			return err

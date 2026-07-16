@@ -36,6 +36,7 @@ import (
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	githubapi "agentguild.dev/agentguild/backend/internal/git/github"
 	gitpostgres "agentguild.dev/agentguild/backend/internal/git/postgres"
+	gitproxy "agentguild.dev/agentguild/backend/internal/git/proxy"
 	"agentguild.dev/agentguild/backend/internal/git/validation"
 	gitworker "agentguild.dev/agentguild/backend/internal/git/worker"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -156,7 +157,16 @@ func run() error {
 		restOptions = append(restOptions, resttransport.WithExperienceService(experienceService))
 	}
 
-	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), reviewapp.SyntheticDiffProvider{}, reviewapp.AlwaysPassValidationProvider{}, reviewapp.Options{})
+	submissionRepository := gitpostgres.NewSubmissionRepository(pool)
+	diffProvider, err := reviewapp.NewGitDiffProvider(submissionRepository, gitRuntime.repositoryResolver)
+	if err != nil {
+		return fmt.Errorf("build review diff provider: %w", err)
+	}
+	validationProvider, err := reviewapp.NewGitValidationProvider(gitpostgres.NewValidationJobRepository(pool))
+	if err != nil {
+		return fmt.Errorf("build review validation provider: %w", err)
+	}
+	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), submissionRepository, diffProvider, validationProvider, reviewapp.Options{})
 	if err != nil {
 		return err
 	}
@@ -172,6 +182,7 @@ func run() error {
 		restOptions = append(restOptions,
 			resttransport.WithSubmissionService(gitRuntime.submissionService),
 			resttransport.WithCredentialService(gitRuntime.credentialService),
+			resttransport.WithGitProxy(gitRuntime.gitProxy),
 		)
 	}
 	restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
@@ -199,7 +210,7 @@ func run() error {
 	mcpHandler := mcptransport.NewServer(service, verifier, mcpOptions...).Handler()
 
 	if cfg.ReviewSeedTenantID != "" {
-		if err := reviewpostgres.SeedReviewDefaults(ctx, pool, cfg.ReviewSeedTenantID); err != nil {
+		if err := reviewpostgres.SeedReviewDefaults(ctx, pool, cfg.ReviewSeedTenantID, cfg.ReviewSeedReviewerUserID); err != nil {
 			return fmt.Errorf("seed review defaults: %w", err)
 		}
 	}
@@ -560,12 +571,13 @@ type gitRuntime struct {
 	submissionService  *gitapp.SubmissionService
 	validationWorker   *gitworker.ValidationWorker
 	repositoryResolver gitapp.RepositoryGitResolver
+	gitProxy           http.Handler
 }
 
 func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, gitapp.GitHubAppManager, *gitapp.RepositoryOnboardingService, error) {
 	gitStore := gitpostgres.NewStore(pool)
 	gitAppRepo := gitpostgres.NewGitHubAppRepository(pool)
-	gitAppManager, err := gitapp.NewGitHubAppManager(gitAppRepo)
+	gitAppManager, err := gitapp.NewGitHubAppManagerWithOptions(gitAppRepo, gitapp.GitHubAppManagerOptions{AllowedHosts: cfg.GitHubAllowedHosts})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build github app service: %w", err)
 	}
@@ -607,7 +619,10 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 	}
 
 	credentialService, err := gitapp.NewCredentialService(gitStore, repositoryResolver, gitapp.Options{
-		Provider: "github",
+		Provider:     "github",
+		Authorizer:   service,
+		ProxyBaseURL: cfg.GitHubAppPublicBaseURL,
+		TokenSecret:  []byte(cfg.CursorSecret),
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build credential service: %w", err)
@@ -615,9 +630,13 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 
 	verifier := gitapp.NewCommitVerifier(repositoryResolver, &submissionRepoAdapter{store: gitStore})
 	notifier := application.NewCoreExecutionNotifier(service)
-	submissionService, err := gitapp.NewSubmissionService(gitStore, verifier, notifier, nil)
+	submissionService, err := gitapp.NewSubmissionService(gitStore, verifier, notifier, service, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build submission service: %w", err)
+	}
+	gitProxy, err := gitproxy.NewHandler(gitStore, repositoryResolver)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build git proxy: %w", err)
 	}
 
 	repositoryOnboarding, err := gitapp.NewRepositoryOnboardingService(
@@ -630,7 +649,12 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		return nil, nil, nil, fmt.Errorf("build repository onboarding service: %w", err)
 	}
 
-	runner := validation.NewRunner(validation.DefaultRegistry(), &validation.TempWorkspaceFactory{}, nil)
+	cloneHosts := append([]string{"github.com"}, cfg.GitHubAllowedHosts...)
+	workspaceFactory, err := validation.NewGitWorkspaceFactory(repositoryResolver, cloneHosts...)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("build validation workspace factory: %w", err)
+	}
+	runner := validation.NewRunner(validation.DefaultRegistry(), workspaceFactory, validation.NewContainerExecutor(cfg.ValidationSandboxImage))
 	validationWorker := gitworker.NewValidationWorker(
 		gitStore,
 		"validation-worker",
@@ -645,27 +669,18 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		submissionService:  submissionService,
 		validationWorker:   validationWorker,
 		repositoryResolver: repositoryResolver,
+		gitProxy:           gitProxy,
 	}, gitAppManager, repositoryOnboarding, nil
 }
 
 func runValidationWorker(ctx context.Context, w *gitworker.ValidationWorker, pool *pgxpool.Pool) error {
-	rows, err := pool.Query(ctx, `
-		SELECT DISTINCT tenant_id
-		FROM validation_jobs
-		WHERE status IN ('pending','running')
-		LIMIT 100`)
+	tenantIDs, err := listValidationWorkerTenants(ctx, pool)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
 	var lastErr error
-	for rows.Next() {
-		var tenantID string
-		if err := rows.Scan(&tenantID); err != nil {
-			lastErr = err
-			continue
-		}
+	for _, tenantID := range tenantIDs {
 		if _, err := w.RunOnce(ctx, tenantID); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
@@ -673,10 +688,31 @@ func runValidationWorker(ctx context.Context, w *gitworker.ValidationWorker, poo
 			lastErr = err
 		}
 	}
-	if err := rows.Err(); err != nil {
-		lastErr = err
-	}
 	return lastErr
+}
+
+func listValidationWorkerTenants(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT tenant_id
+		FROM validation_jobs
+		WHERE status IN ('pending','running')
+		   OR (status IN ('succeeded','failed') AND execution_state_synced=FALSE)
+		ORDER BY tenant_id
+		LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tenantIDs := make([]string, 0)
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			return nil, err
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	return tenantIDs, rows.Err()
 }
 
 // submissionRepoAdapter exposes git/application.SubmissionRepository by

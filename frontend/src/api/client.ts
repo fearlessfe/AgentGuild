@@ -14,6 +14,7 @@ export type ExecutionStatus =
   | "running"
   | "submitted"
   | "validating"
+  | "validation_failed"
   | "reviewing"
   | "revision_requested"
   | "accepted"
@@ -145,6 +146,26 @@ export type SyncResult = {
   skipped: number;
   cancelled: number;
   failed: number;
+};
+
+export type SubmissionStatus = "pending_verification" | "validated" | "validation_failed" | "invalid";
+
+export type SubmissionView = {
+  id: string;
+  tenant_id: string;
+  task_id: string;
+  execution_id: string;
+  repo: string;
+  branch: string;
+  commit_sha: string;
+  base_commit_sha: string;
+  summary: string;
+  tests?: string;
+  diff_fingerprint: string;
+  status: SubmissionStatus;
+  validation_job_id?: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ConnectionTestResult = {
@@ -286,6 +307,9 @@ export async function listTasks(filters: {
 
 export const getTask = (id: string) => apiRequest<TaskView>(`/v1/tasks/${encodeURIComponent(id)}`);
 export const getExecution = (id: string) => apiRequest<ExecutionView>(`/v1/executions/${encodeURIComponent(id)}`);
+export const listExecutionSubmissions = (id: string) =>
+  apiRequest<SubmissionView[]>(`/v1/executions/${encodeURIComponent(id)}/submissions`);
+export const getSubmission = (id: string) => apiRequest<SubmissionView>(`/v1/submissions/${encodeURIComponent(id)}`);
 export const pollInterval = (seconds?: number) => (seconds && seconds > 0 ? seconds * 1000 : false);
 export async function getGitHubApp(): Promise<Envelope<GitHubAppView>> {
   const response = await apiRequest<GitHubAppView>("/v1/github-app");
@@ -323,10 +347,14 @@ export const removeRepository = (id: string, options: MutationOptions = {}) =>
   apiRequest<{ deleted: boolean }>(`/v1/repositories/${encodeURIComponent(id)}`, { method: "DELETE", headers: mutationHeaders(options) });
 export const listSyncRules = () => apiRequest<{ items: SyncRule[] }>("/v1/sync-rules");
 export const getSyncRule = (id: string) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`);
-export const createSyncRule = (input: SyncRuleInput) => apiRequest<SyncRule>("/v1/sync-rules", { method: "POST", body: input });
-export const updateSyncRule = (id: string, input: SyncRuleInput) => apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "PUT", body: input });
-export const deleteSyncRule = (id: string) => apiRequest<{ deleted: boolean }>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "DELETE" });
-export const runSyncRule = (id: string) => apiRequest<SyncResult>(`/v1/sync-rules/${encodeURIComponent(id)}:run`, { method: "POST" });
+export const createSyncRule = (input: SyncRuleInput, options: MutationOptions = {}) =>
+  apiRequest<SyncRule>("/v1/sync-rules", { method: "POST", headers: mutationHeaders(options), body: input });
+export const updateSyncRule = (id: string, input: SyncRuleInput, options: MutationOptions = {}) =>
+  apiRequest<SyncRule>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "PUT", headers: mutationHeaders(options), body: input });
+export const deleteSyncRule = (id: string, options: MutationOptions = {}) =>
+  apiRequest<{ deleted: boolean }>(`/v1/sync-rules/${encodeURIComponent(id)}`, { method: "DELETE", headers: mutationHeaders(options) });
+export const runSyncRule = (id: string, options: MutationOptions = {}) =>
+  apiRequest<SyncResult>(`/v1/sync-rules/${encodeURIComponent(id)}:run`, { method: "POST", headers: mutationHeaders(options) });
 export const githubManifestUrl = () => `${base}/oauth/github/app/manifest`;
 export const githubInstallUrl = (id?: string) => {
   if (!id) return `${base}/oauth/github/app/install`;
@@ -367,7 +395,7 @@ const demoTasks: TaskView[] = [
   created_at: "2026-07-02T01:15:00Z",
   updated_at: "2026-07-02T02:00:00Z",
   state_version: 2,
-  active_execution_id: status === "in_progress" ? `exec-${id}` : undefined,
+  active_execution_id: status === "in_progress" || status === "completed" ? `exec-${id}` : undefined,
   claimed_by: status !== "open" ? "Atlas v12" : undefined,
   source:
     id === "AG-192"
@@ -481,6 +509,27 @@ let demoSyncRules: SyncRule[] = [
     updated_at: "2026-07-01T09:00:00Z",
   },
 ];
+const demoSubmissions: SubmissionView[] = [
+  {
+    id: "sub-1",
+    tenant_id: "billing-platform",
+    task_id: "AG-188",
+    execution_id: "exec-AG-188",
+    repo: "acme/billing-service",
+    branch: "agent/ag-188",
+    commit_sha: "8f3a1c2d9e7b6a5f4c3d2e1a0b9c8d7e6f5a4b3c",
+    base_commit_sha: "1a2b3c4d5e6f78901234567890abcdef12345678",
+    summary: "修复重复触发并补充回归测试",
+    tests: "go test ./...",
+    diff_fingerprint: "sha256:demo-submission-1",
+    status: "validated",
+    validation_job_id: "validation-1",
+    created_at: "2026-07-02T13:12:05Z",
+    updated_at: "2026-07-02T13:14:20Z",
+  },
+];
+let demoReviewCounter = 1;
+const demoReviews = new Map<string, Record<string, unknown>>();
 
 let demoBenchmarkSetCounter = 1;
 const demoBenchmarkSets = [
@@ -855,7 +904,7 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
       default_priority: typeof body.default_priority === "string" ? body.default_priority : "normal",
       dedupe_strategy: typeof body.dedupe_strategy === "string" ? body.dedupe_strategy : "repo_issue",
       source_auth: typeof body.source_auth === "string" ? body.source_auth : "app",
-      enabled: true,
+      enabled: typeof body.enabled === "boolean" ? body.enabled : true,
       created_at: now,
       updated_at: now,
     };
@@ -925,21 +974,31 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({ data: { items }, meta: demoMeta });
   }
 
+  const executionSubmissionsMatch = url.pathname.match(/^\/v1\/executions\/([^/]+)\/submissions$/);
+  if (executionSubmissionsMatch && method === "GET") {
+    const executionID = decodeURIComponent(executionSubmissionsMatch[1]);
+    return clone({ data: demoSubmissions.filter((item) => item.execution_id === executionID), meta: demoMeta });
+  }
+
   if (url.pathname.startsWith("/v1/executions/") && method === "GET") {
+    const executionID = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+    const taskID = executionID.startsWith("exec-") ? executionID.slice("exec-".length) : "AG-188";
+    const task = demoTasks.find((item) => item.id === taskID);
+    const accepted = task?.status === "completed";
     return clone({
       data: {
-        id: url.pathname.split("/").pop(),
-        task_id: "AG-188",
+        id: executionID,
+        task_id: taskID,
         tenant_id: "billing-platform",
         agent_version_id: "Atlas v12",
-        status: "running",
-        stage: "运行测试",
-        progress: 65,
+        status: accepted ? "accepted" : "running",
+        stage: accepted ? "评审已接受" : "运行测试",
+        progress: accepted ? 100 : 65,
         lease_generation: 3,
         lease_soft_expires_at: "2026-07-02T14:10:00Z",
         lease_hard_expires_at: "2026-07-02T14:10:30Z",
         cost: { observed_cost: "0.067", self_reported_cost: "0.070", coverage: "partial", provider: "langfuse" },
-        audit_summary: "Atlas v12 heartbeat · running",
+        audit_summary: accepted ? "评审已接受 Atlas v12 的提交" : "Atlas v12 heartbeat · running",
       },
       meta: demoMeta,
     });
@@ -950,8 +1009,34 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
     return clone({ data: demoTasks.find((task) => task.id === id) ?? demoTasks[0], meta: demoMeta });
   }
 
+  const createReviewMatch = url.pathname.match(/^\/v1\/submissions\/([^/:]+)\/reviews$/);
+  if (createReviewMatch && method === "POST") {
+    demoReviewCounter += 1;
+    const submissionID = decodeURIComponent(createReviewMatch[1]);
+    const review = {
+      id: `rev-${demoReviewCounter}`,
+      submission_id: submissionID,
+      reviewer_id: "reviewer-1",
+      rubric_version_id: "rubric-1",
+      capability: "code-review",
+      status: "pending",
+      rubric_scores: [],
+      line_comments: [],
+    };
+    demoReviews.set(review.id, review);
+    return clone({ data: review, meta: demoMeta });
+  }
+
+  if (url.pathname === "/v1/reviews" && method === "GET") {
+    const status = url.searchParams.get("status");
+    const reviews = Array.from(demoReviews.values()).filter((review) => !status || review.status === status);
+    return clone({ data: reviews, meta: demoMeta });
+  }
+
   if (url.pathname.startsWith("/v1/reviews/") && method === "GET") {
     const id = decodeURIComponent(url.pathname.split("/").pop() ?? "rev-1");
+    const stored = demoReviews.get(id);
+    if (stored) return clone({ data: stored, meta: demoMeta });
     return clone({
       data: {
         id,
@@ -968,6 +1053,13 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
       },
       meta: demoMeta,
     });
+  }
+
+  const submissionMatch = url.pathname.match(/^\/v1\/submissions\/([^/]+)$/);
+  if (submissionMatch && method === "GET") {
+    const id = decodeURIComponent(submissionMatch[1]);
+    const submission = demoSubmissions.find((item) => item.id === id) ?? { ...demoSubmissions[0], id };
+    return clone({ data: submission, meta: demoMeta });
   }
 
   if (url.pathname.startsWith("/v1/submissions/") && url.pathname.endsWith("/diff") && method === "GET") {
@@ -1049,6 +1141,7 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
         submission_id: "sub-1",
         reviewer_id: "reviewer-1",
         rubric_version_id: "rubric-1",
+        capability: "code-review",
         status: "submitted",
         final_decision: body.decision ?? "accepted",
         rubric_scores: Array.isArray(body.scores) ? body.scores : [],

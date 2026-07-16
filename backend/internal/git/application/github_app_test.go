@@ -397,7 +397,7 @@ func TestGitHubAppDriverReturnsNotConfiguredWhenMissing(t *testing.T) {
 
 func newGitHubAppManager(t *testing.T) application.GitHubAppManager {
 	t.Helper()
-	manager, err := application.NewGitHubAppManager(newMemoryGitHubAppRepo())
+	manager, err := application.NewGitHubAppManagerWithOptions(newMemoryGitHubAppRepo(), application.GitHubAppManagerOptions{AllowedHosts: []string{"github.example.com", "ghe.example"}})
 	require.NoError(t, err)
 	return manager
 }

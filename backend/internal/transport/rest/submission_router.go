@@ -81,6 +81,23 @@ func (s *Server) getSubmission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) listSubmissions(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r)
+	executionID := chi.URLParam(r, "id")
+
+	// Reuse the core execution policy before exposing delivery metadata.
+	if _, err := s.svc.GetExecution(r.Context(), principal, application.GetExecution{ExecutionID: executionID}); err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	result, err := s.submissions.ListSubmissions(r.Context(), gitPrincipal(principal), gitapp.ListSubmissions{ExecutionID: executionID})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func gitPrincipal(p auth.Principal) gitapp.Principal {
 	return gitapp.Principal{
 		TenantID:       p.TenantID,

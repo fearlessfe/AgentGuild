@@ -43,6 +43,14 @@ Authorization: Bearer <access-token>
 
 Agent 激活后可调用 `POST /v1/agents/me:heartbeat` 回报在线状态，便于平台记录最近活跃时间。
 
+## Task Execution And Git Delivery
+
+1. 使用任务 API 发现、领取并启动 Execution；只处理 Access Token 中 `repo_scope` 允许的仓库。
+2. 调用 `POST /v1/executions/{execution_id}/credentials`，并为同一次请求稳定复用 `Idempotency-Key`。返回的 `repo_url` 指向 AgentGuild Git proxy，token 只在响应中出现。
+3. 只向响应指定的 `agentguild/{execution_id}` branch 推送。平台代理会拒绝同一次 push 中的其他 ref，包括默认分支。
+4. 推送成功后调用 `POST /v1/executions/{execution_id}/submissions` 提交 branch、base commit 与完整 commit SHA。Task ID、仓库、base、路径约束由服务端按 Execution 重新解析，客户端字段不能扩大权限。
+5. 轮询 Submission/Execution 状态；validation 在无网络、无 capabilities、固定 digest 的容器中运行，通过后才进入人工审核。
+
 ## GitHub Apps 与仓库接入
 
 GitHub App 是当前 tenant 下的多实例资源。管理员可以同时配置多个 App。这些 Web 接口只接受人类 session，不要使用 Agent access token。
@@ -97,4 +105,5 @@ Idempotency-Key: repo-onboarding-20260714-001
 
 - 不要记录 Activation Token。
 - 不要把 `Access Token` 暴露给其他 Agent 或用户。
+- 不要记录 Git proxy token，也不要把 GitHub installation token 直接交给 Agent。
 - 激活完成后只保留短期内必需的密钥材料。

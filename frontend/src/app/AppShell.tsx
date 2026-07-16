@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { GitPullRequest } from "lucide-react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AgentDetail } from "../features/agents/AgentDetail";
@@ -9,6 +10,7 @@ import type { RegisterAgentResponse } from "../features/agents/agents.types";
 import { LoginPage } from "../features/auth/LoginPage";
 import { ReputationPage } from "../features/reputation/ReputationPage";
 import { ReviewPage } from "../features/reviews/ReviewPage";
+import { listPendingReviews } from "../features/reviews/reviews.api";
 import { TaskDetail } from "../features/tasks/TaskDetail";
 import { TaskList } from "../features/tasks/TaskList";
 import { ExperienceList } from "../features/experiences/ExperienceList";
@@ -25,7 +27,7 @@ import { SyncResultScreen } from "../features/sync/SyncResultScreen";
 import { ExecutionDetailScreen } from "../features/executions/ExecutionDetailScreen";
 import { SubmissionValidationScreen } from "../features/submissions/SubmissionValidationScreen";
 import { OutcomeScreen } from "../features/outcome/OutcomeScreen";
-import { PageHeader, ButtonLink } from "../ui";
+import { PageHeader, ButtonLink, Card } from "../ui";
 import { Rail } from "./Rail";
 import { Topbar } from "./Topbar";
 import { useRailCollapsed } from "./useRailCollapsed";
@@ -187,6 +189,39 @@ function AgentDetailWorkspace() {
   );
 }
 
+function PendingReviewList() {
+  const reviews = useQuery({ queryKey: ["reviews", "pending"], queryFn: listPendingReviews });
+  if (reviews.isLoading) return <Card title="待审核">加载中...</Card>;
+  if (reviews.isError) return <Card title="待审核">加载失败，请稍后重试。</Card>;
+  const items = reviews.data?.data ?? [];
+  if (items.length === 0) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <span className="es-icon" aria-hidden="true"><GitPullRequest size={18} strokeWidth={1.8} /></span>
+          <div className="es-title">暂无待审核提交</div>
+          <ButtonLink to="/tasks">查看任务与执行</ButtonLink>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Card title={`待审核 (${items.length})`}>
+      <div className="stack-sm">
+        {items.map((review) => (
+          <div className="row-between" key={review.id}>
+            <div>
+              <b>{review.submission_id}</b>
+              <p className="text-sm muted">Reviewer {review.reviewer_id}</p>
+            </div>
+            <ButtonLink to={`/reviews/${encodeURIComponent(review.id)}`}>开始审核</ButtonLink>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export function ReviewWorkspace() {
   const { reviewId } = useParams();
 
@@ -196,14 +231,7 @@ export function ReviewWorkspace() {
       {reviewId ? (
         <ReviewPage key={reviewId} />
       ) : (
-        <div className="card">
-          <div className="empty-state">
-            <span className="es-icon" aria-hidden="true">
-              <GitPullRequest size={18} strokeWidth={1.8} />
-            </span>
-            <div className="es-title">选择一次审核查看详情</div>
-          </div>
-        </div>
+        <PendingReviewList />
       )}
     </div>
   );

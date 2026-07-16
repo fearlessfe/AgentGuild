@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getExecution, getTask, pollInterval } from "../../api/client";
-import { Card, EmptyState, StatusChip } from "../../ui";
+import { ButtonLink, Card, EmptyState, StatusChip } from "../../ui";
 
 type ChipTone = "action" | "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -295,6 +295,12 @@ function TaskDetailContent({
               </div>
             ) : null}
             {execution.audit_summary ? <p className="text-sm faint">审计　{execution.audit_summary}</p> : null}
+            <div className="row">
+              <ButtonLink to={`/executions/${encodeURIComponent(execution.id)}`}>打开执行详情</ButtonLink>
+              {task.status === "completed" ? (
+                <ButtonLink to={`/outcome?task_id=${encodeURIComponent(task.id)}`}>查看结果</ButtonLink>
+              ) : null}
+            </div>
           </div>
         </Card>
       ) : null}

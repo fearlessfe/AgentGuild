@@ -35,6 +35,20 @@ func TestRuleServiceCreateRequiresAdminHuman(t *testing.T) {
 	}
 }
 
+func TestRuleServiceCreatePreservesDisabledFlag(t *testing.T) {
+	svc := newTestRuleService(t)
+	cmd := validCreateRuleCommand()
+	enabled := false
+	cmd.Enabled = &enabled
+	view, err := svc.Create(context.Background(), adminPrincipal("tenant-1"), cmd)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if view.Enabled {
+		t.Fatal("Create() enabled = true, want false")
+	}
+}
+
 func TestRuleServiceReadRequiresHumanAndUsesPrincipalTenant(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRuleRepository()

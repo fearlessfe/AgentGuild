@@ -199,9 +199,10 @@ func TestLoadRequiresGitHubAppPublicBaseURLWhenWebEnabled(t *testing.T) {
 	delete(env, "GITHUB_APP_PUBLIC_BASE_URL")
 
 	_, err := config.Load(func(key string) string { return env[key] })
-	require.ErrorContains(t, err, "GITHUB_APP_PUBLIC_BASE_URL is required when WEB_ENABLED=true")
+	require.ErrorContains(t, err, "GITHUB_APP_PUBLIC_BASE_URL is required")
 
 	env["WEB_ENABLED"] = "false"
+	env["MCP_ENABLED"] = "false"
 	_, err = config.Load(func(key string) string { return env[key] })
 	require.NoError(t, err)
 }

@@ -63,13 +63,15 @@ type UpsertGitHubApp struct {
 
 // gitHubAppService is the concrete implementation of GitHubAppService.
 type gitHubAppService struct {
-	repo  GitHubAppRepository
-	newID func() string
+	repo         GitHubAppRepository
+	newID        func() string
+	allowedHosts []string
 }
 
 // GitHubAppManagerOptions configures GitHub App management.
 type GitHubAppManagerOptions struct {
-	NewID func() string
+	NewID        func() string
+	AllowedHosts []string
 }
 
 // NewGitHubAppManager creates a GitHubAppManager.
@@ -85,7 +87,7 @@ func NewGitHubAppManagerWithOptions(repo GitHubAppRepository, options GitHubAppM
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
-	return &gitHubAppService{repo: repo, newID: options.NewID}, nil
+	return &gitHubAppService{repo: repo, newID: options.NewID, allowedHosts: append([]string{"api.github.com"}, options.AllowedHosts...)}, nil
 }
 
 // NewGitHubAppService creates a GitHubAppService from a repository.
@@ -126,6 +128,10 @@ func (s *gitHubAppService) Upsert(ctx context.Context, cmd UpsertGitHubApp) erro
 	baseURL := cmd.BaseURL
 	if baseURL == "" {
 		baseURL = "https://api.github.com"
+	}
+	baseURL, err := github.ValidateBaseURL(baseURL, s.allowedHosts)
+	if err != nil {
+		return invalid("base_url")
 	}
 	return s.repo.Upsert(ctx, &GitHubAppRecord{
 		ID:                       id,
@@ -245,6 +251,7 @@ func (s *gitHubAppService) InstallationAccount(ctx context.Context, tenantID, ap
 	}
 	client, err := github.NewInstallationClient(github.InstallationClientConfig{
 		BaseURL: record.BaseURL, AppID: record.AppID, PrivateKey: record.PrivateKey,
+		AllowedHosts: append([]string{"api.github.com"}, s.allowedHosts...),
 	})
 	if err != nil {
 		return "", err
@@ -284,7 +291,7 @@ func (s *gitHubAppService) Driver(ctx context.Context, tenantID string) (git.Dri
 	if err != nil {
 		return nil, err
 	}
-	return driverFromGitHubApp(record)
+	return driverFromGitHubApp(record, s.allowedHosts)
 }
 
 // DriverForApp returns a git.Driver for one tenant-scoped GitHub App.
@@ -299,15 +306,16 @@ func (s *gitHubAppService) DriverForApp(ctx context.Context, tenantID, appID str
 	if err != nil {
 		return nil, err
 	}
-	return driverFromGitHubApp(record)
+	return driverFromGitHubApp(record, s.allowedHosts)
 }
 
-func driverFromGitHubApp(record *GitHubAppRecord) (git.Driver, error) {
+func driverFromGitHubApp(record *GitHubAppRecord, allowedHosts []string) (git.Driver, error) {
 	return github.NewDriver(github.Config{
 		AppID:          record.AppID,
 		PrivateKey:     record.PrivateKey,
 		InstallationID: record.InstallationID,
 		BaseURL:        record.BaseURL,
+		AllowedHosts:   append([]string{"api.github.com"}, allowedHosts...),
 	})
 }
 

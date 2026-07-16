@@ -1,12 +1,12 @@
-import { PageHeader, Card, Button, ButtonLink, Steps, ApiNote } from "../../ui";
+import { PageHeader, Card, ButtonLink, Steps } from "../../ui";
 import type { Step } from "../../ui";
 
 const ONBOARDING_STEPS: Step[] = [
   { title: "登录", state: "done" },
   { title: "Git 接入", state: "current", desc: "连接企业 Git 提供商并授予最小权限" },
-  { title: "仓库", state: "pending" },
-  { title: "同步", state: "pending" },
-  { title: "完成", state: "pending" },
+  { title: "仓库接入", state: "pending", desc: "选择 App 授权仓库或添加公开仓库" },
+  { title: "首次同步", state: "pending", desc: "创建规则并至少成功运行一次" },
+  { title: "任务执行", state: "pending" },
 ];
 
 export function OnboardingScreen() {
@@ -25,22 +25,15 @@ export function OnboardingScreen() {
                   连接 GitHub
                 </ButtonLink>
                 <ButtonLink to="/repositories">设置仓库</ButtonLink>
-                <Button variant="ghost">稍后再说</Button>
+                <ButtonLink to="/sync">配置同步</ButtonLink>
               </div>
             </div>
           </Card>
-          <ApiNote status="planned">
-            服务端尚无 onboarding 状态接口；完成状态必须由服务端持久化，不能用前端本地状态代替。
-          </ApiNote>
         </div>
         <div className="col">
-          <Card title="引导进度">
+          <Card title="接入路线" sub="按顺序完成 Git、仓库与首次同步配置。">
             <Steps items={ONBOARDING_STEPS} />
           </Card>
-          <div className="row-between">
-            <Button variant="primary">保存并继续</Button>
-            <span className="faint text-xs">进度已保存</span>
-          </div>
         </div>
       </div>
     </div>

@@ -30,6 +30,7 @@ type CreateRuleCommand struct {
 	DefaultPriority string
 	DedupeStrategy  string
 	SourceAuth      string
+	Enabled         *bool
 }
 
 type UpdateRuleCommand struct {
@@ -79,6 +80,10 @@ func (s *RuleService) Create(ctx context.Context, principal auth.Principal, cmd 
 		return RuleView{}, err
 	}
 	now := s.now()
+	enabled := true
+	if cmd.Enabled != nil {
+		enabled = *cmd.Enabled
+	}
 	rule, err := domain.NewRule(
 		s.newID(),
 		principal.TenantID,
@@ -90,7 +95,7 @@ func (s *RuleService) Create(ctx context.Context, principal auth.Principal, cmd 
 		cmd.DefaultPriority,
 		cmd.DedupeStrategy,
 		cmd.SourceAuth,
-		true,
+		enabled,
 		time.Time{},
 		now,
 		now,

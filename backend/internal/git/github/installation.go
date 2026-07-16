@@ -15,10 +15,12 @@ import (
 
 // InstallationClientConfig configures App-authenticated installation metadata requests.
 type InstallationClientConfig struct {
-	BaseURL    string
-	AppID      int64
-	PrivateKey string
-	HTTPClient *http.Client
+	BaseURL           string
+	AppID             int64
+	PrivateKey        string
+	HTTPClient        *http.Client
+	AllowedHosts      []string
+	AllowInsecureHTTP bool
 }
 
 // InstallationClient fetches installation metadata using a GitHub App JWT.
@@ -46,9 +48,15 @@ func NewInstallationClient(cfg InstallationClientConfig) (*InstallationClient, e
 	if baseURL == "" {
 		baseURL = "https://api.github.com"
 	}
+	urlConfig := Config{AppID: cfg.AppID, InstallationID: 1, PrivateKey: cfg.PrivateKey, BaseURL: baseURL, AllowedHosts: cfg.AllowedHosts, AllowInsecureHTTP: cfg.AllowInsecureHTTP}
+	if err := urlConfig.Validate(); err != nil {
+		return nil, err
+	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: defaultHTTPTimeout}
+		client = &http.Client{Timeout: defaultHTTPTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+			return fmt.Errorf("github installation redirects are disabled")
+		}}
 	}
 	return &InstallationClient{baseURL: baseURL, appID: cfg.AppID, key: key, client: client, now: time.Now}, nil
 }

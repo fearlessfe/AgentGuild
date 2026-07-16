@@ -23,6 +23,35 @@ func TestCreateSubmissionRequiresAgentWithExecuteScope(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrForbidden)
 }
 
+func TestCreateSubmissionFailsClosedWithoutAuthorizer(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+	svc, err := application.NewSubmissionService(fixture.store, fixture.verifier, nil, nil, sequenceIDs("sub-denied"))
+	require.NoError(t, err)
+	_, err = svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	require.Empty(t, fixture.store.submissions)
+}
+
+func TestCreateSubmissionRejectsCrossAgentAndRepositoryMismatch(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+	denied := application.SubmissionAuthorizerFunc(func(context.Context, application.Principal, application.CreateSubmission, time.Time) (application.SubmissionGrant, error) {
+		return application.SubmissionGrant{}, domain.ErrNotFound
+	})
+	svc, err := application.NewSubmissionService(fixture.store, fixture.verifier, nil, denied, sequenceIDs("sub-denied"))
+	require.NoError(t, err)
+	_, err = svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.ErrorIs(t, err, domain.ErrNotFound)
+
+	mismatch := application.SubmissionAuthorizerFunc(func(context.Context, application.Principal, application.CreateSubmission, time.Time) (application.SubmissionGrant, error) {
+		return application.SubmissionGrant{TaskID: "task-1", Repo: "trusted/repo", BaseCommit: "base-sha"}, nil
+	})
+	svc, err = application.NewSubmissionService(fixture.store, fixture.verifier, nil, mismatch, sequenceIDs("sub-denied"))
+	require.NoError(t, err)
+	_, err = svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	require.Empty(t, fixture.store.submissions)
+}
+
 func TestCreateSubmissionRequiresFields(t *testing.T) {
 	fixture := newSubmissionFixture(t)
 	base := newSubmissionCmd()
@@ -32,9 +61,7 @@ func TestCreateSubmissionRequiresFields(t *testing.T) {
 		mutate func(*application.CreateSubmission)
 	}{
 		{"execution_id", func(c *application.CreateSubmission) { c.ExecutionID = "" }},
-		{"task_id", func(c *application.CreateSubmission) { c.TaskID = "" }},
 		{"repo", func(c *application.CreateSubmission) { c.Repo = "" }},
-		{"branch", func(c *application.CreateSubmission) { c.Branch = "" }},
 		{"commit_sha", func(c *application.CreateSubmission) { c.CommitSHA = "" }},
 		{"base_commit_sha", func(c *application.CreateSubmission) { c.BaseCommitSHA = "" }},
 		{"summary", func(c *application.CreateSubmission) { c.Summary = "" }},
@@ -208,6 +235,12 @@ func newSubmissionFixtureWithNotifier(t *testing.T, notifier application.Executi
 	t.Helper()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
+	store.credentials["cred-1"] = &application.CredentialRecord{
+		ID: "cred-1", TenantID: "tenant-1", ExecutionID: "exec-1",
+		Provider: "github", Repo: "owner/repo", RepoURL: "https://agentguild.example/git/tenant-1/cred-1/owner/repo.git",
+		Branch: "agentguild/exec-1", BaseCommit: "base-sha", ExpiresAt: now.Add(5 * time.Minute),
+		Status: gitdomain.CredentialStatusActive, CreatedAt: now,
+	}
 	driver := &fakeDriver{
 		commits: map[string]git.Commit{
 			"head-sha":          {SHA: "head-sha"},
@@ -221,7 +254,10 @@ func newSubmissionFixtureWithNotifier(t *testing.T, notifier application.Executi
 		compareFiles: []git.ChangedFile{{Filename: "src/main.go", Status: "modified"}},
 	}
 	verifier := application.NewCommitVerifier(&fakeAppService{driver: driver}, &fakeSubmissionRepository{})
-	svc, err := application.NewSubmissionService(store, verifier, notifier, sequenceIDs("sub-1"))
+	authorizer := application.SubmissionAuthorizerFunc(func(_ context.Context, _ application.Principal, cmd application.CreateSubmission, _ time.Time) (application.SubmissionGrant, error) {
+		return application.SubmissionGrant{TaskID: "task-1", Repo: "owner/repo", BaseCommit: "base-sha", AllowedPaths: cmd.AllowedPaths, ForbiddenPaths: cmd.ForbiddenPaths}, nil
+	})
+	svc, err := application.NewSubmissionService(store, verifier, notifier, authorizer, sequenceIDs("sub-1"))
 	require.NoError(t, err)
 	return &submissionFixture{svc: svc, store: store, driver: driver, verifier: verifier, now: now}
 }
@@ -239,7 +275,7 @@ func newSubmissionCmd() application.CreateSubmission {
 }
 
 func agentPrincipal() application.Principal {
-	return application.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1", Scopes: []string{"tasks:execute"}}
+	return application.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1", Scopes: []string{"tasks:execute"}, RepoScope: []string{"owner/repo"}}
 }
 
 func TestCreateSubmissionNotifiesExecutionSubmitted(t *testing.T) {
@@ -257,11 +293,11 @@ func TestCreateSubmissionNotifiesExecutionSubmitted(t *testing.T) {
 	require.Equal(t, "agent-1", recorder.calls[0].Actor.ID)
 }
 
-func TestCreateSubmissionSucceedsWhenNotificationFails(t *testing.T) {
+func TestCreateSubmissionReturnsRetryableErrorWhenNotificationFails(t *testing.T) {
 	fixture := newSubmissionFixtureWithNotifier(t, &failingNotifier{})
 
 	got, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "notification failed")
 	require.NotEmpty(t, got.Data.ID)
 	require.NotNil(t, got.Data.ValidationJobID)
 }

@@ -10,6 +10,7 @@ import (
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	"agentguild.dev/agentguild/backend/internal/git/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,7 @@ func TestValidationJobRepositoryRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
+	seedValidationSubmission(t, db, job)
 
 	repo := postgres.NewValidationJobRepository(db)
 	require.NoError(t, repo.Insert(ctx, job))
@@ -39,6 +41,7 @@ func TestValidationJobRepositoryTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
+	seedValidationSubmission(t, db, job)
 	require.NoError(t, postgres.NewValidationJobRepository(db).Insert(ctx, job))
 
 	_, err = postgres.NewValidationJobRepository(db).GetByID(ctx, "tenant-2", "job-1")
@@ -50,6 +53,7 @@ func TestValidationJobRepositoryClaimNextPending(t *testing.T) {
 	ctx := context.Background()
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
+	seedValidationSubmission(t, db, job)
 
 	store := postgres.NewStore(db)
 	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
@@ -83,6 +87,7 @@ func TestValidationJobRepositoryClaimNextPendingAfterExpiry(t *testing.T) {
 	ctx := context.Background()
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
+	seedValidationSubmission(t, db, job)
 
 	store := postgres.NewStore(db)
 	require.NoError(t, store.WithTx(ctx, func(tx application.Tx) error {
@@ -113,6 +118,7 @@ func TestValidationJobRepositoryRejectsDuplicateSubmissionJob(t *testing.T) {
 	ctx := context.Background()
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
+	seedValidationSubmission(t, db, job)
 	require.NoError(t, postgres.NewValidationJobRepository(db).Insert(ctx, job))
 
 	job2, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-2" })
@@ -126,6 +132,7 @@ func TestValidationJobRepositoryUpdateStep(t *testing.T) {
 	ctx := context.Background()
 	job, err := gitdomain.NewValidationJob("tenant-1", "sub-1", "exec-1", "owner/repo", "agentguild/exec-1", "head-sha", "v1", time.Now(), func() string { return "job-1" })
 	require.NoError(t, err)
+	seedValidationSubmission(t, db, job)
 	now := time.Now()
 	require.NoError(t, job.Claim("worker-1", now.Add(5*time.Minute), now))
 	require.NoError(t, job.StartStep(gitdomain.ValidationStepBuild, now))
@@ -146,4 +153,16 @@ func TestValidationJobRepositoryUpdateStep(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, gitdomain.ValidationStepStatusSucceeded, got.Steps[0].Status)
 	require.Equal(t, "built", got.Steps[0].LogSummary)
+}
+
+func seedValidationSubmission(t *testing.T, db *pgxpool.Pool, job *gitdomain.ValidationJob) {
+	t.Helper()
+	now := time.Now()
+	submission := &gitdomain.Submission{
+		ID: job.SubmissionID, TenantID: job.TenantID, TaskID: "task-1", ExecutionID: job.ExecutionID,
+		Repo: job.Repo, Branch: job.Branch, CommitSHA: job.CommitSHA, BaseCommitSHA: "base-sha",
+		Summary: "test", DiffFingerprint: "fingerprint", Status: gitdomain.SubmissionStatusPendingVerification,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, postgres.NewSubmissionRepository(db).Save(context.Background(), submission))
 }

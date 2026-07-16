@@ -33,11 +33,6 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal := mustPrincipal(r)
-			requestID := r.Header.Get("Idempotency-Key")
-			if requestID == "" {
-				writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "idempotency_key is required", "idempotency_key")
-				return
-			}
 			if s.idempotencyStore == nil {
 				writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 				return
@@ -49,6 +44,14 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
+			requestID := r.Header.Get("Idempotency-Key")
+			if requestID == "" {
+				requestID = mutationBodyRequestID(body)
+			}
+			if requestID == "" {
+				writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "idempotency_key is required", "idempotency_key")
+				return
+			}
 			key := application.IdempotencyKey{
 				TenantID: principal.TenantID, ActorID: principal.OwnerID,
 				Operation: operation, RequestID: requestID,
@@ -105,6 +108,19 @@ func (s *Server) mutationIdempotency(operation string) func(http.Handler) http.H
 			recorder.copyTo(w)
 		})
 	}
+}
+
+func mutationBodyRequestID(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return ""
+	}
+	var payload struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return payload.RequestID
 }
 
 type mutationHeartbeat struct {

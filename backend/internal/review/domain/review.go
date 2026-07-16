@@ -34,6 +34,7 @@ type Review struct {
 	SubmissionID    string
 	ReviewerID      string
 	RubricVersionID string
+	Capability      string
 	RubricScores    []RubricScore
 	Summary         string
 	Status          ReviewStatus
@@ -43,7 +44,7 @@ type Review struct {
 }
 
 // NewReview creates a new review in the pending state.
-func NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID string, now time.Time) (*Review, error) {
+func NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID, capability string, now time.Time) (*Review, error) {
 	if id == "" {
 		return nil, invalidArgument("id")
 	}
@@ -59,6 +60,9 @@ func NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID string, n
 	if rubricVersionID == "" {
 		return nil, invalidArgument("rubric_version_id")
 	}
+	if capability == "" {
+		return nil, invalidArgument("capability")
+	}
 	if now.IsZero() {
 		return nil, invalidArgument("created_at")
 	}
@@ -68,6 +72,7 @@ func NewReview(id, tenantID, submissionID, reviewerID, rubricVersionID string, n
 		SubmissionID:    submissionID,
 		ReviewerID:      reviewerID,
 		RubricVersionID: rubricVersionID,
+		Capability:      capability,
 		Status:          ReviewPending,
 		CreatedAt:       now,
 	}, nil

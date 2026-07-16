@@ -96,6 +96,7 @@ func (s *Server) createSyncRule(w http.ResponseWriter, r *http.Request) {
 		DefaultPriority: body.DefaultPriority,
 		DedupeStrategy:  body.DedupeStrategy,
 		SourceAuth:      body.SourceAuth,
+		Enabled:         body.Enabled,
 	})
 	if err != nil {
 		mapSyncRuleError(w, err, principal)

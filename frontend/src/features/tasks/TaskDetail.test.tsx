@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { envelope, executionViewFixture, taskViewFixture } from "../../api/fixtures";
 import { TaskDetail } from "./TaskDetail";
@@ -29,7 +30,7 @@ describe("TaskDetail", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <TaskDetail taskId="task-1" />
+        <MemoryRouter><TaskDetail taskId="task-1" /></MemoryRouter>
       </QueryClientProvider>,
     );
 
@@ -69,12 +70,35 @@ describe("TaskDetail", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <TaskDetail taskId="issue-task-1" />
+        <MemoryRouter><TaskDetail taskId="issue-task-1" /></MemoryRouter>
       </QueryClientProvider>,
     );
 
     expect(await screen.findByText("Update instructions for Monitoring Workshop section")).toBeVisible();
     expect(screen.getByText("Issue #13862 @ langfuse/langfuse")).toBeVisible();
     expect(screen.getByText("暂无验收标准")).toBeVisible();
+  });
+
+  it("links a completed task to its retained execution and outcome", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify(envelope(taskViewFixture({ id: "task-1", status: "completed", active_execution_id: "exec-1" }))),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(envelope(executionViewFixture({ id: "exec-1", status: "accepted" }))), { status: 200 }),
+      );
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter><TaskDetail taskId="task-1" /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Accepted")).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看结果" })).toHaveAttribute("href", "/outcome?task_id=task-1");
   });
 });

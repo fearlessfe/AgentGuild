@@ -10,6 +10,8 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
@@ -32,6 +34,7 @@ func TestCreateReviewAllocatesReviewerAndCreatesPendingReview(t *testing.T) {
 	require.Equal(t, "tenant-1", got.Data.TenantID)
 	require.Equal(t, "submission-1", got.Data.SubmissionID)
 	require.Equal(t, "reviewer-1", got.Data.ReviewerID)
+	require.Equal(t, "go", got.Data.Capability)
 	require.Equal(t, reviewdomain.ReviewPending, reviewdomain.ReviewStatus(got.Data.Status))
 	require.Equal(t, 1, fixture.store.reviewers["tenant-1/reviewer-1"].CurrentLoad)
 }
@@ -100,6 +103,32 @@ func TestCreateReviewReturnsNotFoundForMissingSubmission(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
 
+func TestReviewUsesSubmissionExecutionRelationshipWhenIDsDiffer(t *testing.T) {
+	fixture := newReviewFixture(t)
+	seedExecution(t, fixture, "tenant-1", "execution-1", domain.ExecutionReviewing)
+	require.NoError(t, fixture.submissions.Save(context.Background(), &gitdomain.Submission{
+		ID: "submission-1", TenantID: "tenant-1", ExecutionID: "execution-1",
+		Status: gitdomain.SubmissionStatusValidated,
+	}))
+	fixture.seedReviewer("tenant-1", "reviewer-1", "user-reviewer-1", []string{"go"}, 0)
+	fixture.seedRubric("tenant-1", "rubric-1", 1)
+
+	created, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID: "req-create-distinct", SubmissionID: "submission-1", Capabilities: []string{"go"},
+	})
+	require.NoError(t, err)
+
+	_, err = fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
+		RequestID: "req-decide-distinct", ReviewID: created.Data.ID, Decision: reviewdomain.DecisionAccepted,
+		Scores: []reviewdomain.RubricScore{{Dimension: "quality", Score: 90}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.ExecutionAccepted, fixture.store.executions["tenant-1/execution-1"].Status)
+	task := fixture.store.tasks[taskKey("tenant-1", "task-execution-1")]
+	require.Equal(t, domain.TaskCompleted, task.Status)
+	require.Equal(t, "execution-1", task.ActiveExecutionID)
+}
+
 func TestSubmitDecisionAcceptsWhenHardGatesPass(t *testing.T) {
 	fixture := newReviewFixture(t)
 	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
@@ -119,6 +148,9 @@ func TestSubmitDecisionAcceptsWhenHardGatesPass(t *testing.T) {
 	require.Equal(t, 0, fixture.store.reviewers["tenant-1/reviewer-1"].CurrentLoad)
 	exec := fixture.store.executions["tenant-1/submission-1"]
 	require.Equal(t, domain.ExecutionAccepted, exec.Status)
+	task := fixture.store.tasks[taskKey("tenant-1", "task-submission-1")]
+	require.Equal(t, domain.TaskCompleted, task.Status)
+	require.Equal(t, "submission-1", task.ActiveExecutionID)
 }
 
 func TestSubmitDecisionRejectsWithoutHardGateValidation(t *testing.T) {
@@ -134,6 +166,26 @@ func TestSubmitDecisionRejectsWithoutHardGateValidation(t *testing.T) {
 	})
 
 	require.Equal(t, "hard_gates_failed", domain.CodeOf(err))
+}
+
+func TestSubmitDecisionCanCompleteTaskAfterDeadline(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	key := taskKey("tenant-1", "task-submission-1")
+	task := fixture.store.tasks[key]
+	task.Deadline = fixture.store.now.Add(-time.Minute)
+	fixture.store.tasks[key] = task
+	fixture.validation.pass = true
+
+	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
+		RequestID: "req-after-deadline",
+		ReviewID:  review.ID,
+		Decision:  reviewdomain.DecisionAccepted,
+		Scores:    []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.TaskCompleted, fixture.store.tasks[key].Status)
 }
 
 func TestSubmitDecisionRequiresCompleteScoresForAccept(t *testing.T) {
@@ -418,17 +470,18 @@ func TestAllocatorReturnsErrorWhenNoReviewerMatches(t *testing.T) {
 
 func TestNewServiceRequiresDependencies(t *testing.T) {
 	store := newReviewMemoryStore(time.Now())
-	_, err := reviewapp.NewService(store, nil, nil, reviewapp.Options{})
+	_, err := reviewapp.NewService(store, nil, nil, nil, reviewapp.Options{})
 	require.Equal(t, "invalid_argument", domain.CodeOf(err))
 }
 
 // --- fixtures ---
 
 type reviewFixture struct {
-	svc        *reviewapp.Service
-	alloc      reviewapp.Allocator
-	store      *reviewMemoryStore
-	validation *fakeValidationProvider
+	svc         *reviewapp.Service
+	alloc       reviewapp.Allocator
+	store       *reviewMemoryStore
+	submissions *fakeSubmissionRepository
+	validation  *fakeValidationProvider
 }
 
 func newReviewFixture(t *testing.T) *reviewFixture {
@@ -437,11 +490,12 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 	store := newReviewMemoryStore(now)
 	validation := &fakeValidationProvider{pass: true}
 	diff := &fakeDiffProvider{data: []reviewapp.FileDiff{{Path: "main.go"}}}
-	svc, err := reviewapp.NewService(store, diff, validation, reviewapp.Options{
+	submissions := &fakeSubmissionRepository{items: make(map[string]*gitdomain.Submission)}
+	svc, err := reviewapp.NewService(store, submissions, diff, validation, reviewapp.Options{
 		NewID: sequenceIDs("review-1", "comment-1", "review-2"),
 	})
 	require.NoError(t, err)
-	return &reviewFixture{svc: svc, alloc: reviewapp.Allocator{}, store: store, validation: validation}
+	return &reviewFixture{svc: svc, alloc: reviewapp.Allocator{}, store: store, submissions: submissions, validation: validation}
 }
 
 func seedExecution(t *testing.T, f *reviewFixture, tenantID, executionID string, status domain.ExecutionStatus) {
@@ -451,6 +505,7 @@ func seedExecution(t *testing.T, f *reviewFixture, tenantID, executionID string,
 		ID:                      taskID,
 		TenantID:                tenantID,
 		PublisherAgentVersionID: "publisher-v1",
+		Type:                    "code",
 		Deadline:                f.store.now.Add(time.Hour),
 		Status:                  domain.TaskInProgress,
 	}
@@ -466,6 +521,10 @@ func seedExecution(t *testing.T, f *reviewFixture, tenantID, executionID string,
 			HardExpiry: f.store.now.Add(time.Hour),
 		},
 	}
+	require.NoError(t, f.submissions.Save(context.Background(), &gitdomain.Submission{
+		ID: executionID, TenantID: tenantID, ExecutionID: executionID,
+		Status: gitdomain.SubmissionStatusValidated,
+	}))
 }
 
 func seedPendingReview(t *testing.T, f *reviewFixture, tenantID, submissionID, reviewerID string) *reviewdomain.Review {
@@ -474,7 +533,7 @@ func seedPendingReview(t *testing.T, f *reviewFixture, tenantID, submissionID, r
 	f.seedReviewer(tenantID, reviewerID, "user-"+reviewerID, []string{"go"}, 0)
 	f.seedRubric(tenantID, "rubric-"+submissionID, 1)
 
-	review, err := reviewdomain.NewReview("review-"+submissionID, tenantID, submissionID, reviewerID, "rubric-"+submissionID, f.store.now)
+	review, err := reviewdomain.NewReview("review-"+submissionID, tenantID, submissionID, reviewerID, "rubric-"+submissionID, "code-review", f.store.now)
 	require.NoError(t, err)
 	reviewer := f.store.reviewers[reviewerKey(tenantID, reviewerID)]
 	require.NoError(t, reviewer.Assign(f.store.now))
@@ -520,7 +579,7 @@ func publisherPrincipal(tenantID, versionID string) auth.Principal {
 }
 
 func reviewerPrincipal(tenantID, reviewerID string) auth.Principal {
-	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeHuman, OwnerID: "user-" + reviewerID, Scopes: []string{"reviews:read", "reviews:write", "reputation:read"}}
+	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeHuman, OwnerID: "user-" + reviewerID}
 }
 
 // --- memory store ---
@@ -572,8 +631,16 @@ func (tx *reviewMemoryTx) GetTask(_ context.Context, tenantID, id string) (*appl
 func (tx *reviewMemoryTx) ListTaskRecords(context.Context, application.TaskListQuery) ([]application.TaskRecord, error) {
 	panic("not implemented")
 }
-func (tx *reviewMemoryTx) UpdateTask(context.Context, application.TaskRecord, int64, string) (bool, error) {
-	panic("not implemented")
+func (tx *reviewMemoryTx) UpdateTask(_ context.Context, record application.TaskRecord, expected int64, activeExecutionID string) (bool, error) {
+	key := taskKey(record.TenantID, record.ID)
+	current, ok := tx.store.tasks[key]
+	if !ok || current.StateVersion != expected {
+		return false, nil
+	}
+	record.StateVersion++
+	record.ActiveExecutionID = activeExecutionID
+	tx.store.tasks[key] = record
+	return true, nil
 }
 func (tx *reviewMemoryTx) ClaimTask(context.Context, string, string, int64, string) (bool, error) {
 	panic("not implemented")
@@ -700,8 +767,29 @@ func (r reviewMemoryReviewRepository) GetByID(_ context.Context, tenantID, id st
 	return &copy, nil
 }
 
-func (r reviewMemoryReviewRepository) ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error) {
-	panic("not implemented")
+func (r reviewMemoryReviewRepository) ListBySubmission(_ context.Context, tenantID, submissionID string) ([]reviewdomain.Review, error) {
+	var out []reviewdomain.Review
+	for _, review := range r.store.reviews {
+		if review.TenantID == tenantID && review.SubmissionID == submissionID {
+			out = append(out, *review)
+		}
+	}
+	return out, nil
+}
+
+func (r reviewMemoryReviewRepository) List(_ context.Context, tenantID, reviewerID, status string, limit int) ([]reviewdomain.Review, error) {
+	var out []reviewdomain.Review
+	for _, review := range r.store.reviews {
+		if review.TenantID != tenantID || (reviewerID != "" && review.ReviewerID != reviewerID) ||
+			(status != "" && string(review.Status) != status) {
+			continue
+		}
+		out = append(out, *review)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (r reviewMemoryReviewRepository) ListUnprojected(context.Context, int) ([]application.ReviewSignalRecord, error) {
@@ -853,12 +941,44 @@ func sequenceIDs(values ...string) func() string {
 
 // --- providers ---
 
+type fakeSubmissionRepository struct {
+	items map[string]*gitdomain.Submission
+}
+
+func (r *fakeSubmissionRepository) Save(_ context.Context, submission *gitdomain.Submission) error {
+	copy := *submission
+	r.items[submission.TenantID+"/"+submission.ID] = &copy
+	return nil
+}
+
+func (r *fakeSubmissionRepository) GetByID(_ context.Context, tenantID, submissionID string) (*gitdomain.Submission, error) {
+	submission := r.items[tenantID+"/"+submissionID]
+	if submission == nil {
+		return nil, domain.ErrNotFound
+	}
+	copy := *submission
+	return &copy, nil
+}
+
+func (r *fakeSubmissionRepository) GetByExecutionID(_ context.Context, tenantID, executionID string) ([]*gitdomain.Submission, error) {
+	var out []*gitdomain.Submission
+	for _, submission := range r.items {
+		if submission.TenantID == tenantID && submission.ExecutionID == executionID {
+			copy := *submission
+			out = append(out, &copy)
+		}
+	}
+	return out, nil
+}
+
+var _ gitapp.SubmissionRepository = (*fakeSubmissionRepository)(nil)
+
 type fakeDiffProvider struct {
 	data []reviewapp.FileDiff
 	err  error
 }
 
-func (f *fakeDiffProvider) GetDiff(context.Context, string) ([]reviewapp.FileDiff, error) {
+func (f *fakeDiffProvider) GetDiff(context.Context, string, string) ([]reviewapp.FileDiff, error) {
 	return f.data, f.err
 }
 
@@ -866,7 +986,7 @@ type fakeValidationProvider struct {
 	pass bool
 }
 
-func (f *fakeValidationProvider) GetValidationStatus(context.Context, string) (reviewapp.ValidationStatus, error) {
+func (f *fakeValidationProvider) GetValidationStatus(context.Context, string, string) (reviewapp.ValidationStatus, error) {
 	return fakeValidationStatus{pass: f.pass}, nil
 }
 

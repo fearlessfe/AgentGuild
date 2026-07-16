@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// Credential is a short-lived token that grants an agent access to a single
-// repository/branch/base-commit combination. It must never be persisted in
-// plaintext.
+// Credential is a short-lived hosting-provider credential. The Branch and
+// BaseCommit fields describe the requested operation but are not assumed to be
+// enforced by the provider token itself. It must never be persisted in plaintext.
 type Credential struct {
 	Token      string
 	RepoURL    string

@@ -106,6 +106,9 @@ func (n *CoreExecutionNotifier) Notify(ctx context.Context, cmd gitapp.Execution
 		if err != nil {
 			return err
 		}
+		if executionTransitionAlreadyApplied(execution.Status, cmd.Intent) {
+			return nil
+		}
 		if err := execution.Apply(cmd.Intent, cmd.Actor, now); err != nil {
 			return err
 		}
@@ -118,4 +121,25 @@ func (n *CoreExecutionNotifier) Notify(ctx context.Context, cmd gitapp.Execution
 		}
 		return nil
 	})
+}
+
+func executionTransitionAlreadyApplied(status domain.ExecutionStatus, intent domain.Intent) bool {
+	switch intent {
+	case domain.IntentSubmit:
+		return status == domain.ExecutionSubmitted || status == domain.ExecutionValidating ||
+			status == domain.ExecutionValidationFailed || status == domain.ExecutionReviewing ||
+			status == domain.ExecutionRevisionRequested || status == domain.ExecutionAccepted ||
+			status == domain.ExecutionRejected
+	case domain.IntentStartValidation:
+		return status == domain.ExecutionValidating || status == domain.ExecutionValidationFailed ||
+			status == domain.ExecutionReviewing || status == domain.ExecutionRevisionRequested ||
+			status == domain.ExecutionAccepted || status == domain.ExecutionRejected
+	case domain.IntentFailValidation:
+		return status == domain.ExecutionValidationFailed
+	case domain.IntentMarkReviewing:
+		return status == domain.ExecutionReviewing || status == domain.ExecutionRevisionRequested ||
+			status == domain.ExecutionAccepted || status == domain.ExecutionRejected
+	default:
+		return false
+	}
 }

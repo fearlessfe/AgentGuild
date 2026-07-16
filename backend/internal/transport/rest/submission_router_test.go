@@ -26,6 +26,8 @@ type fakeSubmissionService struct {
 	createErr error
 	get       gitapp.Envelope[gitapp.SubmissionView]
 	getErr    error
+	list      gitapp.Envelope[[]gitapp.SubmissionView]
+	listErr   error
 }
 
 type submissionCall struct {
@@ -42,6 +44,24 @@ func (f *fakeSubmissionService) CreateSubmission(_ context.Context, p gitapp.Pri
 func (f *fakeSubmissionService) GetSubmission(_ context.Context, p gitapp.Principal, q gitapp.GetSubmission) (gitapp.Envelope[gitapp.SubmissionView], error) {
 	f.calls = append(f.calls, submissionCall{method: "GetSubmission", principal: p, payload: q})
 	return f.get, f.getErr
+}
+
+func (f *fakeSubmissionService) ListSubmissions(_ context.Context, p gitapp.Principal, q gitapp.ListSubmissions) (gitapp.Envelope[[]gitapp.SubmissionView], error) {
+	f.calls = append(f.calls, submissionCall{method: "ListSubmissions", principal: p, payload: q})
+	return f.list, f.listErr
+}
+
+func TestListSubmissionsAuthorizesExecutionFirst(t *testing.T) {
+	app := &fakeApplication{getExecution: application.Envelope[application.ExecutionView]{Data: application.ExecutionView{ID: "exe-1", TenantID: "tenant-1"}}}
+	sub := &fakeSubmissionService{list: gitapp.Envelope[[]gitapp.SubmissionView]{Data: []gitapp.SubmissionView{{ID: "sub-1", ExecutionID: "exe-1"}}}}
+	server := newTestServerWithSubmissions(app, sub)
+
+	res := get(t, server, "/v1/executions/exe-1/submissions", "token-agent-1")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, sub.calls, 1)
+	require.Equal(t, "exe-1", sub.calls[0].payload.(gitapp.ListSubmissions).ExecutionID)
+	require.Len(t, app.calls, 1)
+	require.Equal(t, "GetExecution", app.calls[0].method)
 }
 
 func newTestServerWithSubmissions(app *fakeApplication, sub *fakeSubmissionService) http.Handler {
@@ -162,7 +182,7 @@ func TestGetSubmissionMapsToServiceAndChecksExecution(t *testing.T) {
 		get: gitapp.Envelope[gitapp.SubmissionView]{
 			Data: gitapp.SubmissionView{
 				ID: "sub-1", TenantID: "tenant-1", ExecutionID: "exe-1",
-				Status: gitdomain.SubmissionStatusPendingVerification,
+				Status:    gitdomain.SubmissionStatusPendingVerification,
 				CreatedAt: now, UpdatedAt: now,
 			},
 			Meta: gitapp.Meta{ServerTime: now},

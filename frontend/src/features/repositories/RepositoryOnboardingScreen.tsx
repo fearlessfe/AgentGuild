@@ -1,4 +1,4 @@
-import { ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as client from "../../api/client";
 import type {
@@ -422,6 +422,17 @@ export function RepositoryOnboardingScreen() {
           </Card>
         </div>
       </div>
+      {summary && onboarded.length > 0 ? (
+        <Card title="下一步：创建同步规则" sub="仓库接入只建立访问绑定；创建并运行规则后，GitHub Issue 才会生成平台任务。">
+          <div className="row-between">
+            <p className="text-sm muted">已接入 {onboarded.length} 个仓库，可以配置标签筛选、任务类型和去重策略。</p>
+            <a className="btn btn--primary" href="/sync">
+              <span aria-hidden="true"><ArrowRight size={14} strokeWidth={1.8} /></span>
+              前往同步规则
+            </a>
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }

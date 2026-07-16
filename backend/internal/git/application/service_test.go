@@ -28,6 +28,20 @@ func TestIssueCredentialRequiresTenantAndAuthorizedCaller(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrForbidden)
 }
 
+func TestIssueCredentialFailsClosedWithoutExecutionAuthorizer(t *testing.T) {
+	store := newMemoryStore(time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC))
+	driver := &fakeCredentialDriver{}
+	svc, err := application.NewCredentialService(store, &fakeAppService{driver: driver}, testCredentialOptions())
+	require.NoError(t, err)
+
+	_, err = svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	require.Zero(t, driver.counter)
+}
+
 func TestIssueCredentialRejectsNonRestrictedBranch(t *testing.T) {
 	fixture := newCredentialFixture(t)
 
@@ -45,7 +59,7 @@ func TestIssueCredentialReturnsTokenAndPersistsMetadata(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "tok-agentguild/exec-1-a", got.Data.Token)
+	require.Regexp(t, `^agc_[A-Za-z0-9_-]+$`, got.Data.Token)
 	require.Equal(t, "tenant-1", got.Data.Credential.TenantID)
 	require.Equal(t, "exec-1", got.Data.Credential.ExecutionID)
 	require.Equal(t, "github", got.Data.Credential.Provider)
@@ -59,6 +73,9 @@ func TestIssueCredentialReturnsTokenAndPersistsMetadata(t *testing.T) {
 	require.Equal(t, "agentguild/exec-1", record.Branch)
 	require.Empty(t, record.RevokedAt)
 	require.Equal(t, gitdomain.CredentialStatusActive, record.Status)
+	require.Equal(t, "owner/repo", record.Repo)
+	require.NotEmpty(t, record.TokenHash)
+	require.NotEqual(t, []byte(got.Data.Token), record.TokenHash)
 }
 
 func TestIssueCredentialUsesRepositoryBoundDriver(t *testing.T) {
@@ -66,7 +83,9 @@ func TestIssueCredentialUsesRepositoryBoundDriver(t *testing.T) {
 	store := newMemoryStore(now)
 	driver := &fakeCredentialDriver{}
 	resolver := &fakeAppService{driver: driver}
-	svc, err := application.NewCredentialService(store, resolver, application.Options{NewID: sequenceIDs("cred-1")})
+	options := testCredentialOptions()
+	options.NewID, options.Authorizer = sequenceIDs("cred-1"), allowCredentialGrant
+	svc, err := application.NewCredentialService(store, resolver, options)
 	require.NoError(t, err)
 
 	_, err = svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
@@ -76,15 +95,23 @@ func TestIssueCredentialUsesRepositoryBoundDriver(t *testing.T) {
 	require.Equal(t, []string{"tenant-1/acme/api"}, resolver.driverCalls)
 }
 
-func TestIssueCredentialUpdatesExistingExecutionMetadata(t *testing.T) {
+func TestIssueCredentialRejectsActiveCredentialAndAllowsReissueAfterRevoke(t *testing.T) {
 	fixture := newCredentialFixture(t)
 	first, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
 
+	_, err = fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		RequestID: "second", ExecutionID: "exec-1", Repo: "owner/repo", Branch: "agentguild/exec-1", BaseCommit: "def",
+	})
+	require.ErrorIs(t, err, git.ErrAlreadyIssued)
+	require.Zero(t, fixture.driver.counter, "credential issuance must not mint an upstream write token")
+
+	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
+	require.NoError(t, err)
 	second, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
-		ExecutionID: "exec-1", Repo: "owner/repo", Branch: "agentguild/exec-1", BaseCommit: "def",
+		RequestID: "third", ExecutionID: "exec-1", Repo: "owner/repo", Branch: "agentguild/exec-1", BaseCommit: "def",
 	})
 
 	require.NoError(t, err)
@@ -95,20 +122,41 @@ func TestIssueCredentialUpdatesExistingExecutionMetadata(t *testing.T) {
 	require.Equal(t, gitdomain.CredentialStatusActive, second.Data.Credential.Status)
 }
 
-func TestIssueCredentialRejectsReissueAfterRevoke(t *testing.T) {
+func TestIssueCredentialReplaysSameRequestWhileActive(t *testing.T) {
 	fixture := newCredentialFixture(t)
-	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
-		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	first, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		RequestID: "same", ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
 
-	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
-	require.NoError(t, err)
-
-	_, err = fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
-		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	second, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		RequestID: "same", ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
-	require.ErrorIs(t, err, git.ErrCredentialRevoked)
+	require.NoError(t, err)
+	require.Equal(t, first.Data.Token, second.Data.Token)
+}
+
+func TestIssueCredentialRotatesMigrationRevokedLegacyRecord(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	revokedAt := fixture.now
+	fixture.store.credentials["legacy-cred"] = &application.CredentialRecord{
+		ID: "legacy-cred", TenantID: "tenant-1", ExecutionID: "exec-1",
+		Provider: "github", RepoURL: "https://github.com/owner/repo.git",
+		Branch: "agentguild/exec-1", BaseCommit: "old-base",
+		ExpiresAt: fixture.now.Add(time.Hour), RevokedAt: &revokedAt,
+		Status: gitdomain.CredentialStatusRevoked, CreatedAt: fixture.now.Add(-time.Hour),
+	}
+
+	got, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		RequestID: "post-migration", ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "new-base",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "legacy-cred", got.Data.Credential.ID)
+	require.Equal(t, gitdomain.CredentialStatusActive, got.Data.Credential.Status)
+	require.Nil(t, got.Data.Credential.RevokedAt)
+	require.NotEmpty(t, fixture.store.credentials["legacy-cred"].RequestHash)
+	require.NotEmpty(t, fixture.store.credentials["legacy-cred"].TokenHash)
 }
 
 func TestRevokeCredentialSetsRevokedAt(t *testing.T) {
@@ -156,7 +204,8 @@ func TestAgentWithExecuteScopeCanIssueCredential(t *testing.T) {
 	fixture := newCredentialFixture(t)
 
 	got, err := fixture.svc.IssueCredential(context.Background(), application.Principal{
-		TenantID: "tenant-1", AgentID: "agent-1", Scopes: []string{"tasks:execute"},
+		TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "version-1",
+		Scopes: []string{"tasks:execute"}, RepoScope: []string{"owner/*"},
 	}, application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
@@ -196,32 +245,109 @@ func TestGetCredentialRequiresAuthorizedCaller(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrForbidden)
 }
 
-func TestIssueCredentialDoesNotIssueTokenForRevokedCredential(t *testing.T) {
+func TestIssueCredentialReissuesOnlyAfterExplicitRevoke(t *testing.T) {
 	fixture := newCredentialFixture(t)
 
 	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, fixture.driver.counter)
 
 	_, err = fixture.svc.RevokeCredential(context.Background(), ownerPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
 	require.NoError(t, err)
 
 	_, err = fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		RequestID: "new-request", ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+}
+
+func TestIssueCredentialRejectsFakeAndCrossAgentExecution(t *testing.T) {
+	fixture := newCredentialFixture(t)
+
+	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
+		ExecutionID: "missing", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.ErrorIs(t, err, domain.ErrNotFound)
+
+	crossAgent := ownerPrincipal()
+	crossAgent.AgentVersionID = "version-2"
+	_, err = fixture.svc.IssueCredential(context.Background(), crossAgent, application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
-	require.ErrorIs(t, err, git.ErrCredentialRevoked)
-	require.Equal(t, 1, fixture.driver.counter)
+	require.ErrorIs(t, err, domain.ErrNotFound)
+	require.Zero(t, fixture.driver.counter)
+}
+
+func TestIssueCredentialEnforcesRepoScopeOnAuthorizedGrant(t *testing.T) {
+	fixture := newCredentialFixture(t)
+	principal := ownerPrincipal()
+	principal.RepoScope = []string{"other/*"}
+
+	_, err := fixture.svc.IssueCredential(context.Background(), principal, application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
+	})
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	require.Zero(t, fixture.driver.counter)
+}
+
+func TestIssueCredentialUsesServerAuthorizedRepositoryAndBase(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	driver := &fakeCredentialDriver{}
+	authorizer := application.CredentialGrantAuthorizerFunc(func(context.Context, application.Principal, application.IssueCredential, time.Time) (application.CredentialGrant, error) {
+		return application.CredentialGrant{Repo: "trusted/repo", BaseCommit: "trusted-base"}, nil
+	})
+	options := testCredentialOptions()
+	options.Authorizer = authorizer
+	svc, err := application.NewCredentialService(store, &fakeAppService{driver: driver}, options)
+	require.NoError(t, err)
+	principal := ownerPrincipal()
+	principal.RepoScope = []string{"trusted/*"}
+
+	got, err := svc.IssueCredential(context.Background(), principal, application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "untrusted/repo", BaseCommit: "untrusted-base",
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"trusted/repo"}, driver.commitRepos)
+	require.Equal(t, "trusted-base", got.Data.Credential.BaseCommit)
+}
+
+func TestIssueCredentialFreezesDefaultBranchWhenGrantHasNoBase(t *testing.T) {
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	store := newMemoryStore(now)
+	driver := &fakeCredentialDriver{}
+	resolver := &fakeAppService{driver: driver, baseCommit: "default-sha"}
+	authorizer := application.CredentialGrantAuthorizerFunc(func(context.Context, application.Principal, application.IssueCredential, time.Time) (application.CredentialGrant, error) {
+		return application.CredentialGrant{Repo: "trusted/repo"}, nil
+	})
+	options := testCredentialOptions()
+	options.Authorizer = authorizer
+	svc, err := application.NewCredentialService(store, resolver, options)
+	require.NoError(t, err)
+	principal := ownerPrincipal()
+	principal.RepoScope = []string{"trusted/*"}
+
+	got, err := svc.IssueCredential(context.Background(), principal, application.IssueCredential{
+		ExecutionID: "exec-1", Repo: "trusted/repo", BaseCommit: "client-assertion",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "default-sha", got.Data.Credential.BaseCommit)
+	require.Equal(t, []string{"tenant-1/trusted/repo"}, resolver.baseCommitCalls)
+	require.Equal(t, []string{"trusted/repo"}, driver.commitRepos)
 }
 
 func ownerPrincipal() application.Principal {
-	return application.Principal{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com"}
+	return application.Principal{
+		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
+		AgentID: "agent-1", AgentVersionID: "version-1", Scopes: []string{"tasks:execute"}, RepoScope: []string{"*"},
+	}
 }
 
 func TestIssueCredentialRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
 	fixture := newCredentialFixture(t)
-	fixture.driver.err = errors.New("issuer unavailable")
+	fixture.driver.getCommitErr = errors.New("base lookup unavailable")
 
 	_, err := fixture.svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
@@ -229,7 +355,7 @@ func TestIssueCredentialRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
 	require.Error(t, err)
 
 	record := fixture.store.credentialByExecution("tenant-1", "exec-1")
-	require.Nil(t, record, "pending placeholder must be rolled back when issuer fails")
+	require.Nil(t, record, "credential metadata must roll back when base verification fails")
 }
 
 func TestRevokeCredentialHandlesConcurrentRevokeRace(t *testing.T) {
@@ -285,7 +411,9 @@ func TestIssueCredentialUsesCanonicalRepositoryForResolvedDriver(t *testing.T) {
 		&gittest.StubIssueSource{},
 	)
 	require.NoError(t, err)
-	svc, err := application.NewCredentialService(store, resolver, application.Options{NewID: sequenceIDs("cred-1")})
+	options := testCredentialOptions()
+	options.NewID, options.Authorizer = sequenceIDs("cred-1"), allowCredentialGrant
+	svc, err := application.NewCredentialService(store, resolver, options)
 	require.NoError(t, err)
 
 	got, err := svc.IssueCredential(context.Background(), ownerPrincipal(), application.IssueCredential{
@@ -295,9 +423,9 @@ func TestIssueCredentialUsesCanonicalRepositoryForResolvedDriver(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"tenant-1/gha-api"}, apps.driverCalls)
-	require.Equal(t, []string{"acme/api"}, driver.repos)
-	require.Equal(t, "https://github.com/acme/api.git", got.Data.Credential.RepoURL)
-	require.Equal(t, "https://github.com/acme/api.git", store.credentialByExecution("tenant-1", "exec-1").RepoURL)
+	require.Equal(t, []string{"acme/api"}, driver.commitRepos)
+	require.Contains(t, got.Data.Credential.RepoURL, "/git/tenant-1/cred-1/acme/api.git")
+	require.Equal(t, "acme/api", store.credentialByExecution("tenant-1", "exec-1").Repo)
 }
 
 type credentialFixture struct {
@@ -312,17 +440,35 @@ func newCredentialFixture(t *testing.T) *credentialFixture {
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newMemoryStore(now)
 	driver := &fakeCredentialDriver{}
-	svc, err := application.NewCredentialService(store, &fakeAppService{driver: driver}, application.Options{
-		NewID: sequenceIDs("cred-1"),
-	})
+	options := testCredentialOptions()
+	options.NewID, options.Authorizer = sequenceIDs("cred-1"), allowCredentialGrant
+	svc, err := application.NewCredentialService(store, &fakeAppService{driver: driver}, options)
 	require.NoError(t, err)
 	return &credentialFixture{svc: svc, store: store, driver: driver, now: now}
 }
 
+var allowCredentialGrant application.CredentialGrantAuthorizer = application.CredentialGrantAuthorizerFunc(
+	func(_ context.Context, principal application.Principal, cmd application.IssueCredential, _ time.Time) (application.CredentialGrant, error) {
+		if cmd.ExecutionID != "exec-1" || principal.AgentVersionID != "version-1" {
+			return application.CredentialGrant{}, domain.ErrNotFound
+		}
+		return application.CredentialGrant{Repo: cmd.Repo, BaseCommit: cmd.BaseCommit}, nil
+	},
+)
+
+func testCredentialOptions() application.Options {
+	return application.Options{
+		ProxyBaseURL: "https://agentguild.example",
+		TokenSecret:  []byte("0123456789abcdef0123456789abcdef"),
+	}
+}
+
 type fakeCredentialDriver struct {
-	counter int
-	err     error
-	repos   []string
+	counter      int
+	err          error
+	getCommitErr error
+	repos        []string
+	commitRepos  []string
 }
 
 func (f *fakeCredentialDriver) CreateCredential(_ context.Context, repo, branch, baseCommit string) (git.Credential, error) {
@@ -340,8 +486,9 @@ func (f *fakeCredentialDriver) CreateCredential(_ context.Context, repo, branch,
 	}, nil
 }
 
-func (f *fakeCredentialDriver) GetCommit(context.Context, string, string) (git.Commit, error) {
-	return git.Commit{}, nil
+func (f *fakeCredentialDriver) GetCommit(_ context.Context, repo, _ string) (git.Commit, error) {
+	f.commitRepos = append(f.commitRepos, repo)
+	return git.Commit{}, f.getCommitErr
 }
 
 func (f *fakeCredentialDriver) CompareCommits(context.Context, string, string, string) ([]git.ChangedFile, error) {
@@ -353,8 +500,10 @@ func (f *fakeCredentialDriver) IsAncestor(context.Context, string, string, strin
 }
 
 type fakeAppService struct {
-	driver      git.Driver
-	driverCalls []string
+	driver          git.Driver
+	driverCalls     []string
+	baseCommit      string
+	baseCommitCalls []string
 }
 
 func (f *fakeAppService) Driver(_ context.Context, tenantID, fullName string) (git.ResolvedDriver, error) {
@@ -364,6 +513,11 @@ func (f *fakeAppService) Driver(_ context.Context, tenantID, fullName string) (g
 
 func (f *fakeAppService) IssueSource(context.Context, string, string, string) (git.ResolvedIssueSource, error) {
 	return git.ResolvedIssueSource{}, nil
+}
+
+func (f *fakeAppService) ResolveBaseCommit(_ context.Context, tenantID, fullName string) (string, error) {
+	f.baseCommitCalls = append(f.baseCommitCalls, tenantID+"/"+fullName)
+	return f.baseCommit, nil
 }
 
 type memoryStore struct {
@@ -458,6 +612,10 @@ func (r *memoryCredentialRepository) GetByExecutionID(_ context.Context, tenantI
 	return cloneRecord(record), nil
 }
 
+func (r *memoryCredentialRepository) GetByExecutionIDForUpdate(ctx context.Context, tenantID, executionID string) (*application.CredentialRecord, error) {
+	return r.GetByExecutionID(ctx, tenantID, executionID)
+}
+
 func (r *memoryCredentialRepository) Update(_ context.Context, record *application.CredentialRecord) error {
 	existing := r.store.credentials[record.ID]
 	if existing == nil || existing.TenantID != record.TenantID {
@@ -465,6 +623,18 @@ func (r *memoryCredentialRepository) Update(_ context.Context, record *applicati
 	}
 	if existing.RevokedAt != nil {
 		return git.ErrCredentialRevoked
+	}
+	r.store.credentials[record.ID] = cloneRecord(record)
+	return nil
+}
+
+func (r *memoryCredentialRepository) Reactivate(_ context.Context, record *application.CredentialRecord) error {
+	existing := r.store.credentials[record.ID]
+	if existing == nil || existing.TenantID != record.TenantID {
+		return git.ErrCredentialNotFound
+	}
+	if existing.RevokedAt == nil {
+		return git.ErrAlreadyIssued
 	}
 	r.store.credentials[record.ID] = cloneRecord(record)
 	return nil

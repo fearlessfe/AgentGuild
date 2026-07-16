@@ -19,6 +19,10 @@ type StepRunner interface {
 	RunStep(ctx context.Context, job *gitdomain.ValidationJob, step gitdomain.ValidationStep) (gitdomain.Step, error)
 }
 
+type IntegrityChecker interface {
+	CheckIntegrity(context.Context, *gitdomain.ValidationJob) (bool, error)
+}
+
 // ValidationWorker consumes validation_jobs using PostgreSQL advisory leases.
 type ValidationWorker struct {
 	store       gitapp.Store
@@ -96,27 +100,39 @@ func (w *ValidationWorker) runOne(ctx context.Context, tenantID string) (bool, e
 	if job == nil {
 		return true, nil
 	}
-	if job.Attempt > w.maxAttempts {
+	if job.Attempt > w.maxAttempts && job.Status != gitdomain.ValidationStatusSucceeded && job.Status != gitdomain.ValidationStatusFailed {
 		return false, w.recordFailure(ctx, job, fmt.Errorf("max attempts %d exceeded", w.maxAttempts))
 	}
 
-	_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
-		TenantID:    job.TenantID,
-		ExecutionID: job.ExecutionID,
-		Intent:      domain.IntentStartValidation,
-		Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
-	}, time.Now())
+	if job.Status != gitdomain.ValidationStatusSucceeded && job.Status != gitdomain.ValidationStatusFailed {
+		if err := w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+			TenantID:    job.TenantID,
+			ExecutionID: job.ExecutionID,
+			Intent:      domain.IntentStartValidation,
+			Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+		}, time.Now()); err != nil {
+			return false, w.recordFailure(ctx, job, err)
+		}
+	}
 
 	if err := w.process(ctx, job); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return false, err
 		}
-		_ = w.recordFailure(ctx, job, err)
+		if recordErr := w.recordFailure(ctx, job, err); recordErr != nil {
+			return false, recordErr
+		}
+		if job.Status == gitdomain.ValidationStatusSucceeded || job.Status == gitdomain.ValidationStatusFailed {
+			return false, err
+		}
 	}
 	return false, nil
 }
 
 func (w *ValidationWorker) process(ctx context.Context, job *gitdomain.ValidationJob) error {
+	if job.Status == gitdomain.ValidationStatusSucceeded || job.Status == gitdomain.ValidationStatusFailed {
+		return w.syncTerminalState(ctx, job)
+	}
 	for _, step := range job.Steps {
 		if step.Status == gitdomain.ValidationStepStatusSucceeded || step.Status == gitdomain.ValidationStepStatusSkipped {
 			continue
@@ -125,22 +141,11 @@ func (w *ValidationWorker) process(ctx context.Context, job *gitdomain.Validatio
 			return err
 		}
 		if job.Status == gitdomain.ValidationStatusFailed {
-			_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
-				TenantID:    job.TenantID,
-				ExecutionID: job.ExecutionID,
-				Intent:      domain.IntentFailValidation,
-				Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
-			}, time.Now())
-			return nil
+			return w.syncTerminalState(ctx, job)
 		}
 	}
 	if job.Status == gitdomain.ValidationStatusSucceeded {
-		_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
-			TenantID:    job.TenantID,
-			ExecutionID: job.ExecutionID,
-			Intent:      domain.IntentMarkReviewing,
-			Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
-		}, time.Now())
+		return w.syncTerminalState(ctx, job)
 	}
 	return nil
 }
@@ -213,7 +218,6 @@ func (w *ValidationWorker) runStep(ctx context.Context, job *gitdomain.Validatio
 }
 
 func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.ValidationJob, cause error) error {
-	failed := false
 	err := w.store.WithTx(ctx, func(tx gitapp.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
@@ -224,11 +228,16 @@ func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.Val
 			return err
 		}
 		if fresh.Status != gitdomain.ValidationStatusRunning {
+			if fresh.Status == gitdomain.ValidationStatusFailed || fresh.Status == gitdomain.ValidationStatusSucceeded {
+				fresh.ClaimedBy = nil
+				fresh.ClaimedUntil = nil
+				fresh.UpdatedAt = now
+				return tx.ValidationJobs().Update(ctx, fresh)
+			}
 			return nil
 		}
 		if fresh.Attempt >= w.maxAttempts {
 			fresh.Status = gitdomain.ValidationStatusFailed
-			failed = true
 		} else {
 			fresh.Status = gitdomain.ValidationStatusPending
 		}
@@ -240,15 +249,81 @@ func (w *ValidationWorker) recordFailure(ctx context.Context, job *gitdomain.Val
 	if err != nil {
 		return err
 	}
-	if failed {
-		_ = w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
-			TenantID:    job.TenantID,
-			ExecutionID: job.ExecutionID,
-			Intent:      domain.IntentFailValidation,
-			Actor:       domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
-		}, time.Now())
-	}
 	return nil
+}
+
+func (w *ValidationWorker) syncTerminalState(ctx context.Context, job *gitdomain.ValidationJob) error {
+	var intent domain.Intent
+	var target gitdomain.SubmissionStatus
+	invalidated := false
+	if job.Status == gitdomain.ValidationStatusSucceeded {
+		if checker, ok := w.runner.(IntegrityChecker); ok {
+			reachable, err := checker.CheckIntegrity(ctx, job)
+			if err != nil {
+				return err
+			}
+			if !reachable {
+				job.Status = gitdomain.ValidationStatusFailed
+				invalidated = true
+			}
+		}
+	}
+	switch job.Status {
+	case gitdomain.ValidationStatusSucceeded:
+		intent = domain.IntentMarkReviewing
+		target = gitdomain.SubmissionStatusValidated
+	case gitdomain.ValidationStatusFailed:
+		intent = domain.IntentFailValidation
+		if invalidated {
+			target = gitdomain.SubmissionStatusInvalid
+		} else {
+			target = gitdomain.SubmissionStatusValidationFailed
+		}
+	default:
+		return fmt.Errorf("validation job %s is not terminal", job.ID)
+	}
+	if err := w.notifier.Notify(ctx, gitapp.ExecutionStateCommand{
+		TenantID: job.TenantID, ExecutionID: job.ExecutionID, Intent: intent,
+		Actor: domain.Actor{Type: domain.ActorSystem, ID: "validation-worker"},
+	}, time.Now()); err != nil {
+		return err
+	}
+	return w.store.WithTx(ctx, func(tx gitapp.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		submission, err := tx.Submissions().GetByID(ctx, job.TenantID, job.SubmissionID)
+		if err != nil {
+			return err
+		}
+		if submission.Status != target {
+			switch target {
+			case gitdomain.SubmissionStatusValidated:
+				err = submission.MarkValidated(now)
+			case gitdomain.SubmissionStatusValidationFailed:
+				err = submission.MarkValidationFailed(now)
+			case gitdomain.SubmissionStatusInvalid:
+				err = submission.MarkInvalid(now)
+			}
+			if err != nil {
+				return err
+			}
+			if err := tx.Submissions().Save(ctx, submission); err != nil {
+				return err
+			}
+		}
+		fresh, err := tx.ValidationJobs().GetByID(ctx, job.TenantID, job.ID)
+		if err != nil {
+			return err
+		}
+		fresh.ExecutionStateSynced = true
+		fresh.Status = job.Status
+		fresh.ClaimedBy = nil
+		fresh.ClaimedUntil = nil
+		fresh.UpdatedAt = now
+		return tx.ValidationJobs().Update(ctx, fresh)
+	})
 }
 
 // ValidationJobError is a simple error type for worker configuration issues.

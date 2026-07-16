@@ -13,7 +13,7 @@ import (
 
 func mustNewReview(t *testing.T, id, submissionID, reviewerID, rubricVersionID string) *reviewdomain.Review {
 	t.Helper()
-	review, err := reviewdomain.NewReview(id, "tenant-1", submissionID, reviewerID, rubricVersionID, time.Now())
+	review, err := reviewdomain.NewReview(id, "tenant-1", submissionID, reviewerID, rubricVersionID, "code-review", time.Now())
 	require.NoError(t, err)
 	return review
 }
@@ -62,14 +62,16 @@ func TestReviewConstructorRejectsMissingFields(t *testing.T) {
 		submissionID    string
 		reviewerID      string
 		rubricVersionID string
+		capability      string
 		field           string
 	}{
-		{name: "empty id", tenantID: "t", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", field: "id"},
-		{name: "empty tenant_id", id: "id", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", field: "tenant_id"},
-		{name: "empty submission_id", id: "id", tenantID: "t", reviewerID: "r", rubricVersionID: "rv", field: "submission_id"},
-		{name: "empty reviewer_id", id: "id", tenantID: "t", submissionID: "s", rubricVersionID: "rv", field: "reviewer_id"},
-		{name: "empty rubric_version_id", id: "id", tenantID: "t", submissionID: "s", reviewerID: "r", field: "rubric_version_id"},
-		{name: "zero created_at", id: "id", tenantID: "t", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", field: "created_at"},
+		{name: "empty id", tenantID: "t", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", capability: "code-review", field: "id"},
+		{name: "empty tenant_id", id: "id", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", capability: "code-review", field: "tenant_id"},
+		{name: "empty submission_id", id: "id", tenantID: "t", reviewerID: "r", rubricVersionID: "rv", capability: "code-review", field: "submission_id"},
+		{name: "empty reviewer_id", id: "id", tenantID: "t", submissionID: "s", rubricVersionID: "rv", capability: "code-review", field: "reviewer_id"},
+		{name: "empty rubric_version_id", id: "id", tenantID: "t", submissionID: "s", reviewerID: "r", capability: "code-review", field: "rubric_version_id"},
+		{name: "empty capability", id: "id", tenantID: "t", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", field: "capability"},
+		{name: "zero created_at", id: "id", tenantID: "t", submissionID: "s", reviewerID: "r", rubricVersionID: "rv", capability: "code-review", field: "created_at"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,7 +79,7 @@ func TestReviewConstructorRejectsMissingFields(t *testing.T) {
 			if tc.field != "created_at" {
 				nowArg = now
 			}
-			review, err := reviewdomain.NewReview(tc.id, tc.tenantID, tc.submissionID, tc.reviewerID, tc.rubricVersionID, nowArg)
+			review, err := reviewdomain.NewReview(tc.id, tc.tenantID, tc.submissionID, tc.reviewerID, tc.rubricVersionID, tc.capability, nowArg)
 			require.Nil(t, review)
 			assertInvalidArgument(t, err, tc.field)
 		})
@@ -172,7 +174,7 @@ func TestReviewAcceptedRequiresCompleteRubricScores(t *testing.T) {
 			scores: []reviewdomain.RubricScore{{Dimension: "correctness", Score: 101}},
 		},
 		{
-			name:   "missing dimension",
+			name: "missing dimension",
 			rubric: mustNewRubricVersionForReview(t, "rubric-1", []reviewdomain.RubricDimension{
 				{ID: "correctness", Name: "Correctness"},
 				{ID: "readability", Name: "Readability"},

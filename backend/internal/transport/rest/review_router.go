@@ -18,8 +18,18 @@ type ReviewService interface {
 	SubmitDecision(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitDecision) (application.Envelope[reviewapp.ReviewView], error)
 	AddComment(ctx context.Context, principal auth.Principal, cmd reviewapp.AddComment) (application.Envelope[reviewapp.CommentView], error)
 	GetReview(ctx context.Context, principal auth.Principal, query reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error)
+	ListReviews(ctx context.Context, principal auth.Principal, query reviewapp.ListReviews) (application.Envelope[[]reviewapp.ReviewView], error)
 	GetSubmissionDiff(ctx context.Context, principal auth.Principal, query reviewapp.GetSubmissionDiff) (application.Envelope[[]reviewapp.FileDiff], error)
 	SubmitForReview(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error)
+}
+
+func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
+	result, err := s.reviewSvc.ListReviews(r.Context(), mustPrincipal(r), reviewapp.ListReviews{Status: r.URL.Query().Get("status"), Limit: 50})
+	if err != nil {
+		mapDomainError(w, err, mustPrincipal(r))
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // RubricService 是 REST 层消费的评分标准服务边界。

@@ -1,6 +1,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/json"
@@ -46,6 +47,9 @@ func WithClock(now func() time.Time) Option {
 
 // NewDriver creates a GitHub Driver from configuration.
 func NewDriver(cfg Config, opts ...Option) (*Driver, error) {
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = "https://api.github.com"
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -54,11 +58,17 @@ func NewDriver(cfg Config, opts ...Option) (*Driver, error) {
 		return nil, fmt.Errorf("parse github private key: %w", err)
 	}
 
+	base, _ := url.Parse(cfg.BaseURL)
 	d := &Driver{
-		cfg:    cfg,
-		key:    key,
-		client: &http.Client{Timeout: defaultHTTPTimeout},
-		now:    time.Now,
+		cfg: cfg,
+		key: key,
+		client: &http.Client{Timeout: defaultHTTPTimeout, CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			if req.URL.Scheme != "https" || !strings.EqualFold(req.URL.Host, base.Host) {
+				return fmt.Errorf("github redirect changed origin")
+			}
+			return nil
+		}},
+		now: time.Now,
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -66,15 +76,16 @@ func NewDriver(cfg Config, opts ...Option) (*Driver, error) {
 	return d, nil
 }
 
-// CreateCredential returns a GitHub App installation token scoped to the
-// requested repository/branch/base-commit combination.
+// CreateCredential returns a repository-scoped GitHub App installation token.
+// GitHub cannot constrain installation tokens to a branch; production callers
+// keep this token server-side behind the branch-enforcing Git proxy.
 func (d *Driver) CreateCredential(ctx context.Context, repo, branch, baseCommit string) (git.Credential, error) {
 	owner, name, err := splitRepo(repo)
 	if err != nil {
 		return git.Credential{}, err
 	}
 
-	token, expiresAt, err := d.installationToken(ctx)
+	token, expiresAt, err := d.installationToken(ctx, name)
 	if err != nil {
 		return git.Credential{}, err
 	}
@@ -183,19 +194,36 @@ func (d *Driver) compare(ctx context.Context, repo, base, head string) (compareP
 	return payload, files, nil
 }
 
-func (d *Driver) installationToken(ctx context.Context) (string, time.Time, error) {
+func (d *Driver) installationToken(ctx context.Context, repositories ...string) (string, time.Time, error) {
 	jwtToken, err := d.createJWT()
 	if err != nil {
 		return "", time.Time{}, err
 	}
 
 	url := d.apiURL("/app/installations/%d/access_tokens", d.cfg.InstallationID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	var requestBody io.Reader
+	if len(repositories) > 0 {
+		body, err := json.Marshal(struct {
+			Repositories []string          `json:"repositories"`
+			Permissions  map[string]string `json:"permissions"`
+		}{
+			Repositories: repositories,
+			Permissions:  map[string]string{"contents": "write"},
+		})
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		requestBody = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, requestBody)
 	if err != nil {
 		return "", time.Time{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+jwtToken)
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {

@@ -24,6 +24,7 @@ func TestIssueCredentialRoute(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/executions/exec-1/credentials", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer token-agent-1")
+	req.Header.Set("Idempotency-Key", "cred-req-1")
 	rr := httptest.NewRecorder()
 	server.ServeHTTP(rr, req)
 
@@ -32,6 +33,29 @@ func TestIssueCredentialRoute(t *testing.T) {
 	require.Equal(t, "exec-1", svc.issueCalls[0].ExecutionID)
 	require.Equal(t, "owner/repo", svc.issueCalls[0].Repo)
 	require.Equal(t, "abc", svc.issueCalls[0].BaseCommit)
+	require.Equal(t, "cred-req-1", svc.issueCalls[0].RequestID)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &response))
+	data := response["data"].(map[string]any)
+	require.Equal(t, "tok-1", data["token"])
+	credential := data["credential"].(map[string]any)
+	require.Equal(t, "cred-1", credential["id"])
+	require.Equal(t, "exec-1", credential["execution_id"])
+	require.NotContains(t, credential, "ExecutionID")
+}
+
+func TestIssueCredentialRouteRequiresIdempotencyKey(t *testing.T) {
+	svc := &fakeCredentialService{}
+	server := rest.NewServer(&fakeApplication{}, &tokenVerifier{}, rest.WithCredentialService(svc)).Router()
+	req := httptest.NewRequest(http.MethodPost, "/v1/executions/exec-1/credentials", bytes.NewReader([]byte(`{"repo":"owner/repo","base_commit":"abc"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token-agent-1")
+	rr := httptest.NewRecorder()
+
+	server.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	require.Empty(t, svc.issueCalls)
 }
 
 func TestGetCredentialRoute(t *testing.T) {

@@ -119,6 +119,26 @@ func TestTaskExpiresAtDeadline(t *testing.T) {
 	}
 }
 
+func TestTaskCanCompleteAfterDeadline(t *testing.T) {
+	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	task := mustNewTask(t, "task-1", "tenant-1", "publisher-1", deadline)
+	task.Status = domain.TaskInProgress
+	task.ClaimedBy = "agent-1"
+
+	err := task.Apply(
+		domain.IntentComplete,
+		domain.Actor{Type: domain.ActorReviewer, ID: "reviewer-1"},
+		deadline.Add(time.Hour),
+	)
+
+	if err != nil {
+		t.Fatalf("Apply(complete after deadline) error = %v", err)
+	}
+	if task.Status != domain.TaskCompleted {
+		t.Fatalf("status = %q, want %q", task.Status, domain.TaskCompleted)
+	}
+}
+
 func TestTaskRejectsProgressAtDeadlineWithoutMutation(t *testing.T) {
 	deadline := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
 	beforeDeadline := deadline.Add(-time.Minute)
@@ -147,21 +167,6 @@ func TestTaskRejectsProgressAtDeadlineWithoutMutation(t *testing.T) {
 				return task
 			}(),
 			intent: domain.IntentStart,
-			actor:  agent,
-		},
-		{
-			name: "complete",
-			task: func() *domain.Task {
-				task := mustNewTask(t, "task-1", "tenant-1", "publisher-1", deadline)
-				if err := task.Apply(domain.IntentClaim, agent, beforeDeadline); err != nil {
-					t.Fatalf("claim fixture: %v", err)
-				}
-				if err := task.Apply(domain.IntentStart, agent, beforeDeadline); err != nil {
-					t.Fatalf("start fixture: %v", err)
-				}
-				return task
-			}(),
-			intent: domain.IntentComplete,
 			actor:  agent,
 		},
 		{

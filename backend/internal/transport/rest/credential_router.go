@@ -12,6 +12,7 @@ func (s *Server) issueCredential(w http.ResponseWriter, r *http.Request) {
 	executionID := chi.URLParam(r, "id")
 
 	var body struct {
+		RequestID  string `json:"request_id"`
 		Repo       string `json:"repo"`
 		Branch     string `json:"branch,omitempty"`
 		BaseCommit string `json:"base_commit"`
@@ -19,8 +20,13 @@ func (s *Server) issueCredential(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
+	idempotencyKey, ok := resolveIdempotencyKey(r, body.RequestID, w)
+	if !ok {
+		return
+	}
 
 	result, err := s.credentials.IssueCredential(r.Context(), gitPrincipal(principal), gitapp.IssueCredential{
+		RequestID:   idempotencyKey,
 		ExecutionID: executionID,
 		Repo:        body.Repo,
 		Branch:      body.Branch,

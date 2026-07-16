@@ -81,7 +81,10 @@ func newSubmissionService(t *testing.T, svc *application.Service, resolver gitap
 	db := testdb.StartPostgres(t)
 	store := gitpostgres.NewStore(db)
 	verifier := gitapp.NewCommitVerifier(resolver, gitpostgres.NewSubmissionRepository(db))
-	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil, nil)
+	authorizer := gitapp.SubmissionAuthorizerFunc(func(_ context.Context, _ gitapp.Principal, cmd gitapp.CreateSubmission, _ time.Time) (gitapp.SubmissionGrant, error) {
+		return gitapp.SubmissionGrant{TaskID: cmd.TaskID, Repo: cmd.Repo, BaseCommit: cmd.BaseCommitSHA, AllowedPaths: cmd.AllowedPaths, ForbiddenPaths: cmd.ForbiddenPaths}, nil
+	})
+	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil, authorizer, nil)
 	require.NoError(t, err)
 	return subSvc
 }

@@ -653,6 +653,7 @@ func TestReviewToolsRequireRequestID(t *testing.T) {
 		})
 	}
 }
+
 type fakeSubmissionService struct {
 	calls []submissionCall
 
@@ -773,7 +774,7 @@ func TestValidationGetToolMapsToService(t *testing.T) {
 		get: gitapp.Envelope[gitapp.SubmissionView]{
 			Data: gitapp.SubmissionView{
 				ID: "sub-1", TenantID: "tenant-1", ExecutionID: "exe-1",
-				Status: gitdomain.SubmissionStatusPendingVerification,
+				Status:    gitdomain.SubmissionStatusPendingVerification,
 				CreatedAt: now, UpdatedAt: now,
 			},
 			Meta: gitapp.Meta{ServerTime: now},
@@ -819,13 +820,13 @@ func TestSubmissionCreateHidesNonOwnerExecution(t *testing.T) {
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "submission_create",
 		Arguments: map[string]any{
-			"request_id":   "req-1",
-			"execution_id": "exe-1",
-			"repo":         "owner/repo",
-			"branch":       "agentguild/exe-1",
-			"commit_sha":   "abc",
+			"request_id":      "req-1",
+			"execution_id":    "exe-1",
+			"repo":            "owner/repo",
+			"branch":          "agentguild/exe-1",
+			"commit_sha":      "abc",
 			"base_commit_sha": "def",
-			"summary":      "fix",
+			"summary":         "fix",
 		},
 	})
 	require.NoError(t, err)
@@ -881,13 +882,13 @@ func TestSubmissionToolsMapGitPrincipal(t *testing.T) {
 	_, _ = session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "submission_create",
 		Arguments: map[string]any{
-			"request_id":   "req-1",
-			"execution_id": "exe-1",
-			"repo":         "owner/repo",
-			"branch":       "agentguild/exe-1",
-			"commit_sha":   "abc",
+			"request_id":      "req-1",
+			"execution_id":    "exe-1",
+			"repo":            "owner/repo",
+			"branch":          "agentguild/exe-1",
+			"commit_sha":      "abc",
 			"base_commit_sha": "def",
-			"summary":      "fix",
+			"summary":         "fix",
 		},
 	})
 
@@ -901,11 +902,11 @@ func TestSubmissionToolsMapGitPrincipal(t *testing.T) {
 type fakeCredentialService struct {
 	calls []credentialCall
 
-	issue  gitapp.Envelope[gitapp.IssueCredentialResponse]
-	issueErr error
-	get    gitapp.Envelope[gitapp.CredentialView]
-	getErr error
-	revoke gitapp.Envelope[gitapp.CredentialView]
+	issue     gitapp.Envelope[gitapp.IssueCredentialResponse]
+	issueErr  error
+	get       gitapp.Envelope[gitapp.CredentialView]
+	getErr    error
+	revoke    gitapp.Envelope[gitapp.CredentialView]
 	revokeErr error
 }
 
@@ -964,6 +965,7 @@ func TestCredentialIssueToolMapsToService(t *testing.T) {
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "credential_issue",
 		Arguments: map[string]any{
+			"request_id":   "cred-req-1",
 			"execution_id": "exe-1",
 			"repo":         "owner/repo",
 			"base_commit":  "abc",
@@ -976,6 +978,7 @@ func TestCredentialIssueToolMapsToService(t *testing.T) {
 	require.Equal(t, "exe-1", cmd.ExecutionID)
 	require.Equal(t, "owner/repo", cmd.Repo)
 	require.Equal(t, "abc", cmd.BaseCommit)
+	require.Equal(t, "cred-req-1", cmd.RequestID)
 }
 
 func TestCredentialGetToolMapsToService(t *testing.T) {

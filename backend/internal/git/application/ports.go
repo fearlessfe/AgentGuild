@@ -49,7 +49,9 @@ type CredentialRepository interface {
 	Insert(context.Context, *CredentialRecord) error
 	GetByID(context.Context, string, string) (*CredentialRecord, error)
 	GetByExecutionID(context.Context, string, string) (*CredentialRecord, error)
+	GetByExecutionIDForUpdate(context.Context, string, string) (*CredentialRecord, error)
 	Update(context.Context, *CredentialRecord) error
+	Reactivate(context.Context, *CredentialRecord) error
 	Revoke(context.Context, string, string) error
 }
 

@@ -105,13 +105,12 @@ func TestCredentialServiceIssuesCredentialThroughPostgresStore(t *testing.T) {
 	ctx := context.Background()
 
 	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &fakeDriver{}}, application.Options{
-		NewID: sequenceIDs("cred-1"),
+		NewID: sequenceIDs("cred-1"), Authorizer: credentialTestAuthorizer,
+		ProxyBaseURL: "https://agentguild.example", TokenSecret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	require.NoError(t, err)
 
-	got, err := svc.IssueCredential(ctx, application.Principal{
-		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
-	}, application.IssueCredential{
+	got, err := svc.IssueCredential(ctx, credentialAgentPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
@@ -130,12 +129,11 @@ func TestCredentialServiceRevokeThroughPostgresStore(t *testing.T) {
 	ctx := context.Background()
 
 	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &fakeDriver{}}, application.Options{
-		NewID: sequenceIDs("cred-1"),
+		NewID: sequenceIDs("cred-1"), Authorizer: credentialTestAuthorizer,
+		ProxyBaseURL: "https://agentguild.example", TokenSecret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	require.NoError(t, err)
-	_, err = svc.IssueCredential(ctx, application.Principal{
-		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
-	}, application.IssueCredential{
+	_, err = svc.IssueCredential(ctx, credentialAgentPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
@@ -208,13 +206,12 @@ func TestCredentialServiceRollsBackPendingRecordOnIssuerFailure(t *testing.T) {
 	ctx := context.Background()
 
 	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &failingDriver{err: errors.New("github unavailable")}}, application.Options{
-		NewID: sequenceIDs("cred-1"),
+		NewID: sequenceIDs("cred-1"), Authorizer: credentialTestAuthorizer,
+		ProxyBaseURL: "https://agentguild.example", TokenSecret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	require.NoError(t, err)
 
-	_, err = svc.IssueCredential(ctx, application.Principal{
-		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
-	}, application.IssueCredential{
+	_, err = svc.IssueCredential(ctx, credentialAgentPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.Error(t, err)
@@ -229,13 +226,12 @@ func TestCredentialServiceSetsStatusActiveAfterIssuance(t *testing.T) {
 	ctx := context.Background()
 
 	svc, err := application.NewCredentialService(postgres.NewStore(db), &fakeAppService{driver: &fakeDriver{}}, application.Options{
-		NewID: sequenceIDs("cred-1"),
+		NewID: sequenceIDs("cred-1"), Authorizer: credentialTestAuthorizer,
+		ProxyBaseURL: "https://agentguild.example", TokenSecret: []byte("0123456789abcdef0123456789abcdef"),
 	})
 	require.NoError(t, err)
 
-	_, err = svc.IssueCredential(ctx, application.Principal{
-		TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner@example.com",
-	}, application.IssueCredential{
+	_, err = svc.IssueCredential(ctx, credentialAgentPrincipal(), application.IssueCredential{
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
@@ -247,6 +243,19 @@ func TestCredentialServiceSetsStatusActiveAfterIssuance(t *testing.T) {
 }
 
 type fakeDriver struct{}
+
+var credentialTestAuthorizer application.CredentialGrantAuthorizer = application.CredentialGrantAuthorizerFunc(
+	func(_ context.Context, _ application.Principal, cmd application.IssueCredential, _ time.Time) (application.CredentialGrant, error) {
+		return application.CredentialGrant{Repo: cmd.Repo, BaseCommit: cmd.BaseCommit}, nil
+	},
+)
+
+func credentialAgentPrincipal() application.Principal {
+	return application.Principal{
+		TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "version-1",
+		Scopes: []string{"tasks:execute"}, RepoScope: []string{"owner/*"},
+	}
+}
 
 func (fakeDriver) CreateCredential(_ context.Context, repo, branch, baseCommit string) (git.Credential, error) {
 	return git.Credential{
@@ -279,7 +288,7 @@ func (f *failingDriver) CreateCredential(context.Context, string, string, string
 }
 
 func (f *failingDriver) GetCommit(context.Context, string, string) (git.Commit, error) {
-	return git.Commit{}, nil
+	return git.Commit{}, f.err
 }
 
 func (f *failingDriver) CompareCommits(context.Context, string, string, string) ([]git.ChangedFile, error) {

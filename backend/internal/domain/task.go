@@ -99,7 +99,7 @@ func (t *Task) Apply(intent Intent, actor Actor, now time.Time) error {
 		return ErrForbidden
 	}
 	switch intent {
-	case IntentPublish, IntentClaim, IntentStart, IntentComplete, IntentCancel:
+	case IntentPublish, IntentClaim, IntentStart, IntentCancel:
 		if !now.Before(t.Deadline) {
 			return ErrStateConflict
 		}
@@ -146,7 +146,7 @@ func (t *Task) Apply(intent Intent, actor Actor, now time.Time) error {
 		if t.Status != TaskInProgress {
 			return ErrStateConflict
 		}
-		if actor.Type != ActorAgent || actor.ID != t.ClaimedBy {
+		if (actor.Type != ActorAgent || actor.ID != t.ClaimedBy) && actor.Type != ActorReviewer {
 			return ErrForbidden
 		}
 		t.Status = TaskCompleted

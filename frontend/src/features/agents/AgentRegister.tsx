@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { createIdempotencyKey, shouldRetainMutationKey } from "../../api/client";
 import { registerAgent } from "./agents.api";
 import type { RegisterAgentRequest, RegisterAgentResponse } from "./agents.types";
 
@@ -37,14 +38,23 @@ function parseList(value: string) {
 
 export function AgentRegister({ onRegistered }: AgentRegisterProps) {
   const [form, setForm] = useState<FormState>(initialState);
+  const registrationKey = useRef<string | null>(null);
   const mutation = useMutation({
-    mutationFn: (payload: RegisterAgentRequest) => registerAgent(payload),
+    mutationFn: (payload: RegisterAgentRequest) => {
+      registrationKey.current ??= createIdempotencyKey();
+      return registerAgent(payload, { idempotencyKey: registrationKey.current });
+    },
     onSuccess: (result) => {
+      registrationKey.current = null;
       onRegistered(result.data);
+    },
+    onError: (error) => {
+      if (!shouldRetainMutationKey(error)) registrationKey.current = null;
     },
   });
 
   function updateField<Key extends keyof FormState>(key: Key, value: FormState[Key]) {
+    registrationKey.current = null;
     setForm((current) => ({ ...current, [key]: value }));
   }
 

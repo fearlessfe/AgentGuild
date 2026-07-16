@@ -35,6 +35,7 @@ const reviewFixture: ReviewView = {
   submission_id: "sub-1",
   reviewer_id: "reviewer-1",
   rubric_version_id: "rubric-1",
+  capability: "code-review",
   status: "pending",
   final_decision: undefined,
   rubric_scores: [

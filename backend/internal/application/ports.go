@@ -166,6 +166,7 @@ type ReviewRepository interface {
 	Update(context.Context, *reviewdomain.Review) error
 	GetByID(context.Context, string, string) (*reviewdomain.Review, error)
 	ListBySubmission(context.Context, string, string) ([]reviewdomain.Review, error)
+	List(context.Context, string, string, string, int) ([]reviewdomain.Review, error)
 	ListUnprojected(context.Context, int) ([]ReviewSignalRecord, error)
 	MarkProjected(context.Context, string, string) error
 }

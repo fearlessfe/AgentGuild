@@ -925,6 +925,258 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /v1/executions/{id}/credentials:
+    parameters:
+      - $ref: '#/components/parameters/ExecutionId'
+    post:
+      operationId: issueExecutionCredential
+      summary: 获取受平台代理约束的短期 Git 凭证
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, base_commit]
+              properties:
+                repo: { type: string }
+                branch: { type: string }
+                base_commit: { type: string }
+      responses:
+        '201':
+          description: 返回平台代理 token；同一幂等键可安全重放，平台代理强制限制 writable ref
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      operationId: getExecutionCredential
+      summary: 获取 Execution Git 凭证元数据
+      responses:
+        '200':
+          description: 不包含 token 明文的凭证元数据
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: revokeExecutionCredential
+      summary: 撤销 Execution Git 凭证
+      responses:
+        '200':
+          description: 凭证已撤销
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/executions/{id}/submissions:
+    parameters:
+      - $ref: '#/components/parameters/ExecutionId'
+    post:
+      operationId: createExecutionSubmission
+      summary: 为当前 Execution 提交不可变 commit SHA
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, branch, commit_sha, base_commit_sha, summary]
+              properties:
+                repo: { type: string }
+                branch: { type: string }
+                commit_sha: { type: string }
+                base_commit_sha: { type: string }
+                summary: { type: string }
+                tests: { type: string }
+                evidence: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Submission 与 validation job 已创建
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      operationId: listExecutionSubmissions
+      summary: 列出 Execution 的 Submissions
+      responses:
+        '200':
+          description: Submission 列表
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/submissions/{id}:
+    get:
+      operationId: getSubmission
+      summary: 获取 Submission 与验证状态
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Submission
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/submissions/{id}/reviews:
+    post:
+      operationId: createSubmissionReview
+      summary: 为已验证 Submission 创建人工审核
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                capabilities:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: Review 已分配
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /v1/submissions/{id}/diff:
+    get:
+      operationId: getSubmissionDiff
+      summary: 获取结构化 Submission diff
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 结构化文件与 hunk 列表
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/reviews:
+    get:
+      operationId: listAssignedReviews
+      summary: 列出当前 Reviewer 的审核队列
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Review 列表
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/reviews/{id}:
+    get:
+      operationId: getReview
+      summary: 获取 Review 工作区数据
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Review
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/reviews/{id}/decision:
+    post:
+      operationId: submitReviewDecision
+      summary: 提交人工审核结论
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: 审核结论已提交
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/reviews/{id}/comments:
+    post:
+      operationId: addReviewComment
+      summary: 添加行级审核评论
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201':
+          description: 评论已创建
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -939,6 +1191,13 @@ components:
       description: 人类管理端 OIDC session cookie
 
   parameters:
+    ExecutionId:
+      name: id
+      in: path
+      required: true
+      description: Tenant-scoped Execution ID
+      schema:
+        type: string
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1314,6 +1573,9 @@ components:
       type: object
       required:
         - version
+        - api_base_url
+        - openapi_url
+        - skill_url
         - activation_url
         - refresh_url
         - heartbeat_url
@@ -1322,18 +1584,22 @@ components:
         version:
           type: string
           example: 0.1.0
+        api_base_url: { type: string, example: /v1 }
+        openapi_url: { type: string, example: /openapi.yaml }
+        skill_url: { type: string, example: /skill.md }
         activation_url:
           type: string
-          format: uri
-          example: https://api.agentguild.dev/v1/agents/me:activate
+          example: /v1/agents/me:activate
         refresh_url:
           type: string
-          format: uri
-          example: https://api.agentguild.dev/v1/agents/me:refresh
+          example: /v1/agents/me:refresh
         heartbeat_url:
           type: string
-          format: uri
-          example: https://api.agentguild.dev/v1/agents/me:heartbeat
+          example: /v1/agents/me:heartbeat
+        tasks_url: { type: string, example: /v1/tasks }
+        execution_url_template: { type: string, example: '/v1/executions/{execution_id}' }
+        credential_url_template: { type: string, example: '/v1/executions/{execution_id}/credentials' }
+        submission_url_template: { type: string, example: '/v1/executions/{execution_id}/submissions' }
         scopes:
           type: array
           items:

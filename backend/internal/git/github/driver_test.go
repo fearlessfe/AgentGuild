@@ -5,10 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -37,28 +40,34 @@ func TestCreateCredentialReturnsTokenAndMetadata(t *testing.T) {
 	expiresAt := now.Add(1 * time.Hour)
 
 	var tokenReq *http.Request
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
-			tokenReq = r
-			auth := r.Header.Get("Authorization")
-			require.True(t, strings.HasPrefix(auth, "Bearer "), "expected bearer token")
-			verifyGitHubAppJWT(t, auth[7:], key, now)
-
-			w.WriteHeader(http.StatusCreated)
-			fmt.Fprintf(w, `{"token":"ghs_installation_token","expires_at":"%s"}`, expiresAt.Format(time.RFC3339))
-		default:
-			w.WriteHeader(http.StatusNotFound)
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		tokenReq = r
+		require.True(t, strings.HasSuffix(r.URL.Path, "/access_tokens"))
+		auth := r.Header.Get("Authorization")
+		require.True(t, strings.HasPrefix(auth, "Bearer "), "expected bearer token")
+		verifyGitHubAppJWT(t, auth[7:], key, now)
+		var body struct {
+			Repositories []string          `json:"repositories"`
+			Permissions  map[string]string `json:"permissions"`
 		}
-	}))
-	defer srv.Close()
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, []string{"repo"}, body.Repositories)
+		require.Equal(t, map[string]string{"contents": "write"}, body.Permissions)
+		require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"token":"ghs_installation_token","expires_at":"%s"}`, expiresAt.Format(time.RFC3339)))),
+		}, nil
+	})}
 
 	d, err := github.NewDriver(github.Config{
 		AppID:          42,
 		InstallationID: 123,
 		PrivateKey:     pem,
-		BaseURL:        srv.URL,
-	}, github.WithClock(func() time.Time { return now }))
+		BaseURL:        "https://api.example.test",
+		AllowedHosts:   []string{"api.example.test"},
+	}, github.WithClock(func() time.Time { return now }), github.WithHTTPClient(client))
 	require.NoError(t, err)
 
 	cred, err := d.CreateCredential(context.Background(), "owner/repo", "main", "abc123")
@@ -70,6 +79,10 @@ func TestCreateCredentialReturnsTokenAndMetadata(t *testing.T) {
 	require.True(t, strings.HasSuffix(cred.RepoURL, "/owner/repo.git"))
 	require.NotNil(t, tokenReq)
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestCreateCredentialRejectsInvalidRepo(t *testing.T) {
 	_, pem := newRSAKey(t)
@@ -203,11 +216,15 @@ func TestRateLimitedReturnsDomainError(t *testing.T) {
 
 func newDriver(t *testing.T, pem, baseURL string) *github.Driver {
 	t.Helper()
+	u, err := url.Parse(baseURL)
+	require.NoError(t, err)
 	d, err := github.NewDriver(github.Config{
-		AppID:          42,
-		InstallationID: 123,
-		PrivateKey:     pem,
-		BaseURL:        baseURL,
+		AppID:             42,
+		InstallationID:    123,
+		PrivateKey:        pem,
+		BaseURL:           baseURL,
+		AllowedHosts:      []string{u.Hostname()},
+		AllowInsecureHTTP: u.Scheme == "http",
 	})
 	require.NoError(t, err)
 	return d

@@ -65,21 +65,22 @@ var DefaultValidationSteps = []ValidationStep{
 
 // ValidationJob is the aggregate root for asynchronous validation of a Submission.
 type ValidationJob struct {
-	ID            string
-	TenantID      string
-	SubmissionID  string
-	ExecutionID   string
-	Repo          string
-	Branch        string
-	CommitSHA     string
-	Status        ValidationStatus
-	Attempt       int
-	ClaimedUntil  *time.Time
-	ClaimedBy     *string
-	ConfigVersion string
-	Steps         []Step
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                   string
+	TenantID             string
+	SubmissionID         string
+	ExecutionID          string
+	Repo                 string
+	Branch               string
+	CommitSHA            string
+	Status               ValidationStatus
+	Attempt              int
+	ClaimedUntil         *time.Time
+	ClaimedBy            *string
+	ConfigVersion        string
+	ExecutionStateSynced bool
+	Steps                []Step
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // Step represents the result of one validation step.

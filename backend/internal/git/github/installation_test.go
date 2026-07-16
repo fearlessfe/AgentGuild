@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -25,9 +26,12 @@ func TestInstallationAccountReturnsOwnerLogin(t *testing.T) {
 		_, _ = w.Write([]byte(`{"account":{"login":"acme-corp"}}`))
 	}))
 	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
 
 	client, err := github.NewInstallationClient(github.InstallationClientConfig{
 		BaseURL: server.URL, AppID: 42, PrivateKey: privateKey, HTTPClient: server.Client(),
+		AllowedHosts: []string{serverURL.Hostname()}, AllowInsecureHTTP: true,
 	})
 	require.NoError(t, err)
 	login, err := client.InstallationAccount(context.Background(), 42)

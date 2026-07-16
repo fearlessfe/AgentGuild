@@ -75,23 +75,24 @@ func Start(t *testing.T) *Env {
 	require.NoError(t, err)
 
 	validation := &acceptanceValidationProvider{pass: true}
-	reviewSvc, err := reviewapp.NewService(store, acceptanceDiffProvider{}, validation, reviewapp.Options{})
-	require.NoError(t, err)
 	worker := reputationworker.NewWorker(store, time.Hour, 100, slog.Default())
 
 	gitStore := gitpostgres.NewStore(db)
+	reviewSvc, err := reviewapp.NewService(store, gitpostgres.NewSubmissionRepository(db), acceptanceDiffProvider{}, validation, reviewapp.Options{})
+	require.NoError(t, err)
 	gitDriver := newAcceptanceGitDriver("golang/example", "7c3f4e9a8b2d1c0f5e6a7b8c9d0e1f2a3b4c5d6e", "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", "", "hello/hello.go")
 	gitAppService := &acceptanceGitAppService{driver: gitDriver}
 	credentialService, err := gitapp.NewCredentialService(gitStore, gitAppService, gitapp.Options{
-		Provider: "github",
-		NewID:    acceptanceSequenceIDs("cred-1"),
+		Provider: "github", NewID: acceptanceSequenceIDs("cred-1"), Authorizer: svc,
+		ProxyBaseURL: "https://agentguild.example",
+		TokenSecret:  []byte("0123456789abcdef0123456789abcdef"),
 	})
 	require.NoError(t, err)
 
 	verifierAdapter := &acceptanceSubmissionRepoAdapter{store: gitStore}
 	commitVerifier := gitapp.NewCommitVerifier(gitAppService, verifierAdapter)
 	notifier := application.NewCoreExecutionNotifier(store)
-	submissionService, err := gitapp.NewSubmissionService(gitStore, commitVerifier, notifier, acceptanceSequenceIDs("sub-1"))
+	submissionService, err := gitapp.NewSubmissionService(gitStore, commitVerifier, notifier, svc, acceptanceSequenceIDs("sub-1"))
 	require.NoError(t, err)
 
 	registry := gitvalidation.Registry{
@@ -105,7 +106,7 @@ func Start(t *testing.T) *Env {
 			},
 		},
 	}
-	runner := gitvalidation.NewRunner(registry, &gitvalidation.StaticWorkspaceFactory{Dir: t.TempDir()}, nil)
+	runner := gitvalidation.NewRunner(registry, &gitvalidation.StaticWorkspaceFactory{Dir: t.TempDir()}, &gitvalidation.CommandExecutor{})
 	validationWorker := gitworker.NewValidationWorker(gitStore, "acceptance-validation-worker", 5*time.Minute, 3, runner, notifier)
 
 	verifier, tokenIssuer := newAcceptanceIdentityRuntime(t)
@@ -989,7 +990,7 @@ func (c *MCPClient) parseCredentialResult(rec *httptest.ResponseRecorder) mcpCre
 	require.NotEmpty(c.t, rpcResp.Result.Content, "success result has no content")
 	var envelope struct {
 		Data gitapp.IssueCredentialResponse `json:"data"`
-		Meta application.Meta             `json:"meta"`
+		Meta application.Meta               `json:"meta"`
 	}
 	require.NoError(c.t, json.Unmarshal([]byte(rpcResp.Result.Content[0].Text), &envelope))
 	c.lastMeta = envelope.Meta
@@ -1391,7 +1392,7 @@ func (c *RESTClient) postCredential(path, requestID string, body map[string]any)
 	}
 	var envelope struct {
 		Data gitapp.IssueCredentialResponse `json:"data"`
-		Meta application.Meta             `json:"meta"`
+		Meta application.Meta               `json:"meta"`
 	}
 	require.NoError(c.t, json.Unmarshal(rec.Body.Bytes(), &envelope))
 	c.lastMeta = envelope.Meta
@@ -1515,6 +1516,7 @@ func (c *IdentityClient) DecodeLastBody(dst any) {
 func (c *IdentityClient) RegisterAgent(cookie *http.Cookie, req RegisterAgentRequest) identityapp.RegisterAgentResponse {
 	c.t.Helper()
 	res := c.doJSON(http.MethodPost, "/v1/agents", map[string]any{
+		"request_id":      fmt.Sprintf("register:%s:%d", req.Name, time.Now().UnixNano()),
 		"name":            req.Name,
 		"description":     req.Description,
 		"team":            req.Team,
@@ -1906,7 +1908,7 @@ func seedAcceptanceReviewer(t *testing.T, db *pgxpool.Pool) {
 // TODO: replace with git-delivery-and-validation implementation
 type acceptanceDiffProvider struct{}
 
-func (acceptanceDiffProvider) GetDiff(context.Context, string) ([]reviewapp.FileDiff, error) {
+func (acceptanceDiffProvider) GetDiff(context.Context, string, string) ([]reviewapp.FileDiff, error) {
 	return []reviewapp.FileDiff{{
 		Path: "main.go",
 		Hunks: []reviewapp.Hunk{{
@@ -1928,7 +1930,7 @@ type acceptanceValidationProvider struct {
 	pass bool
 }
 
-func (a *acceptanceValidationProvider) GetValidationStatus(context.Context, string) (reviewapp.ValidationStatus, error) {
+func (a *acceptanceValidationProvider) GetValidationStatus(context.Context, string, string) (reviewapp.ValidationStatus, error) {
 	return acceptanceValidationStatus{pass: a.pass}, nil
 }
 
