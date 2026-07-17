@@ -393,7 +393,7 @@ export function RepositoryOnboardingScreen() {
                     autoComplete="off"
                     disabled={isMutating}
                   />
-                  <span className="field-hint">添加仓库访问本身，不会创建 Issue 同步规则。</span>
+                  <span className="field-hint">添加仓库访问本身，不会自动生成任务。</span>
                 </div>
                 <div className="row">
                   <Button
@@ -423,12 +423,12 @@ export function RepositoryOnboardingScreen() {
         </div>
       </div>
       {summary && onboarded.length > 0 ? (
-        <Card title="下一步：创建同步规则" sub="仓库接入只建立访问绑定；创建并运行规则后，GitHub Issue 才会生成平台任务。">
+        <Card title="下一步：配置任务生成" sub="仓库接入只建立访问绑定；创建并运行策略后，GitHub Issue 才会生成平台任务。">
           <div className="row-between">
             <p className="text-sm muted">已接入 {onboarded.length} 个仓库，可以配置标签筛选、任务类型和去重策略。</p>
-            <a className="btn btn--primary" href="/sync">
+            <a className="btn btn--primary" href="/generation">
               <span aria-hidden="true"><ArrowRight size={14} strokeWidth={1.8} /></span>
-              前往同步规则
+              配置任务生成
             </a>
           </div>
         </Card>

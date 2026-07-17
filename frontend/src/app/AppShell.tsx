@@ -39,8 +39,9 @@ const MODULE_MAP: readonly [string, string][] = [
   ["/onboarding", "首次引导"],
   ["/git-integration", "Git 接入"],
   ["/repositories", "仓库接入"],
-  ["/sync-result", "同步结果"],
-  ["/sync", "同步规则"],
+  ["/generation", "任务生成"],
+  ["/sync-result", "运行结果"],
+  ["/sync", "任务生成"],
   ["/executions", "执行详情"],
   ["/submissions", "提交验证"],
   ["/reviews", "审核工作台"],
@@ -76,7 +77,8 @@ export function AppShell() {
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route path="/git-integration" element={<GitIntegrationScreen />} />
             <Route path="/repositories" element={<RepositoryOnboardingScreen />} />
-            <Route path="/sync" element={<SyncRuleScreen />} />
+            <Route path="/generation" element={<SyncRuleScreen />} />
+            <Route path="/sync" element={<Navigate to="/generation" replace />} />
             <Route path="/tasks" element={<Workbench />} />
             <Route path="/tasks/:taskId" element={<Workbench />} />
             <Route path="/executions/:executionId" element={<ExecutionDetailScreen />} />
@@ -101,7 +103,7 @@ function Workbench() {
   const navigate = useNavigate();
   return (
     <div className="stack">
-      <PageHeader title="任务中心" sub="任务由同步规则生成；人工不领取、不提交，仅治理与审核。" />
+      <PageHeader title="任务中心" sub="查看任务规格、执行和验收状态；人工仅负责治理与审核。" />
       <div className="split-2 split-2--wide">
         <div className="col col--fill">
           <TaskList />

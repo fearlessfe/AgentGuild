@@ -8,14 +8,14 @@ import { AppShell } from "../../app/AppShell";
 import { OnboardingScreen } from "../onboarding/OnboardingScreen";
 import { SyncRuleScreen } from "./SyncRuleScreen";
 
-describe("Navigation and sync integration", () => {
+describe("Navigation and task generation integration", () => {
   beforeEach(() => {
     (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
   });
 
   it("surfaces repository onboarding from the persistent rail", async () => {
     render(
-      <MemoryRouter initialEntries={["/sync"]}>
+      <MemoryRouter initialEntries={["/generation"]}>
         <AppShell />
       </MemoryRouter>,
     );
@@ -48,17 +48,28 @@ describe("Navigation and sync integration", () => {
     expect(screen.getByRole("link", { name: "设置仓库" })).toHaveAttribute("href", "/repositories");
   });
 
-  it("keeps sync rules focused on rule management and links to repository setup", async () => {
+  it("keeps task generation focused on onboarded repositories and strategy management", async () => {
     render(
       <MemoryRouter>
         <SyncRuleScreen />
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("table", { name: "同步规则列表" })).toBeVisible();
+    expect(await screen.findByRole("table", { name: "任务生成策略列表" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "任务生成策略列表" })).toHaveAttribute("tabindex", "0");
     expect(screen.queryByText("公共仓库同步")).toBeNull();
-    expect(screen.getByRole("button", { name: "创建规则" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "创建策略" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "仓库接入" })).toHaveAttribute("href", "/repositories");
+  });
+
+  it("redirects the legacy /sync route to task generation", async () => {
+    render(
+      <MemoryRouter initialEntries={["/sync"]}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "任务生成" })).toBeVisible();
   });
 });
 
@@ -115,12 +126,12 @@ describe("SyncRuleScreen repository inventory", () => {
     expect(screen.getByLabelText("仓库来源")).toHaveValue("GitHub App");
     expect(screen.getByLabelText("Issue 访问")).toHaveValue("app");
 
-    await user.click(screen.getByRole("button", { name: "创建规则" }));
+    await user.click(screen.getByRole("button", { name: "创建策略" }));
     expect(client.createSyncRule).toHaveBeenCalledWith(
       expect.objectContaining({ repo: "company/platform-api", source_auth: "app" }),
       { idempotencyKey: expect.any(String) },
     );
-    expect(await screen.findByRole("heading", { name: "同步结果" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "运行结果" })).toBeVisible();
   });
 });
 

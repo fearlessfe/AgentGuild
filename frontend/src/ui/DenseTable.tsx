@@ -24,35 +24,37 @@ export function DenseTable({
   caption?: string;
 }) {
   return (
-    <table className="dense-table">
-      {caption ? <caption className="visually-hidden">{caption}</caption> : null}
-      <thead>
-        <tr>
-          {columns.map((column, index) => (
-            <th scope="col" key={index}>
-              {column}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, index) => {
-          if (isGroup(row)) {
+    <div className="dense-table-scroll" role="region" aria-label={caption || "数据表格"} tabIndex={0}>
+      <table className="dense-table">
+        {caption ? <caption className="visually-hidden">{caption}</caption> : null}
+        <thead>
+          <tr>
+            {columns.map((column, index) => (
+              <th scope="col" key={index}>
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => {
+            if (isGroup(row)) {
+              return (
+                <tr className="group-row" key={`group-${index}`}>
+                  <td colSpan={columns.length}>{row.group}</td>
+                </tr>
+              );
+            }
             return (
-              <tr className="group-row" key={`group-${index}`}>
-                <td colSpan={columns.length}>{row.group}</td>
+              <tr data-selected={row.selected ? "true" : "false"} key={row.key ?? index}>
+                {row.cells.map((cell, cellIndex) => (
+                  <td key={cellIndex}>{cell}</td>
+                ))}
               </tr>
             );
-          }
-          return (
-            <tr data-selected={row.selected ? "true" : "false"} key={row.key ?? index}>
-              {row.cells.map((cell, cellIndex) => (
-                <td key={cellIndex}>{cell}</td>
-              ))}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

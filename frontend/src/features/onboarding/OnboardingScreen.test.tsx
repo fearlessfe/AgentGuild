@@ -12,7 +12,7 @@ describe("OnboardingScreen", () => {
     );
 
     expect(screen.getByRole("link", { name: "连接 GitHub" })).toHaveAttribute("href", "/git-integration");
-    expect(screen.getByRole("link", { name: "配置同步" })).toHaveAttribute("href", "/sync");
+    expect(screen.getByRole("link", { name: "配置任务生成" })).toHaveAttribute("href", "/generation");
     expect(screen.queryByRole("button", { name: "保存并继续" })).not.toBeInTheDocument();
     expect(screen.queryByText("进度已保存")).not.toBeInTheDocument();
   });

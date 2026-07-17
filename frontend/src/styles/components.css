@@ -361,8 +361,21 @@
 
 /* dense data table ------------------------------------------------------- */
 
+.dense-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.dense-table-scroll:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: -2px;
+}
+
 .dense-table {
   width: 100%;
+  min-width: max(100%, 640px);
   border-collapse: collapse;
   font-size: 12px;
 }

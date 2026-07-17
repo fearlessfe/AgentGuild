@@ -63,7 +63,7 @@ export function SyncRuleScreen() {
         errors.push(`仓库加载失败：${errorMessage(reposResult.reason)}`);
       }
       if (rulesResult.status === "fulfilled") setSyncRules(rulesResult.value.data.items);
-      else errors.push(`规则加载失败：${errorMessage(rulesResult.reason)}`);
+      else errors.push(`生成策略加载失败：${errorMessage(rulesResult.reason)}`);
       setError(errors.length > 0 ? errors.join("；") : null);
       setLoading(false);
     }
@@ -106,12 +106,12 @@ export function SyncRuleScreen() {
           setSyncResult(result.data);
         } catch (err) {
           if (!shouldRetainMutationKey(err)) settle(mutationKeys.current, runKey);
-          setActionError(`规则已创建，但首次同步失败：${errorMessage(err)}`);
+          setActionError(`生成策略已创建，但首次运行失败：${errorMessage(err)}`);
         }
       }
     } catch (err) {
       if (!shouldRetainMutationKey(err)) settle(mutationKeys.current, signature);
-      setActionError(`创建规则失败：${errorMessage(err)}`);
+      setActionError(`创建生成策略失败：${errorMessage(err)}`);
     } finally {
       setPendingAction(null);
     }
@@ -135,7 +135,7 @@ export function SyncRuleScreen() {
   };
 
   const handleDelete = async (ruleId: string) => {
-    if (!confirm("确定要删除此同步规则吗？")) return;
+    if (!confirm("确定要删除此任务生成策略吗？")) return;
     const action = `delete:${ruleId}`;
     setPendingAction(action);
     setActionError(null);
@@ -161,7 +161,7 @@ export function SyncRuleScreen() {
       setSyncResult(result.data);
     } catch (err) {
       if (!shouldRetainMutationKey(err)) settle(mutationKeys.current, action);
-      setActionError(`运行同步失败：${errorMessage(err)}`);
+      setActionError(`运行生成策略失败：${errorMessage(err)}`);
     } finally {
       setPendingAction(null);
     }
@@ -196,7 +196,7 @@ export function SyncRuleScreen() {
           {rule.enabled ? "停用" : "启用"}
         </Button>
         <Button icon={<Play size={14} />} variant="ghost" onClick={() => void handleRunSync(rule.id)} disabled={pendingAction !== null}>
-          {pendingAction === `run:${rule.id}` ? "运行中..." : "立即同步"}
+          {pendingAction === `run:${rule.id}` ? "运行中..." : "立即运行"}
         </Button>
         <Button icon={<Trash2 size={14} />} variant="ghost" onClick={() => void handleDelete(rule.id)} disabled={pendingAction !== null}>
           删除
@@ -208,17 +208,17 @@ export function SyncRuleScreen() {
   return (
     <div className="stack">
       <PageHeader
-        title="同步规则"
-        sub="为已接入仓库创建规则，并运行首次 Issue → Task 同步。"
+        title="任务生成"
+        sub="从已接入仓库选择 Issue 来源并生成平台任务。"
         actions={<ButtonLink to="/repositories">仓库接入</ButtonLink>}
       />
       {error ? <p role="alert" className="form-error">{error}</p> : null}
       {actionError ? <p role="alert" className="form-error">{actionError}</p> : null}
-      {loading ? <p role="status" className="text-sm">正在加载同步配置...</p> : (
+      {loading ? <p role="status" className="text-sm">正在加载任务生成配置...</p> : (
         <>
           <div className="split-2">
             <div className="col">
-              <Card title="新建同步规则" sub="来源权限根据仓库接入方式自动匹配。">
+              <Card title="新建生成策略" sub="来源权限根据仓库接入方式自动匹配。">
                 {repositories.length === 0 ? (
                   <div className="stack-sm">
                     <p className="text-sm">暂无已接入仓库</p>
@@ -247,20 +247,20 @@ export function SyncRuleScreen() {
                     <label className="field" htmlFor="sync-priority"><span className="field-label">默认优先级</span><select id="sync-priority" value={form.defaultPriority} onChange={(event) => setForm({ ...form, defaultPriority: event.target.value })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
                     <label className="field" htmlFor="sync-dedupe"><span className="field-label">重复 Issue</span><select id="sync-dedupe" value={form.dedupeStrategy} onChange={(event) => setForm({ ...form, dedupeStrategy: event.target.value })}><option value="update">更新已有任务</option><option value="skip">跳过</option></select></label>
                     <label className="source-selector__option"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} /><span>创建后启用</span></label>
-                    <label className="source-selector__option"><input type="checkbox" checked={form.runAfterCreate} onChange={(event) => setForm({ ...form, runAfterCreate: event.target.checked })} /><span>创建后立即同步</span></label>
-                    <div className="row field-span-2"><Button icon={<Plus size={14} />} type="submit" variant="primary" disabled={!selectedRepository || pendingAction !== null}>{pendingAction === "create" ? "创建中..." : "创建规则"}</Button></div>
+                    <label className="source-selector__option"><input type="checkbox" checked={form.runAfterCreate} onChange={(event) => setForm({ ...form, runAfterCreate: event.target.checked })} /><span>创建后立即运行</span></label>
+                    <div className="row field-span-2"><Button icon={<Plus size={14} />} type="submit" variant="primary" disabled={!selectedRepository || pendingAction !== null}>{pendingAction === "create" ? "创建中..." : "创建策略"}</Button></div>
                   </form>
                 )}
               </Card>
             </div>
             <div className="col col--fill">
               <Card title="已接入仓库" sub={`${repositories.length} 个仓库`} pad={false}>
-                <DenseTable columns={["仓库", "来源", "同步", "默认分支"]} rows={repoRows} caption="已接入仓库同步状态" />
+                <DenseTable columns={["仓库", "来源", "任务生成", "默认分支"]} rows={repoRows} caption="已接入仓库任务生成状态" />
               </Card>
             </div>
           </div>
-          <Card title="同步规则" sub={`${syncRules.length} 条规则`} pad={false}>
-            <DenseTable columns={["仓库", "来源", "状态", "包含标签", "排除标签", "最后同步", "操作"]} rows={ruleRows} caption="同步规则列表" />
+          <Card title="生成策略" sub={`${syncRules.length} 条策略`} pad={false}>
+            <DenseTable columns={["仓库", "来源", "状态", "包含标签", "排除标签", "最后运行", "操作"]} rows={ruleRows} caption="任务生成策略列表" />
           </Card>
         </>
       )}

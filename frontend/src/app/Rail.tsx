@@ -4,11 +4,11 @@ import {
   ChevronRight,
   CircleDot,
   FolderGit2,
-  GitBranch,
   GitPullRequest,
   LayoutDashboard,
   Settings,
   SquareKanban,
+  Workflow,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -23,7 +23,7 @@ type RailItem = { to: string; icon: LucideIcon; label: string };
 const RAIL_ITEMS: readonly RailItem[] = [
   { to: "/onboarding", icon: LayoutDashboard, label: "总览" },
   { to: "/repositories", icon: FolderGit2, label: "仓库接入" },
-  { to: "/sync", icon: GitBranch, label: "同步" },
+  { to: "/generation", icon: Workflow, label: "任务生成" },
   { to: "/tasks", icon: SquareKanban, label: "任务中心" },
   { to: "/reviews", icon: GitPullRequest, label: "审核" },
   { to: "/outcome", icon: CircleDot, label: "结果" },

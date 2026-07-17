@@ -21,15 +21,15 @@ export function SyncResultScreen({ result, onClose }: SyncResultScreenProps) {
   return (
     <div className="stack">
       <PageHeader
-        title="同步结果"
-        sub={`同步已完成，共处理 ${total} 项`}
+        title="运行结果"
+        sub={`生成策略运行完成，共处理 ${total} 项`}
         actions={<Button onClick={onClose}>返回</Button>}
       />
       <MetricGrid metrics={metrics} />
       <Card title="摘要">
         <div className="stack">
           <p className="text-sm">
-            本次同步创建了 <strong>{result.created}</strong> 个新任务，
+            本次运行创建了 <strong>{result.created}</strong> 个新任务，
             更新了 <strong>{result.updated}</strong> 个现有任务，
             跳过了 <strong>{result.skipped}</strong> 个不符合条件的 Issue。
           </p>

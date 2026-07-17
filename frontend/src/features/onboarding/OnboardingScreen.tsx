@@ -5,14 +5,14 @@ const ONBOARDING_STEPS: Step[] = [
   { title: "登录", state: "done" },
   { title: "Git 接入", state: "current", desc: "连接企业 Git 提供商并授予最小权限" },
   { title: "仓库接入", state: "pending", desc: "选择 App 授权仓库或添加公开仓库" },
-  { title: "首次同步", state: "pending", desc: "创建规则并至少成功运行一次" },
+  { title: "首次生成", state: "pending", desc: "创建任务生成策略并至少成功运行一次" },
   { title: "任务执行", state: "pending" },
 ];
 
 export function OnboardingScreen() {
   return (
     <div className="stack">
-      <PageHeader title="首次引导" sub="完成四步接入后即可开始任务同步。成功同步一次才视为引导完成。" />
+      <PageHeader title="首次引导" sub="完成仓库接入后即可配置任务生成。首次运行成功后进入任务治理。" />
       <div className="split-2">
         <div className="col">
           <Card title="接入 Git 提供商" sub="当前步骤 · Git 接入">
@@ -25,13 +25,13 @@ export function OnboardingScreen() {
                   连接 GitHub
                 </ButtonLink>
                 <ButtonLink to="/repositories">设置仓库</ButtonLink>
-                <ButtonLink to="/sync">配置同步</ButtonLink>
+                <ButtonLink to="/generation">配置任务生成</ButtonLink>
               </div>
             </div>
           </Card>
         </div>
         <div className="col">
-          <Card title="接入路线" sub="按顺序完成 Git、仓库与首次同步配置。">
+          <Card title="接入路线" sub="按顺序完成 Git、仓库与首次任务生成。">
             <Steps items={ONBOARDING_STEPS} />
           </Card>
         </div>
