@@ -189,7 +189,10 @@ func (s *VersionService) StartEvaluation(
 }
 
 // Promote transitions an eligible version to active and retires the previous
-// active version atomically.
+// active version atomically. The agent's current version observed when Promote
+// starts is used as an optimistic guard: if a concurrent promote (or rollback)
+// changed it before this transaction commits, Promote fails with
+// domain.ErrStateConflict instead of overwriting it.
 func (s *VersionService) Promote(
 	ctx context.Context,
 	cmd Promote,
@@ -200,6 +203,10 @@ func (s *VersionService) Promote(
 		IsAdmin:  cmd.IsAdmin,
 	}
 	if err := s.policy.RequireOwnerOrAdmin(ctx, principal, cmd.TenantID, cmd.AgentID); err != nil {
+		return err
+	}
+	expectedCurrent, err := s.versions.GetAgentCurrentVersionID(ctx, cmd.TenantID, cmd.AgentID)
+	if err != nil {
 		return err
 	}
 	return s.store.WithTx(ctx, func(tx Tx) error {
@@ -236,13 +243,13 @@ func (s *VersionService) Promote(
 				return err
 			}
 		}
-		if err := target.Promote(now); err != nil {
+		if err := target.Promote(now, cmd.ActorID); err != nil {
 			return err
 		}
 		if err := s.versions.UpdateStatus(ctx, tx, target); err != nil {
 			return err
 		}
-		return s.versions.UpdateAgentCurrentVersion(ctx, tx, cmd.TenantID, cmd.AgentID, target.ID)
+		return s.versions.PromoteAgentCurrentVersion(ctx, tx, cmd.TenantID, cmd.AgentID, target.ID, expectedCurrent)
 	})
 }
 

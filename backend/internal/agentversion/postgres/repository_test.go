@@ -156,6 +156,91 @@ func TestRepositoryListByAgentOrdered(t *testing.T) {
 	require.Equal(t, 1, versions[2].VersionNumber)
 }
 
+func TestRepositoryPromoteAgentCurrentVersionOptimisticGuard(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := avpostgres.NewVersionRepository(db)
+	store := avpostgres.NewStore(db)
+
+	tenantID := "tenant-promote-guard"
+	agentID := "agent-promote-guard"
+	insertAgent(t, db, tenantID, agentID, "owner")
+
+	v1 := newDraftVersion(t, tenantID, agentID, 1, "")
+	createVersion(t, store, repo, v1)
+	v2 := newDraftVersion(t, tenantID, agentID, 2, v1.ID)
+	createVersion(t, store, repo, v2)
+
+	// No current version yet: expected "" matches NULL (first promote).
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.PromoteAgentCurrentVersion(context.Background(), tx, tenantID, agentID, v1.ID, "")
+	}))
+
+	current, err := repo.GetAgentCurrentVersionID(context.Background(), tenantID, agentID)
+	require.NoError(t, err)
+	require.Equal(t, v1.ID, current)
+
+	// Stale expectation (a concurrent promote already moved current) conflicts.
+	err = store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.PromoteAgentCurrentVersion(context.Background(), tx, tenantID, agentID, v2.ID, "")
+	})
+	require.ErrorIs(t, err, domain.ErrStateConflict)
+
+	// Matching expectation succeeds.
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.PromoteAgentCurrentVersion(context.Background(), tx, tenantID, agentID, v2.ID, v1.ID)
+	}))
+
+	current, err = repo.GetAgentCurrentVersionID(context.Background(), tenantID, agentID)
+	require.NoError(t, err)
+	require.Equal(t, v2.ID, current)
+}
+
+func TestRepositoryGetAgentCurrentVersionIDNotFound(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := avpostgres.NewVersionRepository(db)
+
+	_, err := repo.GetAgentCurrentVersionID(context.Background(), "tenant-missing", "agent-missing")
+	require.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func TestRepositoryUpdateStatusPersistsPromotedBy(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := avpostgres.NewVersionRepository(db)
+	store := avpostgres.NewStore(db)
+
+	tenantID := "tenant-promoted-by"
+	agentID := "agent-promoted-by"
+	insertAgent(t, db, tenantID, agentID, "owner")
+
+	v := newDraftVersion(t, tenantID, agentID, 1, "")
+	createVersion(t, store, repo, v)
+
+	v.Status = domain.StatusEvaluating
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.UpdateStatus(context.Background(), tx, v)
+	}))
+
+	loaded, err := repo.GetByID(context.Background(), tenantID, agentID, v.ID)
+	require.NoError(t, err)
+	require.NoError(t, loaded.MarkEligible())
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.UpdateStatus(context.Background(), tx, loaded)
+	}))
+
+	eligible, err := repo.GetByID(context.Background(), tenantID, agentID, v.ID)
+	require.NoError(t, err)
+	require.NoError(t, eligible.Promote(time.Now(), "approver-1"))
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return repo.UpdateStatus(context.Background(), tx, eligible)
+	}))
+
+	reloaded, err := repo.GetByID(context.Background(), tenantID, agentID, v.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusActive, reloaded.Status)
+	require.Equal(t, "approver-1", reloaded.PromotedBy)
+	require.NotNil(t, reloaded.PromotedAt)
+}
+
 func TestRepositoryConcurrentCreateDoesNotDuplicateVersionNumber(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	repo := avpostgres.NewVersionRepository(db)

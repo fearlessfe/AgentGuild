@@ -30,6 +30,9 @@ type AgentVersion struct {
 	CreatedBy         string
 	CreatedAt         time.Time
 	PromotedAt        *time.Time
+	// PromotedBy records the approver (actor) who promoted the version to
+	// active. It is written only by the promote transition.
+	PromotedBy        string
 	RetiredAt         *time.Time
 	RejectedReason    string
 
@@ -179,13 +182,14 @@ func (v *AgentVersion) MarkRejected(reason string) error {
 	return nil
 }
 
-// Promote transitions eligible -> active.
-func (v *AgentVersion) Promote(now time.Time) error {
+// Promote transitions eligible -> active and records the approving actor.
+func (v *AgentVersion) Promote(now time.Time, actorID string) error {
 	if v.Status != StatusEligible {
 		return ErrStateConflict
 	}
 	v.Status = StatusActive
 	v.PromotedAt = &now
+	v.PromotedBy = actorID
 	return nil
 }
 

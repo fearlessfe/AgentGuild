@@ -14,11 +14,13 @@ func TestAgentVersionStatusMachine(t *testing.T) {
 
 	require.NoError(t, v.StartEvaluation())
 	require.Equal(t, avdomain.StatusEvaluating, v.StatusValue())
-	require.ErrorIs(t, v.Promote(now), avdomain.ErrStateConflict)
+	require.ErrorIs(t, v.Promote(now, "owner"), avdomain.ErrStateConflict)
 
 	require.NoError(t, v.MarkEligible())
-	require.NoError(t, v.Promote(now))
+	require.NoError(t, v.Promote(now, "owner"))
 	require.Equal(t, avdomain.StatusActive, v.StatusValue())
+	require.Equal(t, "owner", v.PromotedBy)
+	require.NotNil(t, v.PromotedAt)
 }
 
 func TestAgentVersionContentImmutable(t *testing.T) {

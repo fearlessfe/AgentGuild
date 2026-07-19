@@ -34,6 +34,14 @@ type VersionRepository interface {
 	GetActiveByAgent(context.Context, string, string) (*domain.AgentVersion, error)
 	LockAgent(context.Context, Tx, string, string) error
 	UpdateAgentCurrentVersion(context.Context, Tx, string, string, string) error
+	// GetAgentCurrentVersionID returns the agent's current_version_id, or ""
+	// when the agent has no current version. It returns domain.ErrNotFound
+	// when the agent does not exist.
+	GetAgentCurrentVersionID(context.Context, string, string) (string, error)
+	// PromoteAgentCurrentVersion sets the agent's current_version_id only when
+	// it still equals expectedVersionID ("" matches NULL). It returns
+	// domain.ErrStateConflict when the current version changed concurrently.
+	PromoteAgentCurrentVersion(ctx context.Context, tx Tx, tenantID, agentID, versionID, expectedVersionID string) error
 	GetAgentOwner(context.Context, string, string) (string, error)
 }
 
@@ -157,6 +165,7 @@ type VersionDetail struct {
 	CreatedBy         string               `json:"created_by"`
 	CreatedAt         time.Time            `json:"created_at"`
 	PromotedAt        *time.Time           `json:"promoted_at,omitempty"`
+	PromotedBy        string               `json:"promoted_by,omitempty"`
 	RetiredAt         *time.Time           `json:"retired_at,omitempty"`
 }
 

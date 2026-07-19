@@ -90,6 +90,7 @@ func versionDetail(v *domain.AgentVersion) *VersionDetail {
 		CreatedBy:         v.CreatedBy,
 		CreatedAt:         v.CreatedAt,
 		PromotedAt:        v.PromotedAt,
+		PromotedBy:        v.PromotedBy,
 		RetiredAt:         v.RetiredAt,
 	}
 }

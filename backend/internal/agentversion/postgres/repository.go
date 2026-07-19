@@ -74,10 +74,12 @@ func (r *versionRepository) UpdateStatus(ctx context.Context, tx application.Tx,
 		SET status=$4,
 		    promoted_at=COALESCE($5, promoted_at),
 		    retired_at=COALESCE($6, retired_at),
-		    rejected_reason=COALESCE($7, rejected_reason)
+		    rejected_reason=COALESCE($7, rejected_reason),
+		    promoted_by=COALESCE($8, promoted_by)
 		WHERE tenant_id=$1 AND agent_id=$2 AND id=$3`,
 		version.TenantID, version.AgentID, version.ID,
 		string(version.Status), promotedAt, retiredAt, nullString(version.RejectedReason),
+		nullString(version.PromotedBy),
 	)
 	if err != nil {
 		return err
@@ -134,13 +136,13 @@ func (r *versionRepository) UpdateContent(ctx context.Context, tx application.Tx
 
 func (r *versionRepository) GetByID(ctx context.Context, tenantID, agentID, versionID string) (*domain.AgentVersion, error) {
 	var version domain.AgentVersion
-	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason sql.NullString
+	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason, promotedBy sql.NullString
 	var promotedAt, retiredAt *time.Time
 	err := r.q.QueryRow(ctx, `
 		SELECT id, tenant_id, agent_id, version_number, parent_version_id, status,
 		       runtime, model, capabilities, config_fingerprint, content_hash,
 		       environment_digest, prompt_ref, skill_refs, memory_ref, tool_refs,
-		       created_by, created_at, promoted_at, retired_at, rejected_reason
+		       created_by, created_at, promoted_at, retired_at, rejected_reason, promoted_by
 		FROM agent_versions
 		WHERE tenant_id=$1 AND agent_id=$2 AND id=$3`,
 		tenantID, agentID, versionID,
@@ -149,7 +151,7 @@ func (r *versionRepository) GetByID(ctx context.Context, tenantID, agentID, vers
 		&parentID, &version.Status, &version.Runtime, &version.Model,
 		&version.Capabilities, &version.ConfigFingerprint, &version.ContentHash,
 		&envDigest, &promptRef, &version.SkillRefs, &memoryRef, &version.ToolRefs,
-		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason,
+		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason, &promotedBy,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
@@ -164,6 +166,7 @@ func (r *versionRepository) GetByID(ctx context.Context, tenantID, agentID, vers
 	version.CreatedBy = createdBy.String
 	version.RejectedReason = rejectedReason.String
 	version.PromotedAt = promotedAt
+	version.PromotedBy = promotedBy.String
 	version.RetiredAt = retiredAt
 	version.Persisted = true
 	return &version, nil
@@ -174,7 +177,7 @@ func (r *versionRepository) ListByAgent(ctx context.Context, tenantID, agentID s
 		SELECT id, tenant_id, agent_id, version_number, parent_version_id, status,
 		       runtime, model, capabilities, config_fingerprint, content_hash,
 		       environment_digest, prompt_ref, skill_refs, memory_ref, tool_refs,
-		       created_by, created_at, promoted_at, retired_at, rejected_reason
+		       created_by, created_at, promoted_at, retired_at, rejected_reason, promoted_by
 		FROM agent_versions
 		WHERE tenant_id=$1 AND agent_id=$2
 		ORDER BY version_number DESC`,
@@ -198,13 +201,13 @@ func (r *versionRepository) ListByAgent(ctx context.Context, tenantID, agentID s
 
 func (r *versionRepository) GetLatestByAgent(ctx context.Context, tenantID, agentID string) (*domain.AgentVersion, error) {
 	var version domain.AgentVersion
-	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason sql.NullString
+	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason, promotedBy sql.NullString
 	var promotedAt, retiredAt *time.Time
 	err := r.q.QueryRow(ctx, `
 		SELECT id, tenant_id, agent_id, version_number, parent_version_id, status,
 		       runtime, model, capabilities, config_fingerprint, content_hash,
 		       environment_digest, prompt_ref, skill_refs, memory_ref, tool_refs,
-		       created_by, created_at, promoted_at, retired_at, rejected_reason
+		       created_by, created_at, promoted_at, retired_at, rejected_reason, promoted_by
 		FROM agent_versions
 		WHERE tenant_id=$1 AND agent_id=$2
 		ORDER BY version_number DESC
@@ -215,7 +218,7 @@ func (r *versionRepository) GetLatestByAgent(ctx context.Context, tenantID, agen
 		&parentID, &version.Status, &version.Runtime, &version.Model,
 		&version.Capabilities, &version.ConfigFingerprint, &version.ContentHash,
 		&envDigest, &promptRef, &version.SkillRefs, &memoryRef, &version.ToolRefs,
-		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason,
+		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason, &promotedBy,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
@@ -230,6 +233,7 @@ func (r *versionRepository) GetLatestByAgent(ctx context.Context, tenantID, agen
 	version.CreatedBy = createdBy.String
 	version.RejectedReason = rejectedReason.String
 	version.PromotedAt = promotedAt
+	version.PromotedBy = promotedBy.String
 	version.RetiredAt = retiredAt
 	version.Persisted = true
 	return &version, nil
@@ -237,13 +241,13 @@ func (r *versionRepository) GetLatestByAgent(ctx context.Context, tenantID, agen
 
 func (r *versionRepository) GetActiveByAgent(ctx context.Context, tenantID, agentID string) (*domain.AgentVersion, error) {
 	var version domain.AgentVersion
-	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason sql.NullString
+	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason, promotedBy sql.NullString
 	var promotedAt, retiredAt *time.Time
 	err := r.q.QueryRow(ctx, `
 		SELECT id, tenant_id, agent_id, version_number, parent_version_id, status,
 		       runtime, model, capabilities, config_fingerprint, content_hash,
 		       environment_digest, prompt_ref, skill_refs, memory_ref, tool_refs,
-		       created_by, created_at, promoted_at, retired_at, rejected_reason
+		       created_by, created_at, promoted_at, retired_at, rejected_reason, promoted_by
 		FROM agent_versions
 		WHERE tenant_id=$1 AND agent_id=$2 AND status='active'
 		ORDER BY version_number DESC
@@ -254,7 +258,7 @@ func (r *versionRepository) GetActiveByAgent(ctx context.Context, tenantID, agen
 		&parentID, &version.Status, &version.Runtime, &version.Model,
 		&version.Capabilities, &version.ConfigFingerprint, &version.ContentHash,
 		&envDigest, &promptRef, &version.SkillRefs, &memoryRef, &version.ToolRefs,
-		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason,
+		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason, &promotedBy,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
@@ -269,6 +273,7 @@ func (r *versionRepository) GetActiveByAgent(ctx context.Context, tenantID, agen
 	version.CreatedBy = createdBy.String
 	version.RejectedReason = rejectedReason.String
 	version.PromotedAt = promotedAt
+	version.PromotedBy = promotedBy.String
 	version.RetiredAt = retiredAt
 	version.Persisted = true
 	return &version, nil
@@ -308,6 +313,43 @@ func (r *versionRepository) UpdateAgentCurrentVersion(ctx context.Context, tx ap
 	return nil
 }
 
+func (r *versionRepository) GetAgentCurrentVersionID(ctx context.Context, tenantID, agentID string) (string, error) {
+	var currentID sql.NullString
+	err := r.q.QueryRow(ctx, `
+		SELECT current_version_id FROM agents
+		WHERE tenant_id=$1 AND id=$2`,
+		tenantID, agentID,
+	).Scan(&currentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", domain.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return currentID.String, nil
+}
+
+func (r *versionRepository) PromoteAgentCurrentVersion(ctx context.Context, tx application.Tx, tenantID, agentID, versionID, expectedVersionID string) error {
+	now, err := tx.Now(ctx)
+	if err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE agents
+		SET current_version_id=$3, updated_at=$4
+		WHERE tenant_id=$1 AND id=$2
+		  AND current_version_id IS NOT DISTINCT FROM $5`,
+		tenantID, agentID, nullString(versionID), now, nullString(expectedVersionID),
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrStateConflict
+	}
+	return nil
+}
+
 func (r *versionRepository) GetAgentOwner(ctx context.Context, tenantID, agentID string) (string, error) {
 	var ownerID string
 	err := r.q.QueryRow(ctx, `
@@ -329,14 +371,14 @@ type versionScanner interface {
 
 func scanVersion(row versionScanner) (*domain.AgentVersion, error) {
 	var version domain.AgentVersion
-	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason sql.NullString
+	var parentID, envDigest, promptRef, memoryRef, createdBy, rejectedReason, promotedBy sql.NullString
 	var promotedAt, retiredAt *time.Time
 	if err := row.Scan(
 		&version.ID, &version.TenantID, &version.AgentID, &version.VersionNumber,
 		&parentID, &version.Status, &version.Runtime, &version.Model,
 		&version.Capabilities, &version.ConfigFingerprint, &version.ContentHash,
 		&envDigest, &promptRef, &version.SkillRefs, &memoryRef, &version.ToolRefs,
-		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason,
+		&createdBy, &version.CreatedAt, &promotedAt, &retiredAt, &rejectedReason, &promotedBy,
 	); err != nil {
 		return nil, err
 	}
@@ -347,6 +389,7 @@ func scanVersion(row versionScanner) (*domain.AgentVersion, error) {
 	version.CreatedBy = createdBy.String
 	version.RejectedReason = rejectedReason.String
 	version.PromotedAt = promotedAt
+	version.PromotedBy = promotedBy.String
 	version.RetiredAt = retiredAt
 	version.Persisted = true
 	return &version, nil
