@@ -7,9 +7,8 @@ import (
 )
 
 // FixedSubmissionStore is a stub SubmissionStore that returns a single
-// accepted submission. It is intended for local development and tests while
-// the git-delivery-and-validation / code-review-and-reputation modules are
-// not yet implemented.
+// accepted submission. It is intended for tests; production uses the
+// PostgreSQL-backed store in this module's postgres package.
 type FixedSubmissionStore struct {
 	Submission *Submission
 }

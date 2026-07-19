@@ -35,8 +35,8 @@ type ExperienceCandidateRepository interface {
 }
 
 // SubmissionStore abstracts the git-delivery-and-validation / code-review
-// modules. This is a forward-looking interface; concrete repositories will be
-// wired in a later change.
+// modules. Production wiring uses the PostgreSQL-backed implementation in
+// this module's postgres package; FixedSubmissionStore remains for tests.
 type SubmissionStore interface {
 	GetAcceptedSubmission(ctx context.Context, tenantID, submissionID string) (*Submission, error)
 }
