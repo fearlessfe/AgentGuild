@@ -85,6 +85,7 @@ type Server struct {
 	experiences   experienceService
 	verifier      auth.TokenVerifier
 	limiter       RateLimiter
+	idempotency   mutationIdempotencyStore
 }
 
 // Option 配置 Server。
@@ -93,6 +94,11 @@ type Option func(*Server)
 // WithRateLimiter 替换默认的无限流实现。
 func WithRateLimiter(l RateLimiter) Option {
 	return func(s *Server) { s.limiter = l }
+}
+
+// WithIdempotencyStore 为变更工具挂载幂等存储（与 REST mutation 中间件同一实现）。
+func WithIdempotencyStore(store mutationIdempotencyStore) Option {
+	return func(s *Server) { s.idempotency = store }
 }
 
 // WithSubmissionService 挂载 Submission 创建与查询工具。
@@ -172,15 +178,15 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 		nil,
 	)
 	principal, _ := auth.PrincipalFrom(r.Context())
-	registerTools(server, s.svc, s.submissions, s.credentials, s.reviewSvc, s.reputationSvc, principal)
+	registerTools(server, s.svc, s.submissions, s.credentials, s.reviewSvc, s.reputationSvc, principal, s.idempotency)
 	if s.versions != nil {
-		registerAgentVersionTools(server, s.versions, principal)
+		registerAgentVersionTools(server, s.versions, principal, s.idempotency)
 	}
 	if s.evaluations != nil {
-		registerEvaluationTools(server, s.evaluations, principal)
+		registerEvaluationTools(server, s.evaluations, principal, s.idempotency)
 	}
 	if s.experiences != nil {
-		registerExperienceTools(server, s.experiences, principal)
+		registerExperienceTools(server, s.experiences, principal, s.idempotency)
 	}
 	return server
 }

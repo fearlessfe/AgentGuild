@@ -13,17 +13,25 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	evaluationdomain "agentguild.dev/agentguild/backend/internal/evaluation/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 )
 
+// ViolationView 是路径违规错误的结构化违规项；仅在领域错误携带违规明细时出现。
+type ViolationView struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 // ErrorResponse 是 REST 暴露的稳定错误结构；code 为全大写领域错误码。
 type ErrorResponse struct {
 	Error struct {
-		Code              string `json:"code"`
-		Message           string `json:"message"`
-		Field             string `json:"field,omitempty"`
-		RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
+		Code              string          `json:"code"`
+		Message           string          `json:"message"`
+		Field             string          `json:"field,omitempty"`
+		RetryAfterSeconds int             `json:"retry_after_seconds,omitempty"`
+		Violations        []ViolationView `json:"violations,omitempty"`
 	} `json:"error"`
 }
 
@@ -70,6 +78,11 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 
 // writeFieldError 写入带字段信息的参数错误；字段信息仅通过响应体暴露，不泄露内部细节。
 func writeFieldError(w http.ResponseWriter, status int, code, message, field string) {
+	writeFieldErrorWithViolations(w, status, code, message, field, nil)
+}
+
+// writeFieldErrorWithViolations 在字段错误基础上附带结构化路径违规项（可为空）。
+func writeFieldErrorWithViolations(w http.ResponseWriter, status int, code, message, field string, violations []ViolationView) {
 	w.Header().Set("Content-Type", "application/json")
 	if field != "" {
 		w.Header().Set("X-Error-Field", field)
@@ -79,7 +92,21 @@ func writeFieldError(w http.ResponseWriter, status int, code, message, field str
 	resp.Error.Code = code
 	resp.Error.Message = message
 	resp.Error.Field = field
+	resp.Error.Violations = violations
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// pathViolationsOf 提取领域错误携带的结构化路径违规项；无违规明细时返回 nil。
+func pathViolationsOf(err error) []ViolationView {
+	var pathErr *gitapp.PathViolationError
+	if !errors.As(err, &pathErr) || len(pathErr.Violations) == 0 {
+		return nil
+	}
+	violations := make([]ViolationView, 0, len(pathErr.Violations))
+	for _, v := range pathErr.Violations {
+		violations = append(violations, ViolationView{Path: v.Path, Reason: v.Reason})
+	}
+	return violations
 }
 
 // mapDomainError 把领域错误映射为 HTTP 状态与响应体。
@@ -88,7 +115,7 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 	code := errorCodeOf(err)
 	switch code {
 	case "invalid_argument":
-		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), errorFieldOf(err))
+		writeFieldErrorWithViolations(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), errorFieldOf(err), pathViolationsOf(err))
 	case "forbidden":
 		if isAdministrator(principal) {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
@@ -103,6 +130,8 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 	case "not_configured":
 		writeError(w, http.StatusNotFound, "NOT_CONFIGURED", err.Error())
+	case "evaluation_unavailable":
+		writeError(w, http.StatusServiceUnavailable, "EVALUATION_UNAVAILABLE", err.Error())
 	case "state_conflict":
 		writeError(w, http.StatusConflict, "STATE_CONFLICT", err.Error())
 	case "hard_gates_failed":

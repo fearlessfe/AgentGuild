@@ -16,6 +16,7 @@ type AgentVersionListInput struct {
 
 // AgentVersionCreateInput is the input for agent_version_create.
 type AgentVersionCreateInput struct {
+	RequestID             string   `json:"request_id" jsonschema:"unique mutation request id"`
 	AgentID               string   `json:"agent_id" jsonschema:"agent identifier"`
 	Runtime               string   `json:"runtime" jsonschema:"runtime identifier"`
 	Model                 string   `json:"model" jsonschema:"model identifier"`
@@ -30,17 +31,19 @@ type AgentVersionCreateInput struct {
 
 // AgentVersionPromoteInput is the input for agent_version_promote.
 type AgentVersionPromoteInput struct {
+	RequestID string `json:"request_id" jsonschema:"unique mutation request id"`
 	AgentID   string `json:"agent_id" jsonschema:"agent identifier"`
 	VersionID string `json:"version_id" jsonschema:"version identifier"`
 }
 
 // AgentVersionRollbackInput is the input for agent_version_rollback.
 type AgentVersionRollbackInput struct {
+	RequestID string `json:"request_id" jsonschema:"unique mutation request id"`
 	AgentID   string `json:"agent_id" jsonschema:"agent identifier"`
 	VersionID string `json:"version_id" jsonschema:"version identifier"`
 }
 
-func registerAgentVersionTools(server *mcp.Server, svc versionService, principal auth.Principal) {
+func registerAgentVersionTools(server *mcp.Server, svc versionService, principal auth.Principal, idempotency mutationIdempotencyStore) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agent_version_list",
 		Description: "列出 Agent 的版本谱系",
@@ -55,6 +58,8 @@ func registerAgentVersionTools(server *mcp.Server, svc versionService, principal
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agent_version_create",
 		Description: "为 Agent 创建一个新的 Draft 版本",
+	}, idempotentMutation(idempotency, "agent_version_create", principal, func(input AgentVersionCreateInput) string {
+		return input.RequestID
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AgentVersionCreateInput) (*mcp.CallToolResult, any, error) {
 		result, err := svc.CreateDraft(ctx, agentversionapp.CreateDraft{
 			TenantID:              principal.TenantID,
@@ -79,11 +84,13 @@ func registerAgentVersionTools(server *mcp.Server, svc versionService, principal
 			"version_number": result.Version.VersionNumber,
 			"status":         result.Version.Status,
 		}), nil, nil
-	})
+	}))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agent_version_promote",
 		Description: "将 Eligible 版本晋级为 Active",
+	}, idempotentMutation(idempotency, "agent_version_promote", principal, func(input AgentVersionPromoteInput) string {
+		return input.RequestID
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AgentVersionPromoteInput) (*mcp.CallToolResult, any, error) {
 		err := svc.Promote(ctx, agentversionapp.Promote{
 			TenantID:  principal.TenantID,
@@ -96,11 +103,13 @@ func registerAgentVersionTools(server *mcp.Server, svc versionService, principal
 			return mapDomainError(err, principal), nil, nil
 		}
 		return successResult(map[string]any{"promoted": true}), nil, nil
-	})
+	}))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agent_version_rollback",
 		Description: "回滚到指定的历史版本",
+	}, idempotentMutation(idempotency, "agent_version_rollback", principal, func(input AgentVersionRollbackInput) string {
+		return input.RequestID
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AgentVersionRollbackInput) (*mcp.CallToolResult, any, error) {
 		err := svc.Rollback(ctx, agentversionapp.Rollback{
 			TenantID:  principal.TenantID,
@@ -113,7 +122,7 @@ func registerAgentVersionTools(server *mcp.Server, svc versionService, principal
 			return mapDomainError(err, principal), nil, nil
 		}
 		return successResult(map[string]any{"rolled_back": true}), nil, nil
-	})
+	}))
 }
 
 // identityPrincipalFromAuth converts an auth principal to the identity package

@@ -3,13 +3,14 @@ package mcp
 import (
 	"context"
 
-	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // EvaluationRunStartInput is the input for evaluation_run_start.
 type EvaluationRunStartInput struct {
+	RequestID          string `json:"request_id" jsonschema:"unique mutation request id"`
 	AgentID            string `json:"agent_id" jsonschema:"agent identifier"`
 	VersionID          string `json:"version_id" jsonschema:"agent version identifier"`
 	BenchmarkSetID     string `json:"benchmark_set_id" jsonschema:"benchmark set identifier"`
@@ -22,10 +23,12 @@ type EvaluationRunGetInput struct {
 	EvaluationRunID string `json:"evaluation_run_id" jsonschema:"evaluation run identifier"`
 }
 
-func registerEvaluationTools(server *mcp.Server, svc evaluationService, principal auth.Principal) {
+func registerEvaluationTools(server *mcp.Server, svc evaluationService, principal auth.Principal, idempotency mutationIdempotencyStore) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "evaluation_run_start",
 		Description: "对指定版本启动评测运行",
+	}, idempotentMutation(idempotency, "evaluation_run_start", principal, func(input EvaluationRunStartInput) string {
+		return input.RequestID
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input EvaluationRunStartInput) (*mcp.CallToolResult, any, error) {
 		result, err := svc.StartEvaluationRun(ctx, evaluationapp.StartEvaluationRun{
 			TenantID:           principal.TenantID,
@@ -44,7 +47,7 @@ func registerEvaluationTools(server *mcp.Server, svc evaluationService, principa
 			"evaluation_run_id": result.EvaluationRun.ID(),
 			"status":            result.EvaluationRun.Status(),
 		}), nil, nil
-	})
+	}))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "evaluation_run_get",

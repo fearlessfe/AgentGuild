@@ -16,13 +16,14 @@ type ExperienceCandidateListInput struct {
 
 // ExperienceCandidateReviewInput is the input for experience_candidate_review.
 type ExperienceCandidateReviewInput struct {
+	RequestID   string `json:"request_id" jsonschema:"unique mutation request id"`
 	AgentID     string `json:"agent_id" jsonschema:"agent identifier"`
 	CandidateID string `json:"candidate_id" jsonschema:"experience candidate identifier"`
 	Action      string `json:"action" jsonschema:"approve or reject"`
 	Reason      string `json:"reason,omitempty" jsonschema:"rejection reason"`
 }
 
-func registerExperienceTools(server *mcp.Server, svc experienceService, principal auth.Principal) {
+func registerExperienceTools(server *mcp.Server, svc experienceService, principal auth.Principal, idempotency mutationIdempotencyStore) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "experience_candidate_list",
 		Description: "列出 Agent 的经验候选",
@@ -37,6 +38,8 @@ func registerExperienceTools(server *mcp.Server, svc experienceService, principa
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "experience_candidate_review",
 		Description: "审批或拒绝经验候选",
+	}, idempotentMutation(idempotency, "experience_candidate_review", principal, func(input ExperienceCandidateReviewInput) string {
+		return input.RequestID
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ExperienceCandidateReviewInput) (*mcp.CallToolResult, any, error) {
 		err := svc.ReviewCandidate(ctx, agentexperienceapp.ReviewCandidate{
 			TenantID:    principal.TenantID,
@@ -54,5 +57,5 @@ func registerExperienceTools(server *mcp.Server, svc experienceService, principa
 			"action":   input.Action,
 			"reviewed": true,
 		}), nil, nil
-	})
+	}))
 }

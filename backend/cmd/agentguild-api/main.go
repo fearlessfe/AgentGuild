@@ -91,7 +91,7 @@ func run() error {
 		return err
 	}
 
-	versionService, evaluationService, experienceService, err := buildVersionExperienceRuntime(pool)
+	versionService, evaluationService, experienceService, err := buildVersionExperienceRuntime(cfg, pool)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build review validation provider: %w", err)
 	}
-	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), submissionRepository, diffProvider, validationProvider, reviewapp.Options{})
+	integrityChecker, err := reviewapp.NewGitSubmissionIntegrityChecker(submissionRepository, gitRuntime.repositoryResolver)
+	if err != nil {
+		return fmt.Errorf("build review integrity checker: %w", err)
+	}
+	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), submissionRepository, diffProvider, validationProvider, reviewapp.Options{Integrity: integrityChecker})
 	if err != nil {
 		return err
 	}
@@ -187,7 +191,8 @@ func run() error {
 	}
 	restHandler := resttransport.NewServer(service, verifier, restOptions...).Router()
 
-	mcpOptions := make([]mcptransport.Option, 0, 7)
+	mcpOptions := make([]mcptransport.Option, 0, 8)
+	mcpOptions = append(mcpOptions, mcptransport.WithIdempotencyStore(store))
 	if versionService != nil {
 		mcpOptions = append(mcpOptions, mcptransport.WithVersionService(versionService))
 	}
@@ -269,7 +274,7 @@ func githubManifestOptions(cfg config.Config) gitapp.ManifestOptions {
 	}
 }
 
-func buildVersionExperienceRuntime(pool *pgxpool.Pool) (*agentversionapp.VersionService, *evaluationapp.EvaluationService, *agentexperienceapp.CandidateService, error) {
+func buildVersionExperienceRuntime(cfg config.Config, pool *pgxpool.Pool) (*agentversionapp.VersionService, *evaluationapp.EvaluationService, *agentexperienceapp.CandidateService, error) {
 	avStore := agentversionpostgres.NewStore(pool)
 	versionRepo := agentversionpostgres.NewVersionRepository(pool)
 	evalProvider := agentversionpostgres.NewEvaluationRunProvider(pool)
@@ -284,7 +289,17 @@ func buildVersionExperienceRuntime(pool *pgxpool.Pool) (*agentversionapp.Version
 	bsRepo := evaluationpostgres.NewBenchmarkSetRepository(pool)
 	runRepo := evaluationpostgres.NewEvaluationRunRepository(pool)
 	versionLifecycle := agentversionpostgres.NewVersionLifecycleAdapter(pool)
-	executor := evaluationapp.NewFixedBenchmarkExecutor()
+	// Evaluation is opt-in via EVALUATION_EXECUTOR: unset means evaluation runs
+	// fail closed with evaluation_unavailable; "fixed" selects the fixed-pass
+	// stub for local development and demos only.
+	var executor evaluationapp.BenchmarkExecutor
+	if cfg.EvaluationExecutor == config.EvaluationExecutorFixed {
+		slog.Warn("EVALUATION_EXECUTOR=fixed: benchmark evaluation uses a fixed-pass stub; results are not a real quality gate")
+		executor = evaluationapp.NewFixedBenchmarkExecutor()
+	} else {
+		slog.Info("EVALUATION_EXECUTOR unset: evaluation runs are disabled and will fail closed")
+		executor = evaluationapp.NewRejectingBenchmarkExecutor()
+	}
 	evPolicy := evaluationapp.NewPolicy(versionRepo)
 	evaluationService, err := evaluationapp.NewEvaluationService(evStore, bsRepo, runRepo, versionLifecycle, executor, evPolicy, evaluationapp.EvaluationOptions{})
 	if err != nil {
@@ -293,8 +308,8 @@ func buildVersionExperienceRuntime(pool *pgxpool.Pool) (*agentversionapp.Version
 
 	axStore := agentexperiencepostgres.NewStore(pool)
 	candidateRepo := agentexperiencepostgres.NewExperienceCandidateRepository(pool)
-	submissionStore := agentexperienceapp.NewFixedSubmissionStore(nil)
-	executionStore := agentexperienceapp.NewFixedExecutionStore(nil)
+	submissionStore := agentexperiencepostgres.NewSubmissionStore(pool)
+	executionStore := agentexperiencepostgres.NewExecutionStore(pool)
 	classifier := agentexperiencedomain.NewRuleBasedSensitivityPolicy()
 	axPolicy := agentexperienceapp.NewPolicy(versionRepo)
 	experienceService, err := agentexperienceapp.NewCandidateService(axStore, candidateRepo, submissionStore, executionStore, axPolicy, classifier, agentexperienceapp.CandidateOptions{})
@@ -634,6 +649,20 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build submission service: %w", err)
 	}
+	// Enforce the task deadline directly on the submission path, aligned with
+	// the heartbeat guard, instead of relying on the reaper alone.
+	submissionService.SetTaskDeadlineResolver(gitapp.TaskDeadlineResolverFunc(func(ctx context.Context, tenantID, taskID string) (time.Time, error) {
+		var deadline time.Time
+		err := service.WithTx(ctx, func(tx application.Tx) error {
+			task, err := tx.GetTask(ctx, tenantID, taskID)
+			if err != nil {
+				return err
+			}
+			deadline = task.Deadline
+			return nil
+		})
+		return deadline, err
+	}))
 	gitProxy, err := gitproxy.NewHandler(gitStore, repositoryResolver)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build git proxy: %w", err)

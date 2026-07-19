@@ -934,7 +934,7 @@ func (f *fakeCredentialService) RevokeCredential(_ context.Context, p gitapp.Pri
 func newMCPServerWithAppAndCredentials(t *testing.T, app *fakeApplication, creds *fakeCredentialService) *mcp.Server {
 	t.Helper()
 	verifier := &fakeVerifier{principal: testPrincipal("tasks:claim", "tasks:execute", "tasks:read", "tasks:publish", "tasks:cancel")}
-	s := NewServer(app, verifier, WithCredentialService(creds))
+	s := NewServer(app, verifier, WithCredentialService(creds), WithIdempotencyStore(newFakeMutationIdempotencyStore()))
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req = req.WithContext(auth.WithPrincipal(req.Context(), verifier.principal))
 	return s.mcpServer(req)
@@ -1031,7 +1031,7 @@ func TestCredentialRevokeToolMapsToService(t *testing.T) {
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "credential_revoke",
-		Arguments: map[string]any{"execution_id": "exe-1"},
+		Arguments: map[string]any{"request_id": "cred-revoke-1", "execution_id": "exe-1"},
 	})
 	require.NoError(t, err)
 	require.False(t, res.IsError)

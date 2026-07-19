@@ -109,12 +109,14 @@ type GetCredentialInput struct {
 
 // RevokeCredentialInput 是 credential_revoke 工具的输入。
 type RevokeCredentialInput struct {
+	RequestID   string `json:"request_id" jsonschema:"unique mutation request id"`
 	ExecutionID string `json:"execution_id" jsonschema:"execution identifier"`
 }
 
 // registerTools 注册任务生命周期、Submission、Credential 与代码评审 MCP 工具。
 // Principal 已按请求注入，每个 handler 只调用共享 applicationService。
-func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, credentials credentialService, reviewSvc reviewService, reputationSvc ReputationService, principal auth.Principal) {
+// idempotency 为变更工具提供与 REST 一致的幂等语义；credential_revoke 等变更工具依赖它。
+func registerTools(server *mcp.Server, svc applicationService, submissions submissionService, credentials credentialService, reviewSvc reviewService, reputationSvc ReputationService, principal auth.Principal, idempotency mutationIdempotencyStore) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "task_publish",
 		Description: "发布新任务",
@@ -321,13 +323,15 @@ func registerTools(server *mcp.Server, svc applicationService, submissions submi
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "credential_revoke",
 			Description: "撤销执行关联的凭证",
+		}, idempotentMutation(idempotency, "credential_revoke", principal, func(input RevokeCredentialInput) string {
+			return input.RequestID
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input RevokeCredentialInput) (*mcp.CallToolResult, any, error) {
 			result, err := credentials.RevokeCredential(ctx, gitPrincipal(principal), gitapp.RevokeCredential{ExecutionID: input.ExecutionID})
 			if err != nil {
 				return mapDomainError(err, principal), nil, nil
 			}
 			return successResult(result), nil, nil
-		})
+		}))
 	}
 	wrapSchemaValidationErrors(server)
 }
