@@ -8,7 +8,9 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,6 +55,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	username, token, ok := r.BasicAuth()
 	if !ok || username != "x-access-token" || token == "" {
+		// 不记录 token 本体，只记录定位所需的非敏感字段。
+		slog.WarnContext(r.Context(), "git proxy rejected request",
+			"tenant", tenantID, "credential", credentialID, "repo", repo,
+			"reason", "missing or malformed basic auth")
 		w.Header().Set("WWW-Authenticate", `Basic realm="AgentGuild Git"`)
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
@@ -60,10 +66,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	record, err := h.authorize(r.Context(), tenantID, credentialID, repo, token)
 	if err != nil {
+		attrs := []any{"tenant", tenantID, "credential", credentialID, "repo", repo, "reason", err.Error()}
+		if record != nil {
+			attrs = append(attrs, "execution", record.ExecutionID, "branch", record.Branch)
+		}
+		slog.WarnContext(r.Context(), "git proxy rejected credential", attrs...)
 		http.Error(w, "credential is invalid or expired", http.StatusUnauthorized)
 		return
 	}
 	if !allowedGitRequest(r.Method, servicePath, r.URL.Query().Get("service")) {
+		slog.WarnContext(r.Context(), "git proxy rejected request",
+			"tenant", tenantID, "credential", credentialID, "execution", record.ExecutionID,
+			"repo", repo, "method", r.Method, "path", servicePath, "service", r.URL.Query().Get("service"),
+			"reason", "git operation is not allowed")
 		http.Error(w, "git operation is not allowed", http.StatusForbidden)
 		return
 	}
@@ -72,6 +87,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && servicePath == "/git-receive-pack" {
 		body, err = enforceReceivePackRef(r.Body, "refs/heads/"+record.Branch)
 		if err != nil {
+			slog.WarnContext(r.Context(), "git proxy rejected push",
+				"tenant", tenantID, "credential", credentialID, "execution", record.ExecutionID,
+				"repo", repo, "allowed_ref", "refs/heads/"+record.Branch,
+				"reason", err.Error())
 			http.Error(w, "push updates a ref outside the execution branch", http.StatusForbidden)
 			return
 		}
@@ -115,6 +134,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, response.Body)
 }
 
+// authorize 校验凭证。校验失败时返回加载到的凭证（如有）与具体原因，
+// 便于拒绝路径输出结构化审计日志；对客户端始终返回统一的 401 文案。
 func (h *Handler) authorize(ctx context.Context, tenantID, credentialID, repo, token string) (*gitapp.CredentialRecord, error) {
 	var record *gitapp.CredentialRecord
 	err := h.store.WithTx(ctx, func(tx gitapp.Tx) error {
@@ -122,13 +143,24 @@ func (h *Handler) authorize(ctx context.Context, tenantID, credentialID, repo, t
 		record, err = tx.Credentials().GetByID(ctx, tenantID, credentialID)
 		return err
 	})
-	if err != nil || record == nil || record.Repo != repo || record.Status != gitdomain.CredentialStatusActive ||
-		record.RevokedAt != nil || !time.Now().Before(record.ExpiresAt) {
-		return nil, errors.New("credential is inactive")
+	if err != nil {
+		return nil, fmt.Errorf("credential lookup failed: %w", err)
+	}
+	if record == nil {
+		return nil, errors.New("credential not found")
+	}
+	if record.Repo != repo {
+		return record, errors.New("credential repo mismatch")
+	}
+	if record.Status != gitdomain.CredentialStatusActive || record.RevokedAt != nil {
+		return record, errors.New("credential is inactive")
+	}
+	if !time.Now().Before(record.ExpiresAt) {
+		return record, errors.New("credential is expired")
 	}
 	hash := sha256.Sum256([]byte(token))
 	if len(record.TokenHash) != len(hash) || subtle.ConstantTimeCompare(record.TokenHash, hash[:]) != 1 {
-		return nil, errors.New("credential token mismatch")
+		return record, errors.New("credential token mismatch")
 	}
 	return record, nil
 }

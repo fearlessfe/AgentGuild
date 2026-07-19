@@ -16,6 +16,7 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 	if err := s.policy.Require(principal, "tasks:claim"); err != nil {
 		return result, err
 	}
+	var rejection *rejectionAudit
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
@@ -46,6 +47,7 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 		}
 		task := &domain.Task{ID: taskRecord.ID, TenantID: taskRecord.TenantID, PublisherID: taskRecord.PublisherAgentVersionID, Deadline: taskRecord.Deadline, Status: taskRecord.Status, ClaimedBy: taskRecord.ClaimedBy}
 		if err := task.Apply(domain.IntentClaim, domain.Actor{Type: domain.ActorAgent, ID: principal.AgentVersionID}, now); err != nil {
+			rejection = &rejectionAudit{taskID: taskRecord.ID, actorType: domain.ActorAgent, actorID: principal.AgentVersionID, intent: "claim", fromState: string(taskRecord.Status), reason: domain.CodeOf(err)}
 			return err
 		}
 		execution, err := domain.NewLeasedExecution(s.newID(), task.ID, task.TenantID, principal.AgentVersionID, now, 1)
@@ -73,6 +75,9 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 		}
 		return complete(ctx, tx, key, idem.OwnerToken, result)
 	})
+	if err != nil && rejection != nil {
+		auditRejection(ctx, s.store, principal.TenantID, *rejection)
+	}
 	return result, err
 }
 
@@ -104,6 +109,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
 		return result, err
 	}
+	var rejection *rejectionAudit
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
@@ -133,6 +139,8 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 			return err
 		}
 		if execution.AgentID != principal.AgentVersionID {
+			// 持有者保护：对外隐藏执行是否存在，但拒绝尝试本身需要审计。
+			rejection = &rejectionAudit{taskID: execution.TaskID, executionID: execution.ID, actorType: domain.ActorAgent, actorID: principal.AgentVersionID, intent: intent, fromState: string(execution.Status), reason: "not_found"}
 			return notFound()
 		}
 		taskRecord, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
@@ -144,12 +152,17 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		}
 		from := execution.Status
 		if err := mutate(execution, now, generation); err != nil {
+			// 仅审计越权与非法迁移；租约过期、参数错误属于正常重试/客户端错误，不记录。
+			if code := domain.CodeOf(err); code == "state_conflict" || code == "forbidden" {
+				rejection = &rejectionAudit{taskID: execution.TaskID, executionID: execution.ID, actorType: domain.ActorAgent, actorID: principal.AgentVersionID, intent: intent, fromState: string(from), reason: code}
+			}
 			return err
 		}
 		var startedTask *TaskRecord
 		if intent == "start" {
 			task := &domain.Task{ID: taskRecord.ID, TenantID: taskRecord.TenantID, PublisherID: taskRecord.PublisherAgentVersionID, Deadline: taskRecord.Deadline, Status: taskRecord.Status, ClaimedBy: taskRecord.ClaimedBy}
 			if err := task.Apply(domain.IntentStart, domain.Actor{Type: domain.ActorAgent, ID: principal.AgentVersionID}, now); err != nil {
+				rejection = &rejectionAudit{taskID: execution.TaskID, executionID: execution.ID, actorType: domain.ActorAgent, actorID: principal.AgentVersionID, intent: intent, fromState: string(taskRecord.Status), reason: domain.CodeOf(err)}
 				return err
 			}
 			taskRecord.Status = task.Status
@@ -177,6 +190,9 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		}
 		return complete(ctx, tx, key, idem.OwnerToken, result)
 	})
+	if err != nil && rejection != nil {
+		auditRejection(ctx, s.store, principal.TenantID, *rejection)
+	}
 	return result, err
 }
 

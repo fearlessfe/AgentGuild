@@ -256,8 +256,15 @@ func TestGetIsTenantScopedAndCancelAtomicallyCancelsActiveExecution(t *testing.T
 	if err != nil || cancelled.Data.Status != domain.TaskCancelled || tx.executions["execution-1"].Status != domain.ExecutionCancelled {
 		t.Fatalf("CancelTask()=%#v execution=%#v err=%v", cancelled, tx.executions["execution-1"], err)
 	}
-	if len(tx.events) != 1 || len(tx.outbox) != 1 {
-		t.Fatalf("cancel audit/outbox: %d/%d", len(tx.events), len(tx.outbox))
+	// 越权取消（other-publisher）会留下 reject:cancel 审计事件；成功取消只写一条迁移事件。
+	var transitions int
+	for _, event := range tx.events {
+		if !strings.HasPrefix(event.Intent, application.RejectedIntentPrefix) {
+			transitions++
+		}
+	}
+	if transitions != 1 || len(tx.outbox) != 1 {
+		t.Fatalf("cancel audit/outbox: %d/%d", transitions, len(tx.outbox))
 	}
 	if tx.outbox[0].EventType != "task.cancelled" {
 		t.Fatalf("cancel outbox type = %q, want task.cancelled", tx.outbox[0].EventType)
@@ -728,17 +735,18 @@ func (tx *fakeTx) GetLatestExecutionEvent(_ context.Context, _, executionID stri
 		return application.TaskEventSummary{}, tx.latestEventErr
 	}
 	for i := len(tx.events) - 1; i >= 0; i-- {
-		if tx.events[i].ExecutionID == executionID {
+		// 与 postgres 实现一致：拒绝审计事件（reject: 前缀）不参与摘要。
+		if tx.events[i].ExecutionID == executionID && !strings.HasPrefix(tx.events[i].Intent, application.RejectedIntentPrefix) {
 			return application.TaskEventSummary{ID: tx.events[i].CreatedAt.UnixNano(), TenantID: tx.events[i].TenantID, TaskID: tx.events[i].TaskID, ExecutionID: tx.events[i].ExecutionID, ActorType: tx.events[i].ActorType, ActorID: tx.events[i].ActorID, Intent: tx.events[i].Intent, FromState: tx.events[i].FromState, ToState: tx.events[i].ToState, CreatedAt: tx.events[i].CreatedAt}, nil
 		}
 	}
 	return application.TaskEventSummary{}, nil
 }
 
-func (tx *fakeTx) Reviews() application.ReviewRepository      { return nil }
+func (tx *fakeTx) Reviews() application.ReviewRepository           { return nil }
 func (tx *fakeTx) LineComments() application.LineCommentRepository { return nil }
-func (tx *fakeTx) Rubrics() application.RubricRepository      { return nil }
-func (tx *fakeTx) Reviewers() application.ReviewerRepository  { return nil }
+func (tx *fakeTx) Rubrics() application.RubricRepository           { return nil }
+func (tx *fakeTx) Reviewers() application.ReviewerRepository       { return nil }
 
 func (tx *fakeTx) UpsertReputationProjection(context.Context, reputationapp.ProjectionRecord) error {
 	return nil

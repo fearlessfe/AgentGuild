@@ -76,6 +76,7 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 	if err := s.policy.Require(principal, "tasks:cancel"); err != nil {
 		return result, err
 	}
+	var rejection *rejectionAudit
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
@@ -105,12 +106,15 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 			return err
 		}
 		if record.PublisherAgentVersionID != principal.AgentVersionID {
+			// 持有者保护：对外隐藏任务归属，但越权取消尝试需要审计。
+			rejection = &rejectionAudit{taskID: record.ID, actorType: domain.ActorPublisher, actorID: principal.AgentVersionID, intent: "cancel", fromState: string(record.Status), reason: "not_found"}
 			return notFound()
 		}
 		task := &domain.Task{ID: record.ID, TenantID: record.TenantID, PublisherID: record.PublisherAgentVersionID, Deadline: record.Deadline, Status: record.Status, ClaimedBy: record.ClaimedBy}
 		from := task.Status
 		actor := domain.Actor{Type: domain.ActorPublisher, ID: principal.AgentVersionID}
 		if err := task.Apply(domain.IntentCancel, actor, now); err != nil {
+			rejection = &rejectionAudit{taskID: record.ID, actorType: domain.ActorPublisher, actorID: principal.AgentVersionID, intent: "cancel", fromState: string(record.Status), reason: domain.CodeOf(err)}
 			return err
 		}
 		executions, err := tx.ListActiveExecutions(ctx, principal.TenantID, record.ID)
@@ -150,6 +154,9 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 		}
 		return complete(ctx, tx, key, idem.OwnerToken, result)
 	})
+	if err != nil && rejection != nil {
+		auditRejection(ctx, s.store, principal.TenantID, *rejection)
+	}
 	return result, err
 }
 

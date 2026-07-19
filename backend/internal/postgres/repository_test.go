@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	"agentguild.dev/agentguild/backend/internal/testdb"
@@ -472,6 +473,122 @@ func TestTransactionRollsBackTaskIdempotencyAuditAndOutbox(t *testing.T) {
 	}
 	if status != "open" || version != 0 {
 		t.Fatalf("task was not rolled back: status=%s version=%d", status, version)
+	}
+}
+
+// TestGetLatestExecutionEventSkipsRejectedIntentAudits 验证拒绝审计事件
+// 不参与“最近一次迁移”摘要，但仍出现在审计查询中。
+func TestGetLatestExecutionEventSkipsRejectedIntentAudits(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-1", "task-1")
+	insertExecution(t, db, "tenant-1", "exe-1", "task-1", "running")
+	store := postgres.NewStore(db)
+	ctx := context.Background()
+
+	err := store.WithTx(ctx, func(tx application.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+		normal := application.TaskEvent{
+			TenantID: "tenant-1", TaskID: "task-1", ExecutionID: "exe-1",
+			ActorType: "agent", ActorID: "agent-1", Intent: "heartbeat",
+			FromState: "running", ToState: "running", Payload: []byte(`{}`), CreatedAt: now,
+		}
+		if err := tx.AppendTaskEvent(ctx, normal); err != nil {
+			return err
+		}
+		rejected := application.TaskEvent{
+			TenantID: "tenant-1", TaskID: "task-1", ExecutionID: "exe-1",
+			ActorType: "agent", ActorID: "intruder", Intent: "reject:heartbeat",
+			FromState: "running", ToState: "running", Reason: "not_found",
+			Payload: []byte(`{}`), CreatedAt: now.Add(time.Second),
+		}
+		return tx.AppendTaskEvent(ctx, rejected)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.WithTx(ctx, func(tx application.Tx) error {
+		latest, err := tx.GetLatestExecutionEvent(ctx, "tenant-1", "exe-1")
+		if err != nil {
+			return err
+		}
+		if latest.Intent != "heartbeat" || latest.ActorID != "agent-1" {
+			t.Fatalf("latest event polluted by rejection audit: %#v", latest)
+		}
+		events, err := tx.ListTaskEvents(ctx, "tenant-1", "task-1", 0, 10)
+		if err != nil {
+			return err
+		}
+		var found bool
+		for _, event := range events {
+			if event.Intent == "reject:heartbeat" && event.ActorID == "intruder" {
+				found = true
+			}
+		}
+		if !found || len(events) != 2 {
+			t.Fatalf("audit query events=%#v", events)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRejectedTransitionAuditSurvivesBusinessRollback 验证被拒绝的越权迁移
+// 在业务事务回滚后仍留下持久审计事件（独立事务写入）。
+func TestRejectedTransitionAuditSurvivesBusinessRollback(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedTask(t, db, "tenant-1", "task-1")
+	insertExecution(t, db, "tenant-1", "exe-1", "task-1", "running")
+	svc, err := application.NewService(postgres.NewStore(db), application.Options{
+		CursorSecret: []byte("01234567890123456789012345678901"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	intruder := auth.Principal{TenantID: "tenant-1", AgentID: "intruder", AgentVersionID: "intruder-v1", Scopes: []string{"tasks:execute"}}
+	_, err = svc.HeartbeatExecution(context.Background(), intruder, application.HeartbeatExecution{
+		RequestID: "beat-1", ExecutionID: "exe-1", LeaseGeneration: 1,
+	})
+	if domain.CodeOf(err) != "not_found" {
+		t.Fatalf("heartbeat error=%v, want not_found", err)
+	}
+
+	var actorType, actorID, intent, fromState, toState, reason string
+	var hasExecution bool
+	err = db.QueryRow(context.Background(), `
+		SELECT actor_type, actor_id, intent, from_state, to_state, reason, execution_id IS NOT NULL
+		FROM task_events WHERE tenant_id='tenant-1' AND task_id='task-1'`).Scan(
+		&actorType, &actorID, &intent, &fromState, &toState, &reason, &hasExecution)
+	if err != nil {
+		t.Fatalf("rejection audit event missing: %v", err)
+	}
+	if actorType != "agent" || actorID != "intruder-v1" || intent != "reject:heartbeat" ||
+		fromState != "running" || toState != "running" || reason != "not_found" || !hasExecution {
+		t.Fatalf("audit event actor=%s/%s intent=%s from=%s to=%s reason=%s hasExecution=%v",
+			actorType, actorID, intent, fromState, toState, reason, hasExecution)
+	}
+	for table, want := range map[string]int64{"outbox_events": 0, "idempotency_records": 0} {
+		var got int64
+		if err := db.QueryRow(context.Background(), "SELECT count(*) FROM "+table+" WHERE tenant_id='tenant-1'").Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s count=%d want=%d（拒绝审计不得写入 outbox）", table, got, want)
+		}
+	}
+	var status string
+	if err := db.QueryRow(context.Background(),
+		`SELECT status FROM executions WHERE tenant_id='tenant-1' AND id='exe-1'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "running" {
+		t.Fatalf("execution mutated by rejected heartbeat: %s", status)
 	}
 }
 

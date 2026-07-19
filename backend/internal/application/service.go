@@ -97,11 +97,13 @@ func NewCoreExecutionNotifier(store Store) *CoreExecutionNotifier {
 }
 
 // Notify applies the state intent to the execution in a single transaction.
+// 被领域状态机拒绝的迁移会在独立事务中追加审计事件。
 func (n *CoreExecutionNotifier) Notify(ctx context.Context, cmd gitapp.ExecutionStateCommand, now time.Time) error {
 	if cmd.TenantID == "" || cmd.ExecutionID == "" {
 		return domain.ErrForbidden
 	}
-	return n.store.WithTx(ctx, func(tx Tx) error {
+	var rejection *rejectionAudit
+	err := n.store.WithTx(ctx, func(tx Tx) error {
 		execution, version, err := tx.GetExecution(ctx, cmd.TenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
@@ -110,6 +112,7 @@ func (n *CoreExecutionNotifier) Notify(ctx context.Context, cmd gitapp.Execution
 			return nil
 		}
 		if err := execution.Apply(cmd.Intent, cmd.Actor, now); err != nil {
+			rejection = &rejectionAudit{taskID: execution.TaskID, executionID: execution.ID, actorType: cmd.Actor.Type, actorID: cmd.Actor.ID, intent: intentName(cmd.Intent), fromState: string(execution.Status), reason: domain.CodeOf(err)}
 			return err
 		}
 		updated, err := tx.UpdateExecution(ctx, execution, version)
@@ -121,6 +124,10 @@ func (n *CoreExecutionNotifier) Notify(ctx context.Context, cmd gitapp.Execution
 		}
 		return nil
 	})
+	if err != nil && rejection != nil {
+		auditRejection(ctx, n.store, cmd.TenantID, *rejection)
+	}
+	return err
 }
 
 func executionTransitionAlreadyApplied(status domain.ExecutionStatus, intent domain.Intent) bool {

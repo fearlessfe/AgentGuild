@@ -34,11 +34,12 @@ func (tx *Tx) AppendOutboxEvent(ctx context.Context, event application.OutboxEve
 func (tx *Tx) GetLatestExecutionEvent(ctx context.Context, tenantID, executionID string) (application.TaskEventSummary, error) {
 	var e application.TaskEventSummary
 	var executionIDPtr *string
+	// 拒绝审计事件（reject: 前缀）不是状态迁移，不参与“最近一次迁移”摘要。
 	err := tx.tx.QueryRow(ctx, `
 		SELECT id, tenant_id, task_id, execution_id, actor_type, actor_id, intent,
 		       from_state, to_state, created_at
 		FROM task_events
-		WHERE tenant_id=$1 AND execution_id=$2
+		WHERE tenant_id=$1 AND execution_id=$2 AND intent NOT LIKE 'reject:%'
 		ORDER BY id DESC
 		LIMIT 1`,
 		tenantID, executionID,
