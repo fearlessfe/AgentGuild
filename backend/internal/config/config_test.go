@@ -233,6 +233,27 @@ func TestLoadNormalizesGitHubAppPublicBaseURL(t *testing.T) {
 	require.Equal(t, "https://agentguild.example.com", cfg.GitHubAppPublicBaseURL)
 }
 
+func TestLoadValidatesEvaluationExecutor(t *testing.T) {
+	// Unset means evaluation runs are disabled (fail closed at execution time).
+	env := validEnv()
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "", cfg.EvaluationExecutor)
+
+	// "fixed" explicitly selects the fixed-pass stub for local development.
+	env = validEnv()
+	env["EVALUATION_EXECUTOR"] = "fixed"
+	cfg, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, config.EvaluationExecutorFixed, cfg.EvaluationExecutor)
+
+	// Any other value is a startup configuration error.
+	env = validEnv()
+	env["EVALUATION_EXECUTOR"] = "real-runner"
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "EVALUATION_EXECUTOR")
+}
+
 func validEnv() map[string]string {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

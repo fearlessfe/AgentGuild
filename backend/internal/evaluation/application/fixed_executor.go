@@ -6,6 +6,10 @@ import (
 	"agentguild.dev/agentguild/backend/internal/evaluation/domain"
 )
 
+// FixedBenchmarkExecutorID identifies the fixed-pass stub executor in run
+// summaries. Its presence marks the evidence as stub-produced.
+const FixedBenchmarkExecutorID = "fixed-stub"
+
 // FixedBenchmarkExecutor is a synchronous stub executor that returns a passing
 // result for every task in the benchmark set. It is intended for local
 // development and tests while a real benchmark runner is not yet wired.
@@ -22,6 +26,9 @@ func NewFixedBenchmarkExecutor() *FixedBenchmarkExecutor {
 	}
 }
 
+// ExecutorID returns the stub executor identifier recorded in run summaries.
+func (e *FixedBenchmarkExecutor) ExecutorID() string { return FixedBenchmarkExecutorID }
+
 // Execute returns a passing task result for every task in the benchmark set.
 func (e *FixedBenchmarkExecutor) Execute(_ context.Context, benchmarkSet *domain.BenchmarkSet, environmentDigest string) ([]domain.TaskResult, error) {
 	tasks := benchmarkSet.Tasks()
@@ -32,9 +39,9 @@ func (e *FixedBenchmarkExecutor) Execute(_ context.Context, benchmarkSet *domain
 			Score:   e.Score,
 			Passed:  e.Score >= e.PassThreshold,
 			Details: map[string]any{
-				"stub":              true,
-				"task_ref":          task.TaskRef,
-				"threshold":         e.PassThreshold,
+				"stub":               true,
+				"task_ref":           task.TaskRef,
+				"threshold":          e.PassThreshold,
 				"environment_digest": environmentDigest,
 			},
 		})

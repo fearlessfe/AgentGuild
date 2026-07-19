@@ -166,6 +166,7 @@ func (s *EvaluationService) StartEvaluationRun(
 			return execErr
 		}
 		thresholdResults, summary := domain.ApplyScoringRule(taskResults, ruleVersion)
+		summary.Executor = s.executor.ExecutorID()
 
 		if err := run.CompleteAt(thresholdResults, summary, now); err != nil {
 			return err

@@ -29,6 +29,7 @@ type Config struct {
 	ValidationWorkerInterval, ValidationLease              time.Duration
 	ValidationMaxAttempts                                  int
 	ValidationSandboxImage                                 string
+	EvaluationExecutor                                     string
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
@@ -51,6 +52,11 @@ type Config struct {
 
 type LookupEnv func(string) string
 
+// EvaluationExecutorFixed selects the fixed-pass stub benchmark executor. It is
+// intended for local development and demos only; any other executor value is a
+// configuration error, and an unset value disables evaluation execution.
+const EvaluationExecutorFixed = "fixed"
+
 func Load(get LookupEnv) (Config, error) {
 	cfg := Config{
 		DatabaseURL: get("DATABASE_URL"), HTTPAddr: value(get, "HTTP_ADDR", ":8080"), CursorSecret: get("CURSOR_SECRET"),
@@ -66,6 +72,7 @@ func Load(get LookupEnv) (Config, error) {
 		ReviewSeedTenantID:           get("REVIEW_SEED_TENANT_ID"),
 		ReviewSeedReviewerUserID:     value(get, "REVIEW_SEED_REVIEWER_USER_ID", "default-reviewer"),
 		ValidationSandboxImage:       get("VALIDATION_SANDBOX_IMAGE"),
+		EvaluationExecutor:           strings.ToLower(strings.TrimSpace(get("EVALUATION_EXECUTOR"))),
 		GitHubAppPublicBaseURL:       get("GITHUB_APP_PUBLIC_BASE_URL"),
 		GitHubAppManifestStateSecret: get("SESSION_COOKIE_SECRET"),
 		GitHubAllowedHosts:           splitCSV(get("GITHUB_ALLOWED_HOSTS")),
@@ -147,6 +154,11 @@ func Load(get LookupEnv) (Config, error) {
 		cfg.ValidationMaxAttempts = 3
 	} else {
 		cfg.ValidationMaxAttempts = int(maxAttempts)
+	}
+	switch cfg.EvaluationExecutor {
+	case "", EvaluationExecutorFixed:
+	default:
+		return Config{}, fmt.Errorf("EVALUATION_EXECUTOR must be %q or unset (evaluation execution disabled)", EvaluationExecutorFixed)
 	}
 	for _, required := range [][2]string{{"DATABASE_URL", cfg.DatabaseURL}, {"CURSOR_SECRET", cfg.CursorSecret}} {
 		if required[1] == "" {

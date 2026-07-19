@@ -31,6 +31,9 @@ var (
 	ErrStateConflict   = &Error{Code: "state_conflict", Message: "state transition is not allowed"}
 	ErrNotFound        = &Error{Code: "not_found", Message: "resource not found"}
 	ErrForbidden       = &Error{Code: "forbidden", Message: "actor is not allowed to perform this action"}
+	// ErrEvaluationUnavailable is returned when no benchmark executor is
+	// configured (EVALUATION_EXECUTOR unset), failing evaluation runs closed.
+	ErrEvaluationUnavailable = &Error{Code: "evaluation_unavailable", Message: "evaluation executor is not configured; set EVALUATION_EXECUTOR to enable evaluation runs"}
 )
 
 func invalidArgument(field string) error {

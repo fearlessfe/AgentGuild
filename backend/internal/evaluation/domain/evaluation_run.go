@@ -38,11 +38,14 @@ type ThresholdResult struct {
 
 // EvaluationSummary aggregates metrics produced by the scoring rule.
 type EvaluationSummary struct {
-	PassRate       float64        `json:"pass_rate"`
-	AvgLatencyMs   float64        `json:"avg_latency_ms"`
-	CostCents      int64          `json:"cost_cents"`
-	SecurityPassed bool           `json:"security_passed"`
-	Extra          map[string]any `json:"extra,omitempty"`
+	PassRate       float64 `json:"pass_rate"`
+	AvgLatencyMs   float64 `json:"avg_latency_ms"`
+	CostCents      int64   `json:"cost_cents"`
+	SecurityPassed bool    `json:"security_passed"`
+	// Executor identifies the benchmark executor that produced the task
+	// results, so reviewers can tell stub-produced evidence from real runs.
+	Executor string         `json:"executor,omitempty"`
+	Extra    map[string]any `json:"extra,omitempty"`
 }
 
 // NewEvaluationRun creates a running evaluation run. It freezes the version and

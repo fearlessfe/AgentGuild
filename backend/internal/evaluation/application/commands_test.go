@@ -104,6 +104,8 @@ type fakeExecutor struct {
 	err     error
 }
 
+func (f *fakeExecutor) ExecutorID() string { return "fake" }
+
 func (f *fakeExecutor) Execute(ctx context.Context, benchmarkSet *domain.BenchmarkSet, environmentDigest string) ([]domain.TaskResult, error) {
 	return f.results, f.err
 }
@@ -210,6 +212,96 @@ func TestStartEvaluationRunPassedMarksEligible(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	require.Equal(t, domain.StatusPassed, runs[0].Status())
+}
+
+func TestStartEvaluationRunRecordsExecutorIdentity(t *testing.T) {
+	db := testdb.StartPostgres(t)
+
+	tenantID := "tenant-executor-id"
+	agentID := "agent-executor-id"
+	ownerID := "owner"
+	versionID := randomID()
+	insertAgent(t, db, tenantID, agentID, ownerID)
+	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
+
+	versions := newFakeVersionLifecycle()
+	versions.AddVersion(&application.VersionInfo{ID: versionID, TenantID: tenantID, AgentID: agentID, Status: "draft"})
+
+	svc := newService(t, db, application.NewFixedBenchmarkExecutor(), versions)
+
+	bsResp, err := svc.CreateBenchmarkSet(context.Background(), application.CreateBenchmarkSet{
+		TenantID:  tenantID,
+		Name:      "Set",
+		Tasks:     []domain.BenchmarkTask{{TaskRef: "task-1"}},
+		CreatedBy: ownerID,
+		IsAdmin:   true,
+	})
+	require.NoError(t, err)
+
+	runResp, err := svc.StartEvaluationRun(context.Background(), application.StartEvaluationRun{
+		TenantID:           tenantID,
+		AgentID:            agentID,
+		VersionID:          versionID,
+		BenchmarkSetID:     bsResp.BenchmarkSet.ID(),
+		EnvironmentDigest:  "env",
+		ScoringRuleVersion: domain.ScoringRuleVersionV1,
+		ActorID:            ownerID,
+		IsAdmin:            false,
+	})
+	require.NoError(t, err)
+	require.True(t, runResp.EvaluationRun.IsPassed())
+	require.Equal(t, application.FixedBenchmarkExecutorID, runResp.EvaluationRun.Summary().Executor)
+
+	// The executor identity must survive persistence so reviewers can tell the
+	// evidence came from the fixed-pass stub.
+	detail, err := svc.GetEvaluationRunDetail(context.Background(), identityapp.Principal{TenantID: tenantID, OwnerID: ownerID, IsAdmin: false}, tenantID, runResp.EvaluationRun.ID())
+	require.NoError(t, err)
+	require.Equal(t, application.FixedBenchmarkExecutorID, detail.Summary.Executor)
+}
+
+func TestStartEvaluationRunRejectingExecutorFailsClosed(t *testing.T) {
+	db := testdb.StartPostgres(t)
+
+	tenantID := "tenant-reject"
+	agentID := "agent-reject"
+	ownerID := "owner"
+	versionID := randomID()
+	insertAgent(t, db, tenantID, agentID, ownerID)
+	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
+
+	versions := newFakeVersionLifecycle()
+	versions.AddVersion(&application.VersionInfo{ID: versionID, TenantID: tenantID, AgentID: agentID, Status: "draft"})
+
+	svc := newService(t, db, application.NewRejectingBenchmarkExecutor(), versions)
+
+	bsResp, err := svc.CreateBenchmarkSet(context.Background(), application.CreateBenchmarkSet{
+		TenantID:  tenantID,
+		Name:      "Set",
+		Tasks:     []domain.BenchmarkTask{{TaskRef: "task-1"}},
+		CreatedBy: ownerID,
+		IsAdmin:   true,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.StartEvaluationRun(context.Background(), application.StartEvaluationRun{
+		TenantID:           tenantID,
+		AgentID:            agentID,
+		VersionID:          versionID,
+		BenchmarkSetID:     bsResp.BenchmarkSet.ID(),
+		EnvironmentDigest:  "env",
+		ScoringRuleVersion: domain.ScoringRuleVersionV1,
+		ActorID:            ownerID,
+		IsAdmin:            false,
+	})
+	require.ErrorIs(t, err, domain.ErrEvaluationUnavailable)
+	require.Equal(t, "evaluation_unavailable", domain.CodeOf(err))
+
+	// The run must roll back in the database: no evaluation run is persisted.
+	// (The in-memory fakeVersionLifecycle is not transactional, so its status
+	// is not asserted here; the real adapter participates in the same tx.)
+	runs, err := svc.ListEvaluationRuns(context.Background(), identityapp.Principal{TenantID: tenantID, OwnerID: ownerID, IsAdmin: false}, tenantID, versionID)
+	require.NoError(t, err)
+	require.Empty(t, runs)
 }
 
 func TestStartEvaluationRunFailedMarksRejected(t *testing.T) {

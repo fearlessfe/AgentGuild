@@ -65,6 +65,9 @@ type VersionInfo struct {
 // BenchmarkExecutor runs the benchmark tasks and returns raw task results. It
 // is intentionally synchronous and injectable for the initial implementation.
 type BenchmarkExecutor interface {
+	// ExecutorID identifies the executor implementation in evaluation run
+	// summaries so the provenance of the evidence stays visible.
+	ExecutorID() string
 	Execute(ctx context.Context, benchmarkSet *domain.BenchmarkSet, environmentDigest string) ([]domain.TaskResult, error)
 }
 

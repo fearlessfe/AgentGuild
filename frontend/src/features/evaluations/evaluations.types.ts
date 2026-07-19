@@ -32,6 +32,7 @@ export type EvaluationSummaryView = {
   avg_latency_ms: number;
   cost_cents: number;
   security_passed: boolean;
+  executor?: string;
   extra?: Record<string, unknown>;
 };
 
