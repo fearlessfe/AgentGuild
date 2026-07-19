@@ -102,8 +102,15 @@
     padding: var(--sp-4);
   }
 
+  .dense-table,
   .agent-table {
     display: none;
+  }
+
+  /* Tables wrapped in the DenseTable scroll container stay visible and
+     scroll horizontally instead of being clipped by the card boundary. */
+  .dense-table-scroll .dense-table {
+    display: table;
   }
 
   .task-mobile-list,
