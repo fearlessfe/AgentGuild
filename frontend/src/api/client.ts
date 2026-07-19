@@ -511,6 +511,23 @@ let demoSyncRules: SyncRule[] = [
 ];
 const demoSubmissions: SubmissionView[] = [
   {
+    id: "sub-0",
+    tenant_id: "billing-platform",
+    task_id: "AG-188",
+    execution_id: "exec-AG-188",
+    repo: "acme/billing-service",
+    branch: "agent/ag-188",
+    commit_sha: "2b4c6d8e0f1a3b5c7d9e1f2a3b4c5d6e7f8a9b0c",
+    base_commit_sha: "1a2b3c4d5e6f78901234567890abcdef12345678",
+    summary: "初版修复，公开测试未通过",
+    tests: "go test ./...",
+    diff_fingerprint: "sha256:demo-submission-0",
+    status: "validation_failed",
+    validation_job_id: "validation-0",
+    created_at: "2026-07-02T11:02:10Z",
+    updated_at: "2026-07-02T11:08:40Z",
+  },
+  {
     id: "sub-1",
     tenant_id: "billing-platform",
     task_id: "AG-188",
@@ -528,6 +545,68 @@ const demoSubmissions: SubmissionView[] = [
     updated_at: "2026-07-02T13:14:20Z",
   },
 ];
+
+function demoValidationJob(submissionID: string) {
+  const failed = submissionID === "sub-0";
+  const finishedSteps = !failed;
+  return {
+    id: failed ? "validation-0" : "validation-1",
+    tenant_id: "billing-platform",
+    submission_id: submissionID,
+    status: failed ? "failed" : "succeeded",
+    attempt: 1,
+    config_version: "validation-config@v3",
+    steps: [
+      {
+        step: "build",
+        status: "succeeded",
+        hard_gate: true,
+        log_summary: "编译通过，无告警",
+        resource_usage: { elapsed_ms: 4200, cpu_seconds: 3.1, peak_memory_mb: 256 },
+        started_at: "2026-07-02T13:12:06Z",
+        finished_at: "2026-07-02T13:12:10Z",
+      },
+      {
+        step: "public_tests",
+        status: failed ? "failed" : "succeeded",
+        hard_gate: true,
+        log_summary: failed ? "2 个公开测试失败：TestScheduleOnce、TestBackoff" : "48 个公开测试全部通过",
+        resource_usage: { elapsed_ms: 12500, cpu_seconds: 9.8, peak_memory_mb: 512 },
+        started_at: "2026-07-02T13:12:10Z",
+        finished_at: "2026-07-02T13:12:23Z",
+      },
+      {
+        step: "hidden_tests",
+        status: failed ? "skipped" : "succeeded",
+        hard_gate: true,
+        log_summary: failed ? "因 public_tests 失败而跳过" : "126 个隐藏测试全部通过",
+        resource_usage: finishedSteps ? { elapsed_ms: 15800, cpu_seconds: 12.4, peak_memory_mb: 640 } : undefined,
+        started_at: finishedSteps ? "2026-07-02T13:12:23Z" : undefined,
+        finished_at: finishedSteps ? "2026-07-02T13:12:39Z" : undefined,
+      },
+      {
+        step: "static_analysis",
+        status: "succeeded",
+        hard_gate: false,
+        log_summary: "无新增静态分析告警",
+        resource_usage: { elapsed_ms: 2300, cpu_seconds: 1.2, peak_memory_mb: 128 },
+        started_at: "2026-07-02T13:12:39Z",
+        finished_at: "2026-07-02T13:12:41Z",
+      },
+      {
+        step: "security_scan",
+        status: "succeeded",
+        hard_gate: false,
+        log_summary: "未发现高危依赖",
+        resource_usage: { elapsed_ms: 3100, cpu_seconds: 1.8, peak_memory_mb: 160 },
+        started_at: "2026-07-02T13:12:41Z",
+        finished_at: "2026-07-02T13:12:44Z",
+      },
+    ],
+    created_at: "2026-07-02T13:12:05Z",
+    updated_at: "2026-07-02T13:14:20Z",
+  };
+}
 let demoReviewCounter = 1;
 const demoReviews = new Map<string, Record<string, unknown>>();
 
@@ -555,7 +634,7 @@ const demoEvaluationRuns = [
     environment_digest: "env-abc",
     scoring_rule_version: "v1",
     threshold_results: [{ name: "security", passed: true }],
-    summary: { pass_rate: 1.0, avg_latency_ms: 1200, cost_cents: 15, security_passed: true },
+    summary: { pass_rate: 1.0, avg_latency_ms: 1200, cost_cents: 15, security_passed: true, executor: "fixed-stub" },
     started_at: "2026-07-02T12:00:00Z",
     completed_at: "2026-07-02T12:05:00Z",
   },
@@ -571,7 +650,7 @@ const demoEvaluationRuns = [
       { name: "security", passed: true },
       { name: "latency", passed: false },
     ],
-    summary: { pass_rate: 0.5, avg_latency_ms: 3500, cost_cents: 22, security_passed: true },
+    summary: { pass_rate: 0.5, avg_latency_ms: 3500, cost_cents: 22, security_passed: true, executor: "fixed-stub" },
     started_at: "2026-07-02T13:00:00Z",
     completed_at: "2026-07-02T13:06:00Z",
   },
@@ -982,8 +1061,9 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
 
   if (url.pathname.startsWith("/v1/executions/") && method === "GET") {
     const executionID = decodeURIComponent(url.pathname.split("/").pop() ?? "");
-    const taskID = executionID.startsWith("exec-") ? executionID.slice("exec-".length) : "AG-188";
-    const task = demoTasks.find((item) => item.id === taskID);
+    const requestedTaskID = executionID.startsWith("exec-") ? executionID.slice("exec-".length) : "AG-188";
+    const task = demoTasks.find((item) => item.id === requestedTaskID);
+    const taskID = task ? requestedTaskID : "AG-188";
     const accepted = task?.status === "completed";
     return clone({
       data: {
@@ -1058,8 +1138,15 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
   const submissionMatch = url.pathname.match(/^\/v1\/submissions\/([^/]+)$/);
   if (submissionMatch && method === "GET") {
     const id = decodeURIComponent(submissionMatch[1]);
-    const submission = demoSubmissions.find((item) => item.id === id) ?? { ...demoSubmissions[0], id };
+    const fallback = demoSubmissions.find((item) => item.id === "sub-1") ?? demoSubmissions[0];
+    const submission = demoSubmissions.find((item) => item.id === id) ?? { ...fallback, id };
     return clone({ data: submission, meta: demoMeta });
+  }
+
+  const submissionValidationMatch = url.pathname.match(/^\/v1\/submissions\/([^/]+)\/validation$/);
+  if (submissionValidationMatch && method === "GET") {
+    const id = decodeURIComponent(submissionValidationMatch[1]);
+    return clone({ data: demoValidationJob(id), meta: demoMeta });
   }
 
   if (url.pathname.startsWith("/v1/submissions/") && url.pathname.endsWith("/diff") && method === "GET") {

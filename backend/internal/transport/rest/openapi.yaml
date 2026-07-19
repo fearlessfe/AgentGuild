@@ -1089,6 +1089,24 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /v1/submissions/{id}/validation:
+    get:
+      operationId: getSubmissionValidation
+      summary: 获取 Submission 的自动验证 Job 详情（含每步日志摘要与资源消耗）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Validation Job 与 Step 视图
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /v1/reviews:
     get:
       operationId: listAssignedReviews
@@ -1953,6 +1971,16 @@ components:
               type: string
             field:
               type: string
+            violations:
+              type: array
+              description: 结构化违规明细（如 changed_paths 越界时返回具体路径与原因），无违规时缺省
+              items:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  reason:
+                    type: string
 
   responses:
     BadRequest:

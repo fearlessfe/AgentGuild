@@ -34,6 +34,9 @@ describe("ExecutionDetailScreen", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByRole("link", { name: "查看提交" })).toHaveAttribute("href", "/submissions/sub-1");
+    const links = await screen.findAllByRole("link", { name: "查看提交" });
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute("href", "/submissions/sub-0");
+    expect(links[1]).toHaveAttribute("href", "/submissions/sub-1");
   });
 });

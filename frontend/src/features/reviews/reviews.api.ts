@@ -1,5 +1,5 @@
 import { apiRequest, createIdempotencyKey } from "../../api/client";
-import type { Decision, FileDiff, LineComment, ReviewView, RubricScore, RubricView } from "./reviews.types";
+import type { Decision, FileDiff, LineComment, ReviewView, RubricScore, RubricView, ValidationJobView } from "./reviews.types";
 
 function generateRequestId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -15,6 +15,9 @@ export const listPendingReviews = () => apiRequest<ReviewView[]>("/v1/reviews?st
 
 export const getSubmissionDiff = (submissionId: string) =>
   apiRequest<FileDiff[]>(`/v1/submissions/${encodeURIComponent(submissionId)}/diff`);
+
+export const getSubmissionValidation = (submissionId: string) =>
+  apiRequest<ValidationJobView>(`/v1/submissions/${encodeURIComponent(submissionId)}/validation`);
 
 export const getActiveRubric = () => apiRequest<RubricView>("/v1/rubrics/active");
 

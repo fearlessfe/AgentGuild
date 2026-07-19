@@ -85,3 +85,32 @@ export type Review = ReviewView;
 export type ReviewDiff = {
   files: FileDiff[];
 };
+
+export type ValidationResourceUsage = {
+  elapsed_ms?: number;
+  cpu_seconds?: number;
+  peak_memory_mb?: number;
+  [key: string]: unknown;
+};
+
+export type ValidationStepView = {
+  step: string;
+  status: string;
+  hard_gate?: boolean;
+  log_summary?: string;
+  resource_usage?: ValidationResourceUsage;
+  started_at?: string;
+  finished_at?: string;
+};
+
+export type ValidationJobView = {
+  id: string;
+  tenant_id: string;
+  submission_id: string;
+  status: string;
+  attempt: number;
+  config_version: string;
+  steps: ValidationStepView[];
+  created_at: string;
+  updated_at: string;
+};

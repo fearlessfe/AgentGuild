@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"agentguild.dev/agentguild/backend/internal/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
@@ -136,6 +139,19 @@ func (p *GitValidationProvider) GetValidationStatus(ctx context.Context, tenantI
 	return persistedValidationStatus{job: job}, nil
 }
 
+// GetValidationJobView returns the persisted validation job detail for a submission.
+func (p *GitValidationProvider) GetValidationJobView(ctx context.Context, tenantID, submissionID string) (*gitapp.ValidationJobView, error) {
+	job, err := p.jobs.GetBySubmissionID(ctx, tenantID, submissionID)
+	if err != nil {
+		return nil, err
+	}
+	if job == nil {
+		return nil, fmt.Errorf("validation job for submission %q was not found", submissionID)
+	}
+	view := gitapp.ValidationJobViewFromDomain(job)
+	return &view, nil
+}
+
 type persistedValidationStatus struct {
 	job *gitdomain.ValidationJob
 }
@@ -150,4 +166,52 @@ func (s persistedValidationStatus) AllHardGatesPassed() bool {
 		}
 	}
 	return true
+}
+
+// GitSubmissionIntegrityChecker verifies that a submission's commit is still
+// reachable from its branch before a review may rely on the validation result.
+// A commit that was force-pushed away invalidates the validation binding, so
+// the submission is marked invalid when its state still allows it and the
+// caller is rejected either way.
+type GitSubmissionIntegrityChecker struct {
+	submissions gitapp.SubmissionRepository
+	verifier    *gitapp.CommitVerifier
+}
+
+func NewGitSubmissionIntegrityChecker(submissions gitapp.SubmissionRepository, resolver gitapp.RepositoryGitResolver) (*GitSubmissionIntegrityChecker, error) {
+	if submissions == nil {
+		return nil, invalid("submission_repository")
+	}
+	if resolver == nil {
+		return nil, invalid("repository_git_resolver")
+	}
+	return &GitSubmissionIntegrityChecker{
+		submissions: submissions,
+		verifier:    gitapp.NewCommitVerifier(resolver, submissions),
+	}, nil
+}
+
+func (p *GitSubmissionIntegrityChecker) CheckIntegrity(ctx context.Context, tenantID, submissionID string, now time.Time) error {
+	submission, err := p.submissions.GetByID(ctx, tenantID, submissionID)
+	if err != nil {
+		return err
+	}
+	reachable, err := p.verifier.IsCommitReachable(ctx, tenantID, submission.Repo, submission.Branch, submission.CommitSHA)
+	if err != nil {
+		return err
+	}
+	if reachable {
+		return nil
+	}
+	// The domain only permits invalidation from pending_verification; a
+	// validated submission is terminal there, so for it the rejection below
+	// is the enforcement point.
+	if err := submission.MarkInvalid(now); err == nil {
+		if err := p.submissions.Save(ctx, submission); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, domain.ErrStateConflict) {
+		return err
+	}
+	return &domain.Error{Code: "state_conflict", Message: "submission commit is no longer reachable on its branch"}
 }

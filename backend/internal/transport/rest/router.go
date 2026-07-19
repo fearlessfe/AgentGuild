@@ -341,6 +341,7 @@ func (s *Server) Router() http.Handler {
 
 		// Shared read-only routes (session or bearer)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/submissions/{id}/diff", s.getSubmissionDiff)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/submissions/{id}/validation", s.getSubmissionValidation)
 
 		// Review mutations are human governance actions and require a browser
 		// session. Application policy additionally enforces reviewer assignment.

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
@@ -45,6 +46,64 @@ func TestGitDiffProviderReturnsStructuredCommitDiff(t *testing.T) {
 	require.Equal(t, "head", driver.head)
 }
 
+func TestGitSubmissionIntegrityCheckerMarksPendingSubmissionInvalidOnForcePush(t *testing.T) {
+	submissions := &fakeSubmissionRepository{items: map[string]*gitdomain.Submission{}}
+	require.NoError(t, submissions.Save(context.Background(), &gitdomain.Submission{
+		ID: "submission-1", TenantID: "tenant-1", Repo: "owner/repo", Branch: "agentguild/exec-1",
+		CommitSHA: "head-sha", Status: gitdomain.SubmissionStatusPendingVerification,
+	}))
+	driver := &integrityDriver{branchHeadSHA: "new-head", reachable: false}
+	checker, err := reviewapp.NewGitSubmissionIntegrityChecker(submissions, &providerResolver{driver: driver})
+	require.NoError(t, err)
+
+	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	err = checker.CheckIntegrity(context.Background(), "tenant-1", "submission-1", now)
+	require.Error(t, err)
+	require.Equal(t, "state_conflict", domain.CodeOf(err))
+
+	got, err := submissions.GetByID(context.Background(), "tenant-1", "submission-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.SubmissionStatusInvalid, got.Status)
+}
+
+func TestGitSubmissionIntegrityCheckerAllowsReachableCommit(t *testing.T) {
+	submissions := &fakeSubmissionRepository{items: map[string]*gitdomain.Submission{}}
+	require.NoError(t, submissions.Save(context.Background(), &gitdomain.Submission{
+		ID: "submission-1", TenantID: "tenant-1", Repo: "owner/repo", Branch: "agentguild/exec-1",
+		CommitSHA: "head-sha", Status: gitdomain.SubmissionStatusPendingVerification,
+	}))
+	driver := &integrityDriver{branchHeadSHA: "new-head", reachable: true}
+	checker, err := reviewapp.NewGitSubmissionIntegrityChecker(submissions, &providerResolver{driver: driver})
+	require.NoError(t, err)
+
+	require.NoError(t, checker.CheckIntegrity(context.Background(), "tenant-1", "submission-1", time.Now()))
+
+	got, err := submissions.GetByID(context.Background(), "tenant-1", "submission-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.SubmissionStatusPendingVerification, got.Status)
+}
+
+func TestGitSubmissionIntegrityCheckerRejectsForcePushedValidatedSubmission(t *testing.T) {
+	submissions := &fakeSubmissionRepository{items: map[string]*gitdomain.Submission{}}
+	require.NoError(t, submissions.Save(context.Background(), &gitdomain.Submission{
+		ID: "submission-1", TenantID: "tenant-1", Repo: "owner/repo", Branch: "agentguild/exec-1",
+		CommitSHA: "head-sha", Status: gitdomain.SubmissionStatusValidated,
+	}))
+	driver := &integrityDriver{branchHeadSHA: "new-head", reachable: false}
+	checker, err := reviewapp.NewGitSubmissionIntegrityChecker(submissions, &providerResolver{driver: driver})
+	require.NoError(t, err)
+
+	err = checker.CheckIntegrity(context.Background(), "tenant-1", "submission-1", time.Now())
+	require.Error(t, err)
+	require.Equal(t, "state_conflict", domain.CodeOf(err))
+
+	// Validated is a terminal status in the submission domain, so the record
+	// cannot be flipped to invalid; the rejection above is the enforcement.
+	got, err := submissions.GetByID(context.Background(), "tenant-1", "submission-1")
+	require.NoError(t, err)
+	require.Equal(t, gitdomain.SubmissionStatusValidated, got.Status)
+}
+
 func TestGitValidationProviderRequiresSucceededHardGates(t *testing.T) {
 	job := &gitdomain.ValidationJob{
 		SubmissionID: "submission-1",
@@ -64,6 +123,62 @@ func TestGitValidationProviderRequiresSucceededHardGates(t *testing.T) {
 	status, err = provider.GetValidationStatus(context.Background(), "tenant-1", "submission-1")
 	require.NoError(t, err)
 	require.False(t, status.AllHardGatesPassed())
+}
+
+func TestGitValidationProviderReturnsValidationJobView(t *testing.T) {
+	startedAt := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(2 * time.Second)
+	job := &gitdomain.ValidationJob{
+		ID:            "job-1",
+		TenantID:      "tenant-1",
+		SubmissionID:  "submission-1",
+		Status:        gitdomain.ValidationStatusSucceeded,
+		Attempt:       2,
+		ConfigVersion: "cfg-v1",
+		Steps: []gitdomain.Step{
+			{
+				Step:          gitdomain.ValidationStepBuild,
+				Status:        gitdomain.ValidationStepStatusSucceeded,
+				HardGate:      true,
+				LogSummary:    "build ok",
+				ResourceUsage: []byte(`{"elapsed_ms":1200}`),
+				StartedAt:     &startedAt,
+				FinishedAt:    &finishedAt,
+			},
+			{Step: gitdomain.ValidationStepSecurityScan, Status: gitdomain.ValidationStepStatusFailed, HardGate: false, LogSummary: "1 warning"},
+		},
+		CreatedAt: startedAt,
+		UpdatedAt: finishedAt,
+	}
+	provider, err := reviewapp.NewGitValidationProvider(&providerValidationJobRepository{job: job})
+	require.NoError(t, err)
+
+	view, err := provider.GetValidationJobView(context.Background(), "tenant-1", "submission-1")
+	require.NoError(t, err)
+	require.Equal(t, "job-1", view.ID)
+	require.Equal(t, "tenant-1", view.TenantID)
+	require.Equal(t, "submission-1", view.SubmissionID)
+	require.Equal(t, "succeeded", view.Status)
+	require.Equal(t, 2, view.Attempt)
+	require.Equal(t, "cfg-v1", view.ConfigVersion)
+	require.Len(t, view.Steps, 2)
+	require.Equal(t, "build", view.Steps[0].Step)
+	require.Equal(t, "succeeded", view.Steps[0].Status)
+	require.True(t, view.Steps[0].HardGate)
+	require.Equal(t, "build ok", view.Steps[0].LogSummary)
+	require.JSONEq(t, `{"elapsed_ms":1200}`, string(view.Steps[0].ResourceUsage))
+	require.Equal(t, startedAt, *view.Steps[0].StartedAt)
+	require.Equal(t, finishedAt, *view.Steps[0].FinishedAt)
+	require.Equal(t, "security_scan", view.Steps[1].Step)
+	require.False(t, view.Steps[1].HardGate)
+}
+
+func TestGitValidationProviderReturnsErrorWhenJobMissing(t *testing.T) {
+	provider, err := reviewapp.NewGitValidationProvider(&providerValidationJobRepository{job: nil})
+	require.NoError(t, err)
+
+	_, err = provider.GetValidationJobView(context.Background(), "tenant-1", "submission-1")
+	require.Error(t, err)
 }
 
 type providerSubmissionRepository struct {

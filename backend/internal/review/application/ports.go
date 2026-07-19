@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 )
 
 // Store is the review application transaction boundary.
@@ -63,4 +64,13 @@ type ValidationStatus interface {
 // ValidationProvider reports whether a submission has passed its hard gates.
 type ValidationProvider interface {
 	GetValidationStatus(ctx context.Context, tenantID, submissionID string) (ValidationStatus, error)
+	// GetValidationJobView returns the persisted validation job detail for a submission.
+	GetValidationJobView(ctx context.Context, tenantID, submissionID string) (*gitapp.ValidationJobView, error)
+}
+
+// SubmissionIntegrityChecker verifies a submission's commit is still reachable
+// from its recorded branch before a review may use the validation result. It
+// returns a domain error when the commit was force-pushed away.
+type SubmissionIntegrityChecker interface {
+	CheckIntegrity(ctx context.Context, tenantID, submissionID string, now time.Time) error
 }

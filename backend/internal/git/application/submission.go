@@ -9,6 +9,26 @@ import (
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 )
 
+// TaskDeadlineResolver resolves the persisted deadline for a task. It is
+// wired in production from the core task store; when nil the deadline guard
+// is disabled (tests and local development).
+type TaskDeadlineResolver interface {
+	TaskDeadline(ctx context.Context, tenantID, taskID string) (time.Time, error)
+}
+
+// TaskDeadlineResolverFunc adapts a function to TaskDeadlineResolver.
+type TaskDeadlineResolverFunc func(context.Context, string, string) (time.Time, error)
+
+// TaskDeadline implements TaskDeadlineResolver.
+func (f TaskDeadlineResolverFunc) TaskDeadline(ctx context.Context, tenantID, taskID string) (time.Time, error) {
+	return f(ctx, tenantID, taskID)
+}
+
+// SetTaskDeadlineResolver wires the task deadline guard after construction.
+func (s *SubmissionService) SetTaskDeadlineResolver(resolver TaskDeadlineResolver) {
+	s.deadlines = resolver
+}
+
 // CreateSubmission validates the commit and persists a new submission.
 func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Principal, cmd CreateSubmission) (Envelope[SubmissionView], error) {
 	var result Envelope[SubmissionView]
@@ -62,6 +82,18 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 				}
 				result = Envelope[SubmissionView]{Data: submissionView(sub, now), Meta: Meta{ServerTime: now}}
 				return nil
+			}
+		}
+		// The task deadline is a hard cutoff for result submission, aligned
+		// with the heartbeat guard: a live lease must not extend the window
+		// past the deadline.
+		if s.deadlines != nil {
+			deadline, err := s.deadlines.TaskDeadline(ctx, principal.TenantID, grant.TaskID)
+			if err != nil {
+				return err
+			}
+			if !now.Before(deadline) {
+				return &domain.Error{Code: "deadline_exceeded", Message: "task deadline has passed"}
 			}
 		}
 		credential, err := tx.Credentials().GetByExecutionID(ctx, principal.TenantID, cmd.ExecutionID)

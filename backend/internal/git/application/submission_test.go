@@ -278,6 +278,48 @@ func agentPrincipal() application.Principal {
 	return application.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1", Scopes: []string{"tasks:execute"}, RepoScope: []string{"owner/repo"}}
 }
 
+func TestCreateSubmissionRejectsAfterTaskDeadline(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+	// The credential (and thus the lease) is still valid at fixture.now; only
+	// the task deadline has passed.
+	fixture.svc.SetTaskDeadlineResolver(application.TaskDeadlineResolverFunc(func(context.Context, string, string) (time.Time, error) {
+		return fixture.now.Add(-time.Minute), nil
+	}))
+
+	_, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.Error(t, err)
+	require.Equal(t, "deadline_exceeded", domain.CodeOf(err))
+	require.Empty(t, fixture.store.submissions)
+	require.Nil(t, fixture.store.credentials["cred-1"].RevokedAt)
+}
+
+func TestCreateSubmissionAllowsBeforeTaskDeadline(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+	fixture.svc.SetTaskDeadlineResolver(application.TaskDeadlineResolverFunc(func(context.Context, string, string) (time.Time, error) {
+		return fixture.now.Add(time.Hour), nil
+	}))
+
+	got, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Data.ID)
+}
+
+func TestCreateSubmissionReplaysExistingSubmissionAfterTaskDeadline(t *testing.T) {
+	fixture := newSubmissionFixture(t)
+
+	first, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+
+	// A retry of an already persisted submission stays idempotent even when
+	// the deadline has passed in the meantime (e.g. notifier-failure retry).
+	fixture.svc.SetTaskDeadlineResolver(application.TaskDeadlineResolverFunc(func(context.Context, string, string) (time.Time, error) {
+		return fixture.now.Add(-time.Minute), nil
+	}))
+	second, err := fixture.svc.CreateSubmission(context.Background(), agentPrincipal(), newSubmissionCmd())
+	require.NoError(t, err)
+	require.Equal(t, first.Data.ID, second.Data.ID)
+}
+
 func TestCreateSubmissionNotifiesExecutionSubmitted(t *testing.T) {
 	recorder := &recordingNotifier{}
 	fixture := newSubmissionFixtureWithNotifier(t, recorder)

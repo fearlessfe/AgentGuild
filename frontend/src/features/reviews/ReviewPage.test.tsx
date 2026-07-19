@@ -4,10 +4,11 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { envelope } from "../../api/fixtures";
+import { envelope, taskViewFixture } from "../../api/fixtures";
+import type { SubmissionView, TaskView } from "../../api/client";
 import { ReviewWorkspace } from "../../app/AppShell";
 import { ReviewPage } from "./ReviewPage";
-import type { FileDiff, ReviewView, RubricView } from "./reviews.types";
+import type { FileDiff, ReviewView, RubricView, ValidationJobView } from "./reviews.types";
 
 function renderWithProviders(
   ui: ReactNode,
@@ -85,10 +86,99 @@ const diffFixture: FileDiff[] = [
   },
 ];
 
+const submissionFixture: SubmissionView = {
+  id: "sub-1",
+  tenant_id: "tenant-1",
+  task_id: "task-1",
+  execution_id: "exec-1",
+  repo: "acme/billing-service",
+  branch: "agent/task-1",
+  commit_sha: "8f3a1c2d9e7b6a5f4c3d2e1a0b9c8d7e6f5a4b3c",
+  base_commit_sha: "1a2b3c4d5e6f78901234567890abcdef12345678",
+  summary: "修复重复触发并补充回归测试",
+  diff_fingerprint: "sha256:sub-1",
+  status: "validated",
+  created_at: "2026-07-02T13:12:05Z",
+  updated_at: "2026-07-02T13:14:20Z",
+};
+
+const revisionsFixture: SubmissionView[] = [
+  submissionFixture,
+  {
+    ...submissionFixture,
+    id: "sub-2",
+    commit_sha: "bbbb1c2d9e7b6a5f4c3d2e1a0b9c8d7e6f5a4b3c",
+    summary: "第二版修订",
+    diff_fingerprint: "sha256:sub-2",
+    status: "pending_verification",
+    created_at: "2026-07-02T15:00:00Z",
+    updated_at: "2026-07-02T15:00:00Z",
+  },
+];
+
+const taskFixture: TaskView = taskViewFixture({
+  id: "task-1",
+  title: "修复定时任务重复触发问题",
+  requirements: ["所有测试通过", "补充回归测试"],
+});
+
+const validationFixture: ValidationJobView = {
+  id: "validation-1",
+  tenant_id: "tenant-1",
+  submission_id: "sub-1",
+  status: "succeeded",
+  attempt: 1,
+  config_version: "validation-config@v3",
+  steps: [
+    {
+      step: "build",
+      status: "succeeded",
+      hard_gate: true,
+      log_summary: "编译通过，无告警",
+      resource_usage: { elapsed_ms: 4200, cpu_seconds: 3.1, peak_memory_mb: 256 },
+      started_at: "2026-07-02T13:12:06Z",
+      finished_at: "2026-07-02T13:12:10Z",
+    },
+    {
+      step: "public_tests",
+      status: "succeeded",
+      hard_gate: true,
+      log_summary: "48 个公开测试全部通过",
+      resource_usage: { elapsed_ms: 12500, cpu_seconds: 9.8, peak_memory_mb: 512 },
+      started_at: "2026-07-02T13:12:10Z",
+      finished_at: "2026-07-02T13:12:23Z",
+    },
+    {
+      step: "security_scan",
+      status: "failed",
+      hard_gate: false,
+      log_summary: "1 个低危告警",
+      resource_usage: { elapsed_ms: 3100 },
+      started_at: "2026-07-02T13:12:41Z",
+      finished_at: "2026-07-02T13:12:44Z",
+    },
+  ],
+  created_at: "2026-07-02T13:12:05Z",
+  updated_at: "2026-07-02T13:14:20Z",
+};
+
+const validationFixtureSub2: ValidationJobView = {
+  ...validationFixture,
+  id: "validation-2",
+  submission_id: "sub-2",
+  status: "pending",
+  attempt: 0,
+  steps: [{ step: "build", status: "pending", hard_gate: true, log_summary: "等待执行" }],
+};
+
 type FetchState = {
   review: ReviewView;
   diff: FileDiff[];
   rubric: RubricView;
+  submission: SubmissionView;
+  revisions: SubmissionView[];
+  task: TaskView;
+  validations: Record<string, ValidationJobView>;
 };
 
 type MockFetchOverrides = {
@@ -113,10 +203,18 @@ function deferred<T>() {
 }
 
 function mockFetch(
-  { review = reviewFixture, diff = diffFixture, rubric = rubricFixture }: Partial<FetchState> = {},
+  {
+    review = reviewFixture,
+    diff = diffFixture,
+    rubric = rubricFixture,
+    submission = submissionFixture,
+    revisions = revisionsFixture,
+    task = taskFixture,
+    validations = { "sub-1": validationFixture, "sub-2": validationFixtureSub2 },
+  }: Partial<FetchState> = {},
   overrides: MockFetchOverrides = {},
 ) {
-  const state: FetchState = { review, diff, rubric };
+  const state: FetchState = { review, diff, rubric, submission, revisions, task, validations };
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
     const method = (init as RequestInit | undefined)?.method ?? "GET";
@@ -131,6 +229,28 @@ function mockFetch(
 
     if (url.pathname.startsWith("/api/v1/submissions/") && url.pathname.endsWith("/diff")) {
       return Promise.resolve(new Response(JSON.stringify(envelope(state.diff)), { status: 200 }));
+    }
+
+    const validationMatch = url.pathname.match(/^\/api\/v1\/submissions\/([^/]+)\/validation$/);
+    if (validationMatch && method === "GET") {
+      const id = decodeURIComponent(validationMatch[1]);
+      const job = state.validations[id] ?? Object.values(state.validations)[0];
+      return Promise.resolve(new Response(JSON.stringify(envelope(job)), { status: 200 }));
+    }
+
+    const submissionMatch = url.pathname.match(/^\/api\/v1\/submissions\/([^/]+)$/);
+    if (submissionMatch && method === "GET") {
+      return Promise.resolve(new Response(JSON.stringify(envelope(state.submission)), { status: 200 }));
+    }
+
+    const executionSubmissionsMatch = url.pathname.match(/^\/api\/v1\/executions\/([^/]+)\/submissions$/);
+    if (executionSubmissionsMatch && method === "GET") {
+      return Promise.resolve(new Response(JSON.stringify(envelope(state.revisions)), { status: 200 }));
+    }
+
+    const taskMatch = url.pathname.match(/^\/api\/v1\/tasks\/([^/]+)$/);
+    if (taskMatch && method === "GET") {
+      return Promise.resolve(new Response(JSON.stringify(envelope(state.task)), { status: 200 }));
     }
 
     const commentMatch = url.pathname.match(/^\/api\/v1\/reviews\/([^/]+)\/comments$/);
@@ -202,7 +322,8 @@ describe("ReviewPage", () => {
     renderWithProviders(<ReviewPage />);
 
     expect(await screen.findByText("审核 rev-1")).toBeVisible();
-    expect(screen.getByText("状态：")).toBeVisible();
+    const header = screen.getByText("审核 rev-1").closest(".review-header") as HTMLElement;
+    expect(within(header).getByText("状态：")).toBeVisible();
     expect(screen.getByText("待审核")).toBeVisible();
     expect(screen.getByText("整体实现正确，但缺少边界测试。")).toBeVisible();
     expect(await screen.findByTestId("rubric-form")).toBeVisible();
@@ -223,6 +344,66 @@ describe("ReviewPage", () => {
     expect(screen.getByLabelText("可读性 分数")).toBeVisible();
     expect(screen.getByLabelText("测试覆盖 分数")).toBeVisible();
     expect(screen.getByTestId("rubric-total")).toHaveTextContent("总分：");
+  });
+
+  it("renders the task acceptance requirements", async () => {
+    mockFetch();
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findByText("审核 rev-1");
+    expect(await screen.findByText("任务验收条件")).toBeVisible();
+    expect(screen.getByText("修复定时任务重复触发问题")).toBeVisible();
+    expect(screen.getByText("所有测试通过")).toBeVisible();
+    expect(screen.getByText("补充回归测试")).toBeVisible();
+  });
+
+  it("renders validation evidence with hard gates, logs and resource usage", async () => {
+    mockFetch();
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findByText("审核 rev-1");
+    const panel = await screen.findByTestId("validation-panel");
+    expect(within(panel).getByText("配置版本：validation-config@v3")).toBeVisible();
+    expect(within(panel).getByText("尝试次数：1")).toBeVisible();
+    expect(within(panel).getByText("build")).toBeVisible();
+    expect(within(panel).getByText("public_tests")).toBeVisible();
+    expect(within(panel).getByText("security_scan")).toBeVisible();
+    // hard_gate 步骤带硬门槛标识，非 hard_gate 步骤不带。
+    expect(within(panel).getAllByText("硬门槛")).toHaveLength(2);
+    expect(within(panel).getByText("编译通过，无告警")).toBeVisible();
+    expect(within(panel).getByText("48 个公开测试全部通过")).toBeVisible();
+    expect(within(panel).getByText("1 个低危告警")).toBeVisible();
+    // 资源消耗以可读形式展示。
+    expect(within(panel).getByText("资源：耗时 4.2s · CPU 3.1s · 峰值内存 256MB")).toBeVisible();
+    expect(within(panel).getByText("资源：耗时 3.1s")).toBeVisible();
+  });
+
+  it("lists revisions and loads the selected revision's diff and validation", async () => {
+    const { spy } = mockFetch();
+    renderWithProviders(<ReviewPage />);
+
+    await screen.findByText("审核 rev-1");
+    expect((await screen.findAllByText("func Charge(amount int) error {")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("48 个公开测试全部通过")).toBeVisible();
+
+    const selector = screen.getByLabelText("Revision");
+    const options = within(selector as HTMLElement).getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent("R1 · 8f3a1c2 · 已验证");
+    expect(options[1]).toHaveTextContent("R2 · bbbb1c2 · 待验证");
+
+    await userEvent.selectOptions(selector, "sub-2");
+
+    await waitFor(() => {
+      const requested = spy.mock.calls.map(([input]) => String(input));
+      expect(requested.some((url) => url.includes("/v1/submissions/sub-2/diff"))).toBe(true);
+      expect(requested.some((url) => url.includes("/v1/submissions/sub-2/validation"))).toBe(true);
+    });
+
+    // 验证面板切换为所选修订的 Job。
+    const panel = await screen.findByTestId("validation-panel");
+    expect(await within(panel).findByText("等待执行")).toBeVisible();
+    expect(within(panel).queryByText("48 个公开测试全部通过")).not.toBeInTheDocument();
   });
 
   it("switches between split and unified diff modes", async () => {

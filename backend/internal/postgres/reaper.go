@@ -66,6 +66,38 @@ func (r *Reaper) RunBatch(ctx context.Context, limit int) (int, error) {
 	}
 	rows.Close()
 
+	// Open tasks without an active execution never match the execution scan
+	// above: they were never claimed (or a previous batch already detached the
+	// execution). They must still expire at their deadline.
+	openRows, err := pgxTx.Query(ctx, `
+		SELECT tenant_id, id, publisher_agent_version_id, deadline
+		FROM tasks
+		WHERE status='open' AND active_execution_id IS NULL AND deadline <= $1
+		ORDER BY deadline, id
+		FOR UPDATE SKIP LOCKED
+		LIMIT $2`, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	type openCandidate struct {
+		tenantID, taskID, publisherID string
+		deadline                      time.Time
+	}
+	var openCandidates []openCandidate
+	for openRows.Next() {
+		var item openCandidate
+		if err := openRows.Scan(&item.tenantID, &item.taskID, &item.publisherID, &item.deadline); err != nil {
+			openRows.Close()
+			return 0, err
+		}
+		openCandidates = append(openCandidates, item)
+	}
+	if err := openRows.Err(); err != nil {
+		openRows.Close()
+		return 0, err
+	}
+	openRows.Close()
+
 	processed := 0
 	for _, item := range candidates {
 		targetTaskStatus := string(domain.TaskOpen)
@@ -114,6 +146,42 @@ func (r *Reaper) RunBatch(ctx context.Context, limit int) (int, error) {
 			eventType = "task.expired"
 		}
 		if err := tx.AppendOutboxEvent(ctx, application.OutboxEvent{TenantID: item.tenantID, ID: item.taskID + ":expire:" + eventID, EventType: eventType, AggregateType: "task", AggregateID: item.taskID, Payload: payload, AvailableAt: now}); err != nil {
+			return 0, err
+		}
+		processed++
+	}
+	for _, item := range openCandidates {
+		task := &domain.Task{
+			ID: item.taskID, TenantID: item.tenantID,
+			PublisherID: item.publisherID, Deadline: item.deadline,
+			Status: domain.TaskOpen,
+		}
+		if err := task.Apply(domain.IntentExpire, domain.Actor{Type: domain.ActorSystem, ID: "reaper"}, now); err != nil {
+			return 0, err
+		}
+		tag, err := pgxTx.Exec(ctx, `
+			UPDATE tasks
+			SET status='expired', state_version=state_version+1, updated_at=$3
+			WHERE tenant_id=$1 AND id=$2 AND status='open' AND active_execution_id IS NULL`,
+			item.tenantID, item.taskID, now)
+		if err != nil {
+			return 0, err
+		}
+		if tag.RowsAffected() != 1 {
+			continue
+		}
+		payload, err := json.Marshal(map[string]string{"task_id": item.taskID})
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.AppendTaskEvent(ctx, application.TaskEvent{TenantID: item.tenantID, TaskID: item.taskID, ActorType: string(domain.ActorSystem), ActorID: "reaper", Intent: "expire", FromState: string(domain.TaskOpen), ToState: string(domain.TaskExpired), Payload: payload, CreatedAt: now}); err != nil {
+			return 0, err
+		}
+		eventID, err := newOwnerToken()
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.AppendOutboxEvent(ctx, application.OutboxEvent{TenantID: item.tenantID, ID: item.taskID + ":expire:" + eventID, EventType: "task.expired", AggregateType: "task", AggregateID: item.taskID, Payload: payload, AvailableAt: now}); err != nil {
 			return 0, err
 		}
 		processed++

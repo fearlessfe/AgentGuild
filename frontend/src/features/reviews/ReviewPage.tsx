@@ -1,13 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addComment, getActiveRubric, getReview, getSubmissionDiff, submitDecision } from "./reviews.api";
+import { getSubmission, getTask, listExecutionSubmissions } from "../../api/client";
+import { addComment, getActiveRubric, getReview, getSubmissionDiff, getSubmissionValidation, submitDecision } from "./reviews.api";
 import { DiffViewer } from "./DiffViewer";
 import { FileTree } from "./FileTree";
 import { RevisionSelector } from "./RevisionSelector";
 import { RubricForm } from "./RubricForm";
+import { ValidationPanel } from "./ValidationPanel";
 import { Card } from "../../ui";
-import type { Decision, FileDiff, LineComment, ReviewStatus, RubricScore } from "./reviews.types";
+import type { Decision, FileDiff, LineComment, ReviewStatus, Revision, RubricScore } from "./reviews.types";
+import type { SubmissionStatus } from "../../api/client";
 
 function formatStatus(status: ReviewStatus) {
   switch (status) {
@@ -15,6 +18,21 @@ function formatStatus(status: ReviewStatus) {
       return "待审核";
     case "submitted":
       return "已提交";
+    default:
+      return status;
+  }
+}
+
+function formatSubmissionStatus(status: SubmissionStatus) {
+  switch (status) {
+    case "pending_verification":
+      return "待验证";
+    case "validated":
+      return "已验证";
+    case "validation_failed":
+      return "验证失败";
+    case "invalid":
+      return "已失效";
     default:
       return status;
   }
@@ -37,6 +55,7 @@ export function ReviewPage() {
   const { reviewId } = useParams<{ reviewId: string }>();
   const queryClient = useQueryClient();
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
   const [comments, setComments] = useState<LineComment[]>([]);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [summary, setSummary] = useState("");
@@ -49,11 +68,44 @@ export function ReviewPage() {
   });
 
   const submissionId = reviewQuery.data?.data.submission_id;
+  const activeSubmissionId = selectedSubmissionId ?? submissionId;
+
+  const submissionQuery = useQuery({
+    queryKey: ["submission", submissionId],
+    queryFn: () => getSubmission(submissionId ?? ""),
+    enabled: !!submissionId,
+    refetchOnWindowFocus: false,
+  });
+
+  const executionId = submissionQuery.data?.data.execution_id;
+  const taskId = submissionQuery.data?.data.task_id;
+
+  const revisionsQuery = useQuery({
+    queryKey: ["execution-submissions", executionId],
+    queryFn: () => listExecutionSubmissions(executionId ?? ""),
+    enabled: !!executionId,
+    refetchOnWindowFocus: false,
+  });
+
+  const taskQuery = useQuery({
+    queryKey: ["task", taskId],
+    queryFn: () => getTask(taskId ?? ""),
+    enabled: !!taskId,
+    refetchOnWindowFocus: false,
+  });
 
   const diffQuery = useQuery({
-    queryKey: ["submission-diff", submissionId],
-    queryFn: () => getSubmissionDiff(submissionId ?? ""),
-    enabled: !!submissionId,
+    queryKey: ["submission-diff", activeSubmissionId],
+    queryFn: () => getSubmissionDiff(activeSubmissionId ?? ""),
+    enabled: !!activeSubmissionId,
+    placeholderData: keepPreviousData,
+  });
+
+  const validationQuery = useQuery({
+    queryKey: ["submission-validation", activeSubmissionId],
+    queryFn: () => getSubmissionValidation(activeSubmissionId ?? ""),
+    enabled: !!activeSubmissionId,
+    placeholderData: keepPreviousData,
   });
 
   const rubricQuery = useQuery({
@@ -65,13 +117,25 @@ export function ReviewPage() {
 
   const files = useMemo<FileDiff[]>(() => diffQuery.data?.data ?? [], [diffQuery.data]);
 
+  // 首个文件自动选中；切换修订后若所选文件不在新 Diff 中则回退到第一个文件。
   useEffect(() => {
-    if (files.length > 0 && !selectedPath) {
+    if (files.length > 0 && (!selectedPath || !files.some((f) => f.path === selectedPath))) {
       setSelectedPath(files[0].path);
     }
   }, [files, selectedPath]);
 
   const selectedFile = useMemo(() => files.find((f) => f.path === selectedPath), [files, selectedPath]);
+
+  const revisions = useMemo<Revision[]>(() => {
+    const submissions = revisionsQuery.data?.data ?? [];
+    return [...submissions]
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .map((submission, index) => ({
+        id: submission.id,
+        label: `R${index + 1} · ${submission.commit_sha.slice(0, 7)} · ${formatSubmissionStatus(submission.status)}`,
+        created_at: submission.created_at,
+      }));
+  }, [revisionsQuery.data]);
 
   // Seed local comments from the review response once on first load only,
   // so background refetches do not discard locally added comments.
@@ -101,6 +165,7 @@ export function ReviewPage() {
   useEffect(() => {
     hasSeededComments.current = false;
     hasSeededScores.current = false;
+    setSelectedSubmissionId(null);
   }, [reviewId]);
 
   const commentMutation = useMutation({
@@ -180,11 +245,9 @@ export function ReviewPage() {
           <span>Reviewer：{review.reviewer_id}</span>
           <span>Submission：{review.submission_id}</span>
           <RevisionSelector
-            revisions={[{ id: review.submission_id, label: review.submission_id }]}
-            selected={review.submission_id}
-            onSelect={() => {
-              // Revision 切换需要后端提供 revisions 列表；当前仅展示当前 Submission。
-            }}
+            revisions={revisions.length > 0 ? revisions : [{ id: review.submission_id, label: review.submission_id }]}
+            selected={activeSubmissionId ?? review.submission_id}
+            onSelect={setSelectedSubmissionId}
             label="Revision"
           />
         </div>
@@ -212,6 +275,27 @@ export function ReviewPage() {
         </main>
 
         <div className="col scroll">
+          <Card title="任务验收条件">
+            {taskQuery.isPending ? (
+              <div className="muted">正在加载任务…</div>
+            ) : taskQuery.isError ? (
+              <div className="error">无法加载任务：{taskQuery.error.message}</div>
+            ) : taskQuery.data ? (
+              <div className="stack review-requirements">
+                <div className="muted">{taskQuery.data.data.title}</div>
+                {taskQuery.data.data.requirements && taskQuery.data.data.requirements.length > 0 ? (
+                  <ul className="perm-list">
+                    {taskQuery.data.data.requirements.map((requirement) => (
+                      <li key={requirement}>{requirement}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="muted">该任务未设置验收条件</div>
+                )}
+              </div>
+            ) : null}
+          </Card>
+
           <Card title="Rubric 评分">
             <div className="review-decision-panel stack">
               {decisionMutation.isError ? (
@@ -288,6 +372,16 @@ export function ReviewPage() {
               </ul>
             </Card>
           ) : null}
+
+          <Card title="验证证据" sub={validationQuery.data ? `Submission ${validationQuery.data.data.submission_id}` : undefined}>
+            {validationQuery.isPending ? (
+              <div className="muted">正在加载验证结果…</div>
+            ) : validationQuery.isError ? (
+              <div className="error">无法加载验证结果：{validationQuery.error.message}</div>
+            ) : validationQuery.data ? (
+              <ValidationPanel job={validationQuery.data.data} />
+            ) : null}
+          </Card>
         </div>
       </div>
     </div>

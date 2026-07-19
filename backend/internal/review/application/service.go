@@ -23,12 +23,16 @@ type Service struct {
 	allocator   Allocator
 	diff        DiffProvider
 	validation  ValidationProvider
+	integrity   SubmissionIntegrityChecker
 	newID       func() string
 }
 
 // Options configures a new Service.
 type Options struct {
 	NewID func() string
+	// Integrity optionally verifies the submission commit is still reachable
+	// before review creation and accept decisions. Nil disables the guard.
+	Integrity SubmissionIntegrityChecker
 }
 
 // NewService creates a review application service.
@@ -55,6 +59,7 @@ func NewService(store application.Store, submissions gitapp.SubmissionRepository
 		allocator:   Allocator{},
 		diff:        diff,
 		validation:  validation,
+		integrity:   options.Integrity,
 		newID:       options.NewID,
 	}, nil
 }
@@ -95,6 +100,11 @@ type GetReview struct {
 
 // GetSubmissionDiff retrieves the structured diff for a submission.
 type GetSubmissionDiff struct {
+	SubmissionID string
+}
+
+// GetSubmissionValidation retrieves the persisted validation job detail for a submission.
+type GetSubmissionValidation struct {
 	SubmissionID string
 }
 
@@ -236,6 +246,14 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 			return &domain.Error{Code: "state_conflict", Message: "submission is not ready for review"}
 		}
 
+		// A force-push after validation invalidates the validation binding:
+		// reject before a reviewer is allocated.
+		if s.integrity != nil {
+			if err := s.integrity.CheckIntegrity(ctx, principal.TenantID, cmd.SubmissionID, now); err != nil {
+				return err
+			}
+		}
+
 		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
 		if err != nil {
 			return err
@@ -326,6 +344,13 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			}
 			if !status.AllHardGatesPassed() {
 				return &domain.Error{Code: "hard_gates_failed", Message: "cannot accept submission with failed hard gates"}
+			}
+			// The accept decision relies on the validation result, so the
+			// validated commit must still be reachable from its branch.
+			if s.integrity != nil {
+				if err := s.integrity.CheckIntegrity(ctx, principal.TenantID, review.SubmissionID, now); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -651,6 +676,49 @@ func (s *Service) canViewSubmissionDiff(ctx context.Context, tx application.Tx, 
 		}
 	}
 	return domain.ErrForbidden
+}
+
+// GetSubmissionValidation returns the persisted validation job detail for a
+// submission. The caller must satisfy the same authorization policy as the
+// submission diff viewer.
+func (s *Service) GetSubmissionValidation(ctx context.Context, principal auth.Principal, query GetSubmissionValidation) (application.Envelope[gitapp.ValidationJobView], error) {
+	var result application.Envelope[gitapp.ValidationJobView]
+	if err := requireTenant(principal); err != nil {
+		return result, err
+	}
+
+	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+		now, err := tx.Now(ctx)
+		if err != nil {
+			return err
+		}
+
+		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, query.SubmissionID)
+		if err != nil {
+			return err
+		}
+
+		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		if err != nil {
+			return err
+		}
+
+		if err := s.canViewSubmissionDiff(ctx, tx, principal, query.SubmissionID, task, execution); err != nil {
+			return err
+		}
+
+		view, err := s.validation.GetValidationJobView(ctx, principal.TenantID, query.SubmissionID)
+		if err != nil {
+			return err
+		}
+
+		result = application.Envelope[gitapp.ValidationJobView]{
+			Data: *view,
+			Meta: application.Meta{ServerTime: now},
+		}
+		return nil
+	})
+	return result, err
 }
 
 // SubmitForReview moves a running execution to the reviewing state.

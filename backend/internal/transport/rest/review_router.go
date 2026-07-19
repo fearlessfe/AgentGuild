@@ -6,6 +6,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
@@ -20,6 +21,7 @@ type ReviewService interface {
 	GetReview(ctx context.Context, principal auth.Principal, query reviewapp.GetReview) (application.Envelope[reviewapp.ReviewView], error)
 	ListReviews(ctx context.Context, principal auth.Principal, query reviewapp.ListReviews) (application.Envelope[[]reviewapp.ReviewView], error)
 	GetSubmissionDiff(ctx context.Context, principal auth.Principal, query reviewapp.GetSubmissionDiff) (application.Envelope[[]reviewapp.FileDiff], error)
+	GetSubmissionValidation(ctx context.Context, principal auth.Principal, query reviewapp.GetSubmissionValidation) (application.Envelope[gitapp.ValidationJobView], error)
 	SubmitForReview(ctx context.Context, principal auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error)
 }
 
@@ -198,6 +200,20 @@ func (s *Server) getSubmissionDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := mustPrincipal(r)
 	result, err := s.reviewSvc.GetSubmissionDiff(r.Context(), principal, reviewapp.GetSubmissionDiff{SubmissionID: chi.URLParam(r, "id")})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) getSubmissionValidation(w http.ResponseWriter, r *http.Request) {
+	if s.reviewSvc == nil {
+		writeError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "review service is not configured")
+		return
+	}
+	principal := mustPrincipal(r)
+	result, err := s.reviewSvc.GetSubmissionValidation(r.Context(), principal, reviewapp.GetSubmissionValidation{SubmissionID: chi.URLParam(r, "id")})
 	if err != nil {
 		mapDomainError(w, err, principal)
 		return

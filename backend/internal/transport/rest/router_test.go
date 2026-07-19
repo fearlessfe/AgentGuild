@@ -16,6 +16,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
@@ -176,19 +177,21 @@ func (f *fakeApplication) GetExecution(ctx context.Context, p auth.Principal, q 
 
 // fakeReviewService 记录 review 应用服务调用参数并按预置值返回。
 type fakeReviewService struct {
-	calls                []call
-	createReview         application.Envelope[reviewapp.ReviewView]
-	createReviewErr      error
-	submitDecision       application.Envelope[reviewapp.ReviewView]
-	submitDecisionErr    error
-	addComment           application.Envelope[reviewapp.CommentView]
-	addCommentErr        error
-	getReview            application.Envelope[reviewapp.ReviewView]
-	getReviewErr         error
-	getSubmissionDiff    application.Envelope[[]reviewapp.FileDiff]
-	getSubmissionDiffErr error
-	submitForReview      application.Envelope[application.ExecutionView]
-	submitForReviewErr   error
+	calls                      []call
+	createReview               application.Envelope[reviewapp.ReviewView]
+	createReviewErr            error
+	submitDecision             application.Envelope[reviewapp.ReviewView]
+	submitDecisionErr          error
+	addComment                 application.Envelope[reviewapp.CommentView]
+	addCommentErr              error
+	getReview                  application.Envelope[reviewapp.ReviewView]
+	getReviewErr               error
+	getSubmissionDiff          application.Envelope[[]reviewapp.FileDiff]
+	getSubmissionDiffErr       error
+	getSubmissionValidation    application.Envelope[gitapp.ValidationJobView]
+	getSubmissionValidationErr error
+	submitForReview            application.Envelope[application.ExecutionView]
+	submitForReviewErr         error
 }
 
 func (f *fakeReviewService) CreateReview(ctx context.Context, p auth.Principal, cmd reviewapp.CreateReview) (application.Envelope[reviewapp.ReviewView], error) {
@@ -219,6 +222,11 @@ func (f *fakeReviewService) ListReviews(ctx context.Context, p auth.Principal, q
 func (f *fakeReviewService) GetSubmissionDiff(ctx context.Context, p auth.Principal, q reviewapp.GetSubmissionDiff) (application.Envelope[[]reviewapp.FileDiff], error) {
 	f.calls = append(f.calls, call{method: "GetSubmissionDiff", principal: p, payload: q})
 	return f.getSubmissionDiff, f.getSubmissionDiffErr
+}
+
+func (f *fakeReviewService) GetSubmissionValidation(ctx context.Context, p auth.Principal, q reviewapp.GetSubmissionValidation) (application.Envelope[gitapp.ValidationJobView], error) {
+	f.calls = append(f.calls, call{method: "GetSubmissionValidation", principal: p, payload: q})
+	return f.getSubmissionValidation, f.getSubmissionValidationErr
 }
 
 func (f *fakeReviewService) SubmitForReview(ctx context.Context, p auth.Principal, cmd reviewapp.SubmitForReview) (application.Envelope[application.ExecutionView], error) {
@@ -355,6 +363,84 @@ func TestCreateReviewRequiresSession(t *testing.T) {
 	res = postJSONWithSession(t, server, "/v1/submissions/sub-1/reviews", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "req-r")
 	require.Equal(t, http.StatusCreated, res.Code)
 	require.Len(t, review.calls, 1)
+}
+
+func TestGetSubmissionValidationReturnsJobView(t *testing.T) {
+	startedAt := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
+	review := &fakeReviewService{
+		getSubmissionValidation: application.Envelope[gitapp.ValidationJobView]{
+			Data: gitapp.ValidationJobView{
+				ID:            "job-1",
+				TenantID:      "tenant-1",
+				SubmissionID:  "sub-1",
+				Status:        "succeeded",
+				Attempt:       1,
+				ConfigVersion: "cfg-v1",
+				Steps: []gitapp.StepView{
+					{Step: "build", Status: "succeeded", HardGate: true, LogSummary: "build ok", ResourceUsage: []byte(`{"elapsed_ms":1200}`), StartedAt: &startedAt},
+					{Step: "security_scan", Status: "failed", HardGate: false, LogSummary: "1 warning"},
+				},
+				CreatedAt: startedAt,
+				UpdatedAt: startedAt,
+			},
+			Meta: application.Meta{ServerTime: startedAt},
+		},
+	}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+
+	res := getWithSession(t, server, "/v1/submissions/sub-1/validation", sessionCookie(t, "owner-1", false))
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, review.calls, 1)
+	require.Equal(t, "GetSubmissionValidation", review.calls[0].method)
+	require.Equal(t, reviewapp.GetSubmissionValidation{SubmissionID: "sub-1"}, review.calls[0].payload)
+	require.Contains(t, res.Body.String(), `"hard_gate":true`)
+	require.Contains(t, res.Body.String(), `"log_summary":"build ok"`)
+	require.Contains(t, res.Body.String(), `"elapsed_ms":1200`)
+	require.Contains(t, res.Body.String(), `"config_version":"cfg-v1"`)
+}
+
+func TestGetSubmissionValidationAcceptsBearerToken(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+
+	res := get(t, server, "/v1/submissions/sub-1/validation", "token-agent-1")
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Len(t, review.calls, 1)
+	require.Equal(t, "agent-1", review.calls[0].principal.AgentID)
+}
+
+func TestGetSubmissionValidationRequiresAuthentication(t *testing.T) {
+	review := &fakeReviewService{}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/submissions/sub-1/validation", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+	require.Empty(t, review.calls)
+}
+
+func TestGetSubmissionValidationMapsForbiddenLikeDiffEndpoint(t *testing.T) {
+	review := &fakeReviewService{getSubmissionValidationErr: domain.ErrForbidden}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+
+	// 非管理员的 forbidden 与 diff 端点一致地映射为 404，避免泄露资源存在性。
+	res := getWithSession(t, server, "/v1/submissions/sub-1/validation", sessionCookie(t, "owner-1", false))
+	require.Equal(t, http.StatusNotFound, res.Code)
+	require.JSONEq(t, `{"error":{"code":"NOT_FOUND","message":"resource not found"}}`, res.Body.String())
+
+	// 携带 admin scope 的主体保留 403 语义。
+	res = get(t, server, "/v1/submissions/sub-1/validation", "token-admin")
+	require.Equal(t, http.StatusForbidden, res.Code)
+}
+
+func TestGetSubmissionValidationMapsNotFound(t *testing.T) {
+	review := &fakeReviewService{getSubmissionValidationErr: domain.ErrNotFound}
+	server := newTestServer(&fakeApplication{}, rest.WithReviewService(review))
+
+	res := getWithSession(t, server, "/v1/submissions/missing/validation", sessionCookie(t, "owner-1", false))
+	require.Equal(t, http.StatusNotFound, res.Code)
+	require.JSONEq(t, `{"error":{"code":"NOT_FOUND","message":"resource not found"}}`, res.Body.String())
 }
 
 func TestPublishTaskRejectsSessionOnly(t *testing.T) {

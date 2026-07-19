@@ -110,6 +110,81 @@ func TestMultipleReapersSkipLockedAndProcessEachExecutionOnce(t *testing.T) {
 	}
 }
 
+func TestReaperExpiresUnclaimedOpenTaskPastDeadline(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedReaperOpenTask(t, db, "task-open-1", time.Now().Add(-time.Second))
+	reaper := postgres.NewReaper(db)
+
+	count, err := reaper.RunBatch(context.Background(), 10)
+	if err != nil || count != 1 {
+		t.Fatalf("RunBatch()=%d, %v", count, err)
+	}
+	count, err = reaper.RunBatch(context.Background(), 10)
+	if err != nil || count != 0 {
+		t.Fatalf("second RunBatch()=%d, %v", count, err)
+	}
+
+	var status, actorType, actorID, fromState, toState string
+	var executionID *string
+	var eventCount, outboxCount int
+	err = db.QueryRow(context.Background(), `
+		SELECT t.status,
+		       (SELECT count(*) FROM task_events WHERE tenant_id='tenant-1' AND task_id=t.id AND intent='expire'),
+		       (SELECT count(*) FROM outbox_events WHERE tenant_id='tenant-1' AND aggregate_id=t.id AND event_type='task.expired')
+		FROM tasks t WHERE t.tenant_id='tenant-1' AND t.id='task-open-1'`).Scan(&status, &eventCount, &outboxCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "expired" || eventCount != 1 || outboxCount != 1 {
+		t.Fatalf("status=%s events=%d outbox=%d", status, eventCount, outboxCount)
+	}
+	err = db.QueryRow(context.Background(), `
+		SELECT execution_id, actor_type, actor_id, from_state, to_state
+		FROM task_events WHERE tenant_id='tenant-1' AND task_id='task-open-1' AND intent='expire'`).
+		Scan(&executionID, &actorType, &actorID, &fromState, &toState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executionID != nil || actorType != "system" || actorID != "reaper" || fromState != "open" || toState != "expired" {
+		t.Fatalf("event execution=%v actor=%s/%s transition=%s->%s", executionID, actorType, actorID, fromState, toState)
+	}
+}
+
+func TestReaperLeavesUnclaimedOpenTaskBeforeDeadline(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	seedReaperOpenTask(t, db, "task-open-1", time.Now().Add(time.Hour))
+
+	count, err := postgres.NewReaper(db).RunBatch(context.Background(), 10)
+	if err != nil || count != 0 {
+		t.Fatalf("RunBatch()=%d, %v", count, err)
+	}
+
+	var status string
+	var eventCount, outboxCount int
+	err = db.QueryRow(context.Background(), `
+		SELECT t.status,
+		       (SELECT count(*) FROM task_events WHERE tenant_id='tenant-1' AND task_id=t.id),
+		       (SELECT count(*) FROM outbox_events WHERE tenant_id='tenant-1' AND aggregate_id=t.id)
+		FROM tasks t WHERE t.tenant_id='tenant-1' AND t.id='task-open-1'`).Scan(&status, &eventCount, &outboxCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != "open" || eventCount != 0 || outboxCount != 0 {
+		t.Fatalf("status=%s events=%d outbox=%d", status, eventCount, outboxCount)
+	}
+}
+
+func seedReaperOpenTask(t *testing.T, db *pgxpool.Pool, taskID string, deadline time.Time) {
+	t.Helper()
+	_, err := db.Exec(context.Background(), `
+		INSERT INTO tasks (tenant_id, id, publisher_agent_version_id, type, title, problem, constraints, requirements, deadline, status)
+		VALUES ('tenant-1', $1, 'publisher', 'code', 'title', 'problem', '[]', '[]', $2, 'open');
+		`, taskID, deadline)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedReaperExecution(t *testing.T, db *pgxpool.Pool, taskID, executionID string, deadline, hardExpiry time.Time) {
 	t.Helper()
 	_, err := db.Exec(context.Background(), `

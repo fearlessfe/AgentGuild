@@ -10,6 +10,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
@@ -166,6 +167,89 @@ func TestSubmitDecisionRejectsWithoutHardGateValidation(t *testing.T) {
 	})
 
 	require.Equal(t, "hard_gates_failed", domain.CodeOf(err))
+}
+
+// seedIntegritySubmission overwrites the bare submission seeded by
+// seedExecution with the repository binding the integrity checker needs.
+func seedIntegritySubmission(t *testing.T, f *reviewFixture, tenantID, submissionID, executionID string) {
+	t.Helper()
+	require.NoError(t, f.submissions.Save(context.Background(), &gitdomain.Submission{
+		ID: submissionID, TenantID: tenantID, ExecutionID: executionID,
+		Repo: "owner/repo", Branch: "agentguild/" + executionID, CommitSHA: "head-sha",
+		Status: gitdomain.SubmissionStatusValidated,
+	}))
+}
+
+func TestCreateReviewRejectsForcePushedSubmission(t *testing.T) {
+	fixture := newReviewFixtureWithIntegrity(t, &integrityDriver{branchHeadSHA: "new-head", reachable: false})
+	seedExecution(t, fixture, "tenant-1", "submission-1", domain.ExecutionReviewing)
+	seedIntegritySubmission(t, fixture, "tenant-1", "submission-1", "submission-1")
+	fixture.seedReviewer("tenant-1", "reviewer-1", "user-1", []string{"go"}, 0)
+	fixture.seedRubric("tenant-1", "rubric-1", 1)
+
+	_, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-force-push",
+		SubmissionID: "submission-1",
+		Capabilities: []string{"go"},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "state_conflict", domain.CodeOf(err))
+	require.Empty(t, fixture.store.reviews)
+	require.Equal(t, 0, fixture.store.reviewers["tenant-1/reviewer-1"].CurrentLoad)
+}
+
+func TestCreateReviewAllowsReachableSubmission(t *testing.T) {
+	fixture := newReviewFixtureWithIntegrity(t, &integrityDriver{branchHeadSHA: "new-head", reachable: true})
+	seedExecution(t, fixture, "tenant-1", "submission-1", domain.ExecutionReviewing)
+	seedIntegritySubmission(t, fixture, "tenant-1", "submission-1", "submission-1")
+	fixture.seedReviewer("tenant-1", "reviewer-1", "user-1", []string{"go"}, 0)
+	fixture.seedRubric("tenant-1", "rubric-1", 1)
+
+	got, err := fixture.svc.CreateReview(context.Background(), publisherPrincipal("tenant-1", "publisher-v1"), reviewapp.CreateReview{
+		RequestID:    "req-reachable",
+		SubmissionID: "submission-1",
+		Capabilities: []string{"go"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "submission-1", got.Data.SubmissionID)
+}
+
+func TestSubmitDecisionRejectsAcceptAfterForcePush(t *testing.T) {
+	fixture := newReviewFixtureWithIntegrity(t, &integrityDriver{branchHeadSHA: "new-head", reachable: false})
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	seedIntegritySubmission(t, fixture, "tenant-1", "submission-1", "submission-1")
+	fixture.validation.pass = true
+
+	_, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
+		RequestID: "req-accept-force-push",
+		ReviewID:  review.ID,
+		Decision:  reviewdomain.DecisionAccepted,
+		Scores:    []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
+	})
+
+	require.Error(t, err)
+	require.Equal(t, "state_conflict", domain.CodeOf(err))
+	require.Equal(t, reviewdomain.ReviewPending, fixture.store.reviews[reviewKey("tenant-1", review.ID)].Status)
+	require.Equal(t, domain.ExecutionReviewing, fixture.store.executions["tenant-1/submission-1"].Status)
+}
+
+func TestSubmitDecisionAcceptsWhenCommitStillReachable(t *testing.T) {
+	fixture := newReviewFixtureWithIntegrity(t, &integrityDriver{branchHeadSHA: "new-head", reachable: true})
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	seedIntegritySubmission(t, fixture, "tenant-1", "submission-1", "submission-1")
+	fixture.validation.pass = true
+
+	got, err := fixture.svc.SubmitDecision(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.SubmitDecision{
+		RequestID: "req-accept-reachable",
+		ReviewID:  review.ID,
+		Decision:  reviewdomain.DecisionAccepted,
+		Scores:    []reviewdomain.RubricScore{{Dimension: "quality", Score: 80}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, string(reviewdomain.DecisionAccepted), got.Data.FinalDecision)
 }
 
 func TestSubmitDecisionCanCompleteTaskAfterDeadline(t *testing.T) {
@@ -402,6 +486,78 @@ func TestGetSubmissionDiffRejectsUnauthorizedViewer(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrForbidden)
 }
 
+func TestGetSubmissionValidationReturnsJobForAuthorizedViewer(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	startedAt := fixture.store.now
+	finishedAt := fixture.store.now.Add(2 * time.Second)
+	fixture.validation.jobView = &gitapp.ValidationJobView{
+		ID:            "job-1",
+		TenantID:      "tenant-1",
+		SubmissionID:  review.SubmissionID,
+		Status:        "succeeded",
+		Attempt:       1,
+		ConfigVersion: "cfg-v1",
+		Steps: []gitapp.StepView{
+			{
+				Step:          "build",
+				Status:        "succeeded",
+				HardGate:      true,
+				LogSummary:    "build ok",
+				ResourceUsage: []byte(`{"elapsed_ms":1200}`),
+				StartedAt:     &startedAt,
+				FinishedAt:    &finishedAt,
+			},
+		},
+		CreatedAt: startedAt,
+		UpdatedAt: finishedAt,
+	}
+
+	got, err := fixture.svc.GetSubmissionValidation(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.GetSubmissionValidation{SubmissionID: review.SubmissionID})
+	require.NoError(t, err)
+	require.Equal(t, "job-1", got.Data.ID)
+	require.Equal(t, "succeeded", got.Data.Status)
+	require.Equal(t, "cfg-v1", got.Data.ConfigVersion)
+	require.Len(t, got.Data.Steps, 1)
+	require.Equal(t, "build", got.Data.Steps[0].Step)
+	require.True(t, got.Data.Steps[0].HardGate)
+	require.JSONEq(t, `{"elapsed_ms":1200}`, string(got.Data.Steps[0].ResourceUsage))
+}
+
+func TestGetSubmissionValidationAllowsTenantAdmin(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	fixture.validation.jobView = &gitapp.ValidationJobView{ID: "job-1", SubmissionID: review.SubmissionID, Status: "pending"}
+
+	got, err := fixture.svc.GetSubmissionValidation(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "admin-1", IsAdmin: true}, reviewapp.GetSubmissionValidation{SubmissionID: review.SubmissionID})
+	require.NoError(t, err)
+	require.Equal(t, "job-1", got.Data.ID)
+}
+
+func TestGetSubmissionValidationRejectsUnauthorizedViewer(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+
+	_, err := fixture.svc.GetSubmissionValidation(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeHuman, OwnerID: "user-other"}, reviewapp.GetSubmissionValidation{SubmissionID: review.SubmissionID})
+	require.ErrorIs(t, err, domain.ErrForbidden)
+}
+
+func TestGetSubmissionValidationReturnsNotFoundForUnknownSubmission(t *testing.T) {
+	fixture := newReviewFixture(t)
+
+	_, err := fixture.svc.GetSubmissionValidation(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.GetSubmissionValidation{SubmissionID: "missing"})
+	require.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func TestGetSubmissionValidationPropagatesValidationJobNotFound(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	fixture.validation.jobErr = git.ErrValidationJobNotFound
+
+	_, err := fixture.svc.GetSubmissionValidation(context.Background(), reviewerPrincipal("tenant-1", "reviewer-1"), reviewapp.GetSubmissionValidation{SubmissionID: review.SubmissionID})
+	require.ErrorIs(t, err, git.ErrValidationJobNotFound)
+}
+
 func TestPolicyRequiresReviewerForDecision(t *testing.T) {
 	policy := reviewapp.Policy{}
 	review := reviewapp.ReviewRecord{TenantID: "tenant-1", ReviewerUserID: "user-1"}
@@ -486,16 +642,51 @@ type reviewFixture struct {
 
 func newReviewFixture(t *testing.T) *reviewFixture {
 	t.Helper()
+	return newReviewFixtureWithIntegrity(t, nil)
+}
+
+func newReviewFixtureWithIntegrity(t *testing.T, driver git.Driver) *reviewFixture {
+	t.Helper()
 	now := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	store := newReviewMemoryStore(now)
 	validation := &fakeValidationProvider{pass: true}
 	diff := &fakeDiffProvider{data: []reviewapp.FileDiff{{Path: "main.go"}}}
 	submissions := &fakeSubmissionRepository{items: make(map[string]*gitdomain.Submission)}
-	svc, err := reviewapp.NewService(store, submissions, diff, validation, reviewapp.Options{
+	options := reviewapp.Options{
 		NewID: sequenceIDs("review-1", "comment-1", "review-2"),
-	})
+	}
+	if driver != nil {
+		integrity, err := reviewapp.NewGitSubmissionIntegrityChecker(submissions, &providerResolver{driver: driver})
+		require.NoError(t, err)
+		options.Integrity = integrity
+	}
+	svc, err := reviewapp.NewService(store, submissions, diff, validation, options)
 	require.NoError(t, err)
 	return &reviewFixture{svc: svc, alloc: reviewapp.Allocator{}, store: store, submissions: submissions, validation: validation}
+}
+
+// integrityDriver fakes the git driver calls used by
+// GitSubmissionIntegrityChecker: the branch head lookup and the ancestry
+// check between the submission commit and that head.
+type integrityDriver struct {
+	branchHeadSHA string
+	reachable     bool
+}
+
+func (*integrityDriver) CreateCredential(context.Context, string, string, string) (git.Credential, error) {
+	return git.Credential{}, nil
+}
+
+func (d *integrityDriver) GetCommit(context.Context, string, string) (git.Commit, error) {
+	return git.Commit{SHA: d.branchHeadSHA}, nil
+}
+
+func (*integrityDriver) CompareCommits(context.Context, string, string, string) ([]git.ChangedFile, error) {
+	return nil, nil
+}
+
+func (d *integrityDriver) IsAncestor(context.Context, string, string, string) (bool, error) {
+	return d.reachable, nil
 }
 
 func seedExecution(t *testing.T, f *reviewFixture, tenantID, executionID string, status domain.ExecutionStatus) {
@@ -983,11 +1174,17 @@ func (f *fakeDiffProvider) GetDiff(context.Context, string, string) ([]reviewapp
 }
 
 type fakeValidationProvider struct {
-	pass bool
+	pass    bool
+	jobView *gitapp.ValidationJobView
+	jobErr  error
 }
 
 func (f *fakeValidationProvider) GetValidationStatus(context.Context, string, string) (reviewapp.ValidationStatus, error) {
 	return fakeValidationStatus{pass: f.pass}, nil
+}
+
+func (f *fakeValidationProvider) GetValidationJobView(context.Context, string, string) (*gitapp.ValidationJobView, error) {
+	return f.jobView, f.jobErr
 }
 
 type fakeValidationStatus struct {

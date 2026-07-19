@@ -3,12 +3,14 @@ import {
   ApiError,
   addGitHubAppRepository,
   addPublicRepository,
+  apiRequest,
   createSyncRule,
   deleteGitHubApp,
   getExecution,
   getGitHubApp,
   getTask,
   githubInstallUrl,
+  listExecutionSubmissions,
   listGitHubAppRepositories,
   listGitHubApps,
   listSyncRules,
@@ -16,6 +18,7 @@ import {
   removeRepository,
   testGitHubApp,
 } from "./client";
+import type { ValidationJobView } from "../features/reviews/reviews.types";
 
 const baseUrl = "/api";
 
@@ -343,5 +346,50 @@ describe("GitHub issue sync API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe(`${baseUrl}/v1/github-app:test`);
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("POST");
+  });
+});
+
+describe("demo mode review decision context", () => {
+  afterEach(() => {
+    delete (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE;
+  });
+
+  it("returns the persisted validation job for a submission", async () => {
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+
+    const response = await apiRequest<ValidationJobView>("/v1/submissions/sub-1/validation");
+
+    expect(response.data.submission_id).toBe("sub-1");
+    expect(response.data.status).toBe("succeeded");
+    expect(response.data.config_version).toBeTruthy();
+    expect(response.data.steps.length).toBeGreaterThan(0);
+    expect(response.data.steps.some((step) => step.hard_gate)).toBe(true);
+    expect(response.data.steps[0].log_summary).toBeTruthy();
+    expect(response.data.steps[0].resource_usage?.elapsed_ms).toBeGreaterThan(0);
+  });
+
+  it("marks the earlier revision's validation job as failed", async () => {
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+
+    const response = await apiRequest<ValidationJobView>("/v1/submissions/sub-0/validation");
+
+    expect(response.data.status).toBe("failed");
+    expect(response.data.steps.find((step) => step.step === "public_tests")?.status).toBe("failed");
+  });
+
+  it("lists every revision of the demo execution", async () => {
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+
+    const response = await listExecutionSubmissions("exec-AG-188");
+
+    expect(response.data.map((item) => item.id)).toEqual(["sub-0", "sub-1"]);
+  });
+
+  it("falls back to a known demo task for arbitrary execution ids", async () => {
+    (import.meta.env as Record<string, string | undefined>).VITE_DEMO_MODE = "true";
+
+    const response = await getExecution("exec-route-99");
+
+    expect(response.data.task_id).toBe("AG-188");
   });
 });

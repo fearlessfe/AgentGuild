@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/url"
 	"strings"
@@ -224,6 +225,7 @@ type SubmissionService struct {
 	verifier   *CommitVerifier
 	notifier   ExecutionNotifier
 	authorizer SubmissionAuthorizer
+	deadlines  TaskDeadlineResolver
 	newID      func() string
 }
 
@@ -302,12 +304,13 @@ type CheckSubmissionIntegrity struct {
 
 // StepView is the public shape of a validation step.
 type StepView struct {
-	Step          string     `json:"step"`
-	Status        string     `json:"status"`
-	LogSummary    string     `json:"log_summary,omitempty"`
-	ResourceUsage []byte     `json:"resource_usage,omitempty"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	Step          string          `json:"step"`
+	Status        string          `json:"status"`
+	HardGate      bool            `json:"hard_gate"`
+	LogSummary    string          `json:"log_summary,omitempty"`
+	ResourceUsage json.RawMessage `json:"resource_usage,omitempty"`
+	StartedAt     *time.Time      `json:"started_at,omitempty"`
+	FinishedAt    *time.Time      `json:"finished_at,omitempty"`
 }
 
 // ValidationJobView is the public shape of a validation job.
@@ -323,6 +326,35 @@ type ValidationJobView struct {
 	Steps         []StepView `json:"steps"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+// ValidationJobViewFromDomain maps a persisted validation job to its public view.
+func ValidationJobViewFromDomain(job *gitdomain.ValidationJob) ValidationJobView {
+	steps := make([]StepView, 0, len(job.Steps))
+	for _, step := range job.Steps {
+		steps = append(steps, StepView{
+			Step:          string(step.Step),
+			Status:        string(step.Status),
+			HardGate:      step.HardGate,
+			LogSummary:    step.LogSummary,
+			ResourceUsage: json.RawMessage(step.ResourceUsage),
+			StartedAt:     step.StartedAt,
+			FinishedAt:    step.FinishedAt,
+		})
+	}
+	return ValidationJobView{
+		ID:            job.ID,
+		TenantID:      job.TenantID,
+		SubmissionID:  job.SubmissionID,
+		Status:        string(job.Status),
+		Attempt:       job.Attempt,
+		ClaimedUntil:  job.ClaimedUntil,
+		ClaimedBy:     job.ClaimedBy,
+		ConfigVersion: job.ConfigVersion,
+		Steps:         steps,
+		CreatedAt:     job.CreatedAt,
+		UpdatedAt:     job.UpdatedAt,
+	}
 }
 
 // SubmissionView is the public shape of a submission.
