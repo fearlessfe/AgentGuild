@@ -2,7 +2,9 @@ package postgres_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,7 +116,7 @@ func TestCredentialServiceIssuesCredentialThroughPostgresStore(t *testing.T) {
 		ExecutionID: "exec-1", Repo: "owner/repo", BaseCommit: "abc",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "tok-exec-1", got.Data.Token)
+	require.True(t, strings.HasPrefix(got.Data.Token, "agc_"))
 	require.Equal(t, "agentguild/exec-1", got.Data.Credential.Branch)
 
 	repo := postgres.NewCredentialRepository(db)
@@ -122,6 +124,10 @@ func TestCredentialServiceIssuesCredentialThroughPostgresStore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "exec-1", record.ExecutionID)
 	require.Empty(t, record.RevokedAt)
+	require.Equal(t, "owner/repo", record.Repo)
+	require.NotEmpty(t, record.RequestHash)
+	tokenHash := sha256.Sum256([]byte(got.Data.Token))
+	require.Equal(t, tokenHash[:], record.TokenHash)
 }
 
 func TestCredentialServiceRevokeThroughPostgresStore(t *testing.T) {
@@ -138,9 +144,7 @@ func TestCredentialServiceRevokeThroughPostgresStore(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, err := svc.RevokeCredential(ctx, application.Principal{
-		TenantID: "tenant-1", OwnerID: "owner-1",
-	}, application.RevokeCredential{ExecutionID: "exec-1"})
+	got, err := svc.RevokeCredential(ctx, credentialAgentPrincipal(), application.RevokeCredential{ExecutionID: "exec-1"})
 	require.NoError(t, err)
 	require.NotNil(t, got.Data.RevokedAt)
 
@@ -168,16 +172,21 @@ func TestGitHubAppRepositoryPersistsManifestColumns(t *testing.T) {
 }
 
 func sampleRecord(tenantID, executionID string) *application.CredentialRecord {
+	requestHash := sha256.Sum256([]byte("request-" + executionID))
+	tokenHash := sha256.Sum256([]byte("token-" + executionID))
 	return &application.CredentialRecord{
 		ID:          "cred-" + executionID,
 		TenantID:    tenantID,
 		ExecutionID: executionID,
 		Provider:    "github",
+		Repo:        "owner/repo",
 		RepoURL:     "https://github.com/owner/repo.git",
 		Branch:      "agentguild/" + executionID,
 		BaseCommit:  "abc",
 		ExpiresAt:   time.Now().Add(15 * time.Minute).UTC().Truncate(time.Microsecond),
 		Status:      gitdomain.CredentialStatusActive,
+		RequestHash: requestHash[:],
+		TokenHash:   tokenHash[:],
 		CreatedAt:   time.Now().UTC().Truncate(time.Microsecond),
 	}
 }

@@ -22,9 +22,10 @@ func TestWorkerProcessesUnprojectedReviews(t *testing.T) {
 	ctx := context.Background()
 
 	seedReviewableExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
+	insertSubmission(t, db, "tenant-1", "sub-1", "task-1", "exe-1")
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
-	review := submitReview(t, db, "tenant-1", "review-1", "exe-1", reviewerID, rubricID, reviewdomain.DecisionAccepted)
+	review := submitReview(t, db, "tenant-1", "review-1", "sub-1", reviewerID, rubricID, reviewdomain.DecisionAccepted)
 
 	w := reputationworker.NewWorker(postgres.NewStore(db), 10*time.Millisecond, 10, slog.Default())
 	require.NoError(t, w.RunOnce(ctx))
@@ -43,9 +44,10 @@ func TestWorkerDoesNotProcessPendingReviews(t *testing.T) {
 	ctx := context.Background()
 
 	seedReviewableExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
+	insertSubmission(t, db, "tenant-1", "sub-1", "task-1", "exe-1")
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
-	review, err := reviewdomain.NewReview("review-1", "tenant-1", "exe-1", reviewerID, rubricID, "code-review", time.Now())
+	review, err := reviewdomain.NewReview("review-1", "tenant-1", "sub-1", reviewerID, rubricID, "code-review", time.Now())
 	require.NoError(t, err)
 	require.NoError(t, reviewpostgres.NewReviewRepository(db).Insert(ctx, review))
 
@@ -70,13 +72,16 @@ func TestWorkerGroupsByTenantAndKey(t *testing.T) {
 	seedReviewableExecution(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
 	seedReviewableExecution(t, db, "tenant-1", "task-2", "exe-2", "agent-v1", "code")
 	seedReviewableExecution(t, db, "tenant-2", "task-3", "exe-3", "agent-v1", "code")
+	insertSubmission(t, db, "tenant-1", "sub-1", "task-1", "exe-1")
+	insertSubmission(t, db, "tenant-1", "sub-2", "task-2", "exe-2")
+	insertSubmission(t, db, "tenant-2", "sub-3", "task-3", "exe-3")
 	reviewerID1 := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	reviewerID2 := insertReviewer(t, db, "tenant-2", "reviewer-2")
 	rubricID1 := insertRubricVersion(t, db, "tenant-1", 1)
 	rubricID2 := insertRubricVersion(t, db, "tenant-2", 1)
-	submitReview(t, db, "tenant-1", "review-1", "exe-1", reviewerID1, rubricID1, reviewdomain.DecisionAccepted)
-	submitReview(t, db, "tenant-1", "review-2", "exe-2", reviewerID1, rubricID1, reviewdomain.DecisionRejected)
-	submitReview(t, db, "tenant-2", "review-3", "exe-3", reviewerID2, rubricID2, reviewdomain.DecisionAccepted)
+	submitReview(t, db, "tenant-1", "review-1", "sub-1", reviewerID1, rubricID1, reviewdomain.DecisionAccepted)
+	submitReview(t, db, "tenant-1", "review-2", "sub-2", reviewerID1, rubricID1, reviewdomain.DecisionRejected)
+	submitReview(t, db, "tenant-2", "review-3", "sub-3", reviewerID2, rubricID2, reviewdomain.DecisionAccepted)
 
 	w := reputationworker.NewWorker(postgres.NewStore(db), 10*time.Millisecond, 10, slog.Default())
 	require.NoError(t, w.RunOnce(ctx))
@@ -124,9 +129,11 @@ func TestWorkerAccumulatesProjectionsAcrossBatches(t *testing.T) {
 	for i := 0; i < totalReviews; i++ {
 		taskID := fmt.Sprintf("task-%d", i)
 		executionID := fmt.Sprintf("exe-%d", i)
+		submissionID := fmt.Sprintf("sub-%d", i)
 		reviewID := fmt.Sprintf("review-%d", i)
 		seedReviewableExecution(t, db, "tenant-1", taskID, executionID, "agent-v1", "code")
-		submitReview(t, db, "tenant-1", reviewID, executionID, reviewerID, rubricID, reviewdomain.DecisionAccepted)
+		insertSubmission(t, db, "tenant-1", submissionID, taskID, executionID)
+		submitReview(t, db, "tenant-1", reviewID, submissionID, reviewerID, rubricID, reviewdomain.DecisionAccepted)
 	}
 
 	w := reputationworker.NewWorker(postgres.NewStore(db), 10*time.Millisecond, 2, slog.Default())
@@ -137,7 +144,7 @@ func TestWorkerAccumulatesProjectionsAcrossBatches(t *testing.T) {
 	var total int
 	require.NoError(t, db.QueryRow(ctx, `
 		SELECT total_reviews FROM reputation_projections
-		WHERE tenant_id='tenant-1' AND agent_version_id='agent-v1' AND capability='go' AND task_type='code'`).Scan(&total))
+		WHERE tenant_id='tenant-1' AND agent_version_id='agent-v1' AND capability='code-review' AND task_type='code'`).Scan(&total))
 	require.Equal(t, totalReviews, total)
 
 	for i := 0; i < totalReviews; i++ {
@@ -157,6 +164,18 @@ func seedReviewableExecution(t *testing.T, db *pgxpool.Pool, tenantID, taskID, e
 		INSERT INTO executions (tenant_id, id, task_id, agent_version_id, status, lease_generation, started_at)
 		VALUES ($1, $2, $3, $4, 'reviewing', 1, clock_timestamp())`,
 		tenantID, executionID, taskID, agentVersionID)
+	require.NoError(t, err)
+}
+
+// insertSubmission seeds a validated submission row linking an execution so that
+// review queries joining reviews -> submissions -> executions can resolve.
+func insertSubmission(t *testing.T, db *pgxpool.Pool, tenantID, submissionID, taskID, executionID string) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := db.Exec(ctx, `
+		INSERT INTO submissions (tenant_id, id, task_id, execution_id, branch, commit_sha, base_commit_sha, summary, diff_fingerprint, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'main', 'head-sha', 'base-sha', 'summary', 'fp', 'validated', clock_timestamp(), clock_timestamp())`,
+		tenantID, submissionID, taskID, executionID)
 	require.NoError(t, err)
 }
 

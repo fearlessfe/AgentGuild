@@ -62,11 +62,9 @@ func (f *fakeGitDriver) IsAncestor(_ context.Context, _, base, head string) (boo
 func defaultGitDriver() *fakeGitDriver {
 	return &fakeGitDriver{
 		commits: map[string]git.Commit{
-			"head-sha":         {SHA: "head-sha"},
-			"base-sha":         {SHA: "base-sha"},
-			"agentguild/exe-1": {SHA: "head-sha"},
-			"head-sha-2":       {SHA: "head-sha-2"},
-			"agentguild/exe-2": {SHA: "head-sha-2"},
+			"head-sha":   {SHA: "head-sha"},
+			"base-sha":   {SHA: "base-sha"},
+			"head-sha-2": {SHA: "head-sha-2"},
 		},
 		compareFiles: []git.ChangedFile{{Filename: "src/main.go", Status: "modified"}},
 		ancestors: map[ancestorKey]bool{
@@ -76,7 +74,7 @@ func defaultGitDriver() *fakeGitDriver {
 	}
 }
 
-func newSubmissionService(t *testing.T, svc *application.Service, resolver gitapp.RepositoryGitResolver) *gitapp.SubmissionService {
+func newSubmissionService(t *testing.T, svc *application.Service, resolver gitapp.RepositoryGitResolver) (*gitapp.SubmissionService, *gitapp.CredentialService) {
 	t.Helper()
 	db := testdb.StartPostgres(t)
 	store := gitpostgres.NewStore(db)
@@ -86,7 +84,28 @@ func newSubmissionService(t *testing.T, svc *application.Service, resolver gitap
 	})
 	subSvc, err := gitapp.NewSubmissionService(store, verifier, nil, authorizer, nil)
 	require.NoError(t, err)
-	return subSvc
+	credSvc, err := gitapp.NewCredentialService(store, resolver, gitapp.Options{
+		Authorizer: gitapp.CredentialGrantAuthorizerFunc(func(_ context.Context, _ gitapp.Principal, cmd gitapp.IssueCredential, _ time.Time) (gitapp.CredentialGrant, error) {
+			return gitapp.CredentialGrant{Repo: cmd.Repo, BaseCommit: cmd.BaseCommit}, nil
+		}),
+		ProxyBaseURL: "https://agentguild.example",
+		TokenSecret:  []byte("0123456789abcdef0123456789abcdef"),
+	})
+	require.NoError(t, err)
+	return subSvc, credSvc
+}
+
+// issueCredential 为执行签发活跃凭证；submission 创建要求凭证绑定该执行的
+// repo、agentguild/<execution> 分支与 base commit。
+func issueCredential(t *testing.T, credSvc *gitapp.CredentialService, execID, requestID string) {
+	t.Helper()
+	_, err := credSvc.IssueCredential(context.Background(), gitapp.Principal{
+		TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1-v1",
+		Scopes: []string{"tasks:execute"}, RepoScope: []string{"owner/*"},
+	}, gitapp.IssueCredential{
+		RequestID: requestID, ExecutionID: execID, Repo: "owner/repo", BaseCommit: "base-sha",
+	})
+	require.NoError(t, err)
 }
 
 func publishTaskWithConstraints(t *testing.T, svc *application.Service) string {
@@ -125,7 +144,7 @@ type submissionOutcome struct {
 func createSubmissionViaREST(t *testing.T, svc *application.Service, subSvc *gitapp.SubmissionService, token, executionID, requestID string, commitSHA string) submissionOutcome {
 	t.Helper()
 	server := rest.NewServer(svc, fakeVerifier{}, rest.WithSubmissionService(subSvc)).Router()
-	body := `{"request_id":"` + requestID + `","repo":"owner/repo","branch":"` + commitSHA + `","commit_sha":"` + commitSHA + `","base_commit_sha":"base-sha","summary":"fix parser"}`
+	body := `{"request_id":"` + requestID + `","repo":"owner/repo","branch":"agentguild/` + executionID + `","commit_sha":"` + commitSHA + `","base_commit_sha":"base-sha","summary":"fix parser"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/executions/"+executionID+"/submissions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -153,7 +172,7 @@ func createSubmissionViaMCP(t *testing.T, svc *application.Service, subSvc *gita
 	t.Helper()
 	mcpServer := transportmcp.NewServer(svc, fakeVerifier{}, transportmcp.WithSubmissionService(subSvc))
 	handler := mcpServer.Handler()
-	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submission_create","arguments":{"request_id":"` + requestID + `","execution_id":"` + executionID + `","repo":"owner/repo","branch":"` + commitSHA + `","commit_sha":"` + commitSHA + `","base_commit_sha":"base-sha","summary":"fix parser"}}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"submission_create","arguments":{"request_id":"` + requestID + `","execution_id":"` + executionID + `","repo":"owner/repo","branch":"agentguild/` + executionID + `","commit_sha":"` + commitSHA + `","base_commit_sha":"base-sha","summary":"fix parser"}}}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -216,11 +235,18 @@ func getSubmissionViaREST(t *testing.T, svc *application.Service, subSvc *gitapp
 
 func TestRESTAndMCPCreateSubmissionAreEquivalent(t *testing.T) {
 	svc := newService(t)
-	subSvc := newSubmissionService(t, svc, defaultGitDriver())
+	driver := defaultGitDriver()
+	subSvc, credSvc := newSubmissionService(t, svc, driver)
 	taskID := publishTaskWithConstraints(t, svc)
 	execID := startExecutionForAgent(t, svc, taskID)
+	branch := "agentguild/" + execID
 
+	issueCredential(t, credSvc, execID, "cred-rest")
+	driver.commits[branch] = git.Commit{SHA: "head-sha"}
 	rest := createSubmissionViaREST(t, svc, subSvc, "token-agent-1", execID, "req-rest", "head-sha")
+	// 提交后凭证即被撤销，再次提交需要重新签发。
+	issueCredential(t, credSvc, execID, "cred-mcp")
+	driver.commits[branch] = git.Commit{SHA: "head-sha-2"}
 	mcp := createSubmissionViaMCP(t, svc, subSvc, execID, "req-mcp", "head-sha-2")
 
 	require.Equal(t, "pending_verification", rest.Status)
@@ -231,16 +257,24 @@ func TestRESTAndMCPCreateSubmissionAreEquivalent(t *testing.T) {
 
 func TestRESTAndMCPSubmissionIdempotencyAreEquivalent(t *testing.T) {
 	svc := newService(t)
-	subSvc := newSubmissionService(t, svc, defaultGitDriver())
+	driver := defaultGitDriver()
+	subSvc, credSvc := newSubmissionService(t, svc, driver)
 	taskID := publishTaskWithConstraints(t, svc)
 	execID := startExecutionForAgent(t, svc, taskID)
+	branch := "agentguild/" + execID
 
+	issueCredential(t, credSvc, execID, "cred-rest")
+	driver.commits[branch] = git.Commit{SHA: "head-sha"}
 	first := createSubmissionViaREST(t, svc, subSvc, "token-agent-1", execID, "idem-1", "head-sha")
 	second := createSubmissionViaREST(t, svc, subSvc, "token-agent-1", execID, "idem-1", "head-sha")
+	require.NotEmpty(t, first.SubmissionID)
 	require.Equal(t, first.SubmissionID, second.SubmissionID)
 
+	issueCredential(t, credSvc, execID, "cred-mcp")
+	driver.commits[branch] = git.Commit{SHA: "head-sha-2"}
 	third := createSubmissionViaMCP(t, svc, subSvc, execID, "idem-2", "head-sha-2")
 	fourth := createSubmissionViaMCP(t, svc, subSvc, execID, "idem-2", "head-sha-2")
+	require.NotEmpty(t, third.SubmissionID)
 	require.Equal(t, third.SubmissionID, fourth.SubmissionID)
 }
 
@@ -248,11 +282,16 @@ func TestRESTAndMCPSubmissionOutOfBoundPathAreEquivalent(t *testing.T) {
 	svc := newService(t)
 	driver := defaultGitDriver()
 	driver.compareFiles = []git.ChangedFile{{Filename: "README.md", Status: "modified"}}
-	subSvc := newSubmissionService(t, svc, driver)
+	subSvc, credSvc := newSubmissionService(t, svc, driver)
 	taskID := publishTaskWithConstraints(t, svc)
 	execID := startExecutionForAgent(t, svc, taskID)
+	branch := "agentguild/" + execID
 
+	issueCredential(t, credSvc, execID, "cred-path")
+	driver.commits[branch] = git.Commit{SHA: "head-sha"}
 	rest := createSubmissionViaREST(t, svc, subSvc, "token-agent-1", execID, "req-path", "head-sha")
+	// 路径校验失败会回滚事务，凭证仍然有效，无需重新签发。
+	driver.commits[branch] = git.Commit{SHA: "head-sha-2"}
 	mcp := createSubmissionViaMCP(t, svc, subSvc, execID, "req-path2", "head-sha-2")
 
 	require.Equal(t, "INVALID_ARGUMENT", rest.DomainCode)
@@ -261,10 +300,14 @@ func TestRESTAndMCPSubmissionOutOfBoundPathAreEquivalent(t *testing.T) {
 
 func TestSubmissionQueryRejectsCrossOwner(t *testing.T) {
 	svc := newService(t)
-	subSvc := newSubmissionService(t, svc, defaultGitDriver())
+	driver := defaultGitDriver()
+	subSvc, credSvc := newSubmissionService(t, svc, driver)
 	taskID := publishTaskWithConstraints(t, svc)
 	execID := startExecutionForAgent(t, svc, taskID)
+	issueCredential(t, credSvc, execID, "cred-owner")
+	driver.commits["agentguild/"+execID] = git.Commit{SHA: "head-sha"}
 	rest := createSubmissionViaREST(t, svc, subSvc, "token-agent-1", execID, "req-owner", "head-sha")
+	require.NotEmpty(t, rest.SubmissionID)
 
 	outcome := getSubmissionViaREST(t, svc, subSvc, "token-agent-2", rest.SubmissionID)
 	require.Equal(t, "NOT_FOUND", outcome.DomainCode)
@@ -272,7 +315,7 @@ func TestSubmissionQueryRejectsCrossOwner(t *testing.T) {
 
 func TestSubmissionCreateRejectsNonOwnerExecution(t *testing.T) {
 	svc := newService(t)
-	subSvc := newSubmissionService(t, svc, defaultGitDriver())
+	subSvc, _ := newSubmissionService(t, svc, defaultGitDriver())
 	taskID := publishTaskWithConstraints(t, svc)
 
 	// Claim by agent-1 but attempt to submit with agent-2 token.
@@ -285,10 +328,14 @@ func TestSubmissionCreateRejectsNonOwnerExecution(t *testing.T) {
 
 func TestRESTAndMCPGetSubmissionAreEquivalent(t *testing.T) {
 	svc := newService(t)
-	subSvc := newSubmissionService(t, svc, defaultGitDriver())
+	driver := defaultGitDriver()
+	subSvc, credSvc := newSubmissionService(t, svc, driver)
 	taskID := publishTaskWithConstraints(t, svc)
 	execID := startExecutionForAgent(t, svc, taskID)
+	issueCredential(t, credSvc, execID, "cred-get")
+	driver.commits["agentguild/"+execID] = git.Commit{SHA: "head-sha"}
 	created := createSubmissionViaREST(t, svc, subSvc, "token-agent-1", execID, "req-get", "head-sha")
+	require.NotEmpty(t, created.SubmissionID)
 
 	rest := getSubmissionViaREST(t, svc, subSvc, "token-agent-1", created.SubmissionID)
 	require.Equal(t, "pending_verification", rest.Status)

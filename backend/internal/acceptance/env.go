@@ -208,11 +208,13 @@ func (env *Env) RunReaper() int {
 
 // SubmitForReview 将运行中的执行推进到 reviewing 状态。
 // 当前为临时入口，待 git-delivery-and-validation 模块合入后替换。
+// review 管道通过 submissions 表解析 execution（见 reviewapplication.executionForSubmission），
+// 因此这里同步补种一条以 execution id 为 id 的 validated submission，模拟真实 git 交付后的状态。
 func (env *Env) SubmitForReview(executionID string) {
 	env.T.Helper()
 	ctx := context.Background()
-	var agentVersionID string
-	err := env.DB.QueryRow(ctx, `SELECT agent_version_id FROM executions WHERE tenant_id=$1 AND id=$2`, "tenant-1", executionID).Scan(&agentVersionID)
+	var agentVersionID, taskID string
+	err := env.DB.QueryRow(ctx, `SELECT agent_version_id, task_id FROM executions WHERE tenant_id=$1 AND id=$2`, "tenant-1", executionID).Scan(&agentVersionID, &taskID)
 	require.NoError(env.T, err)
 	token := "token-agent"
 	var i int
@@ -221,6 +223,18 @@ func (env *Env) SubmitForReview(executionID string) {
 	}
 	res := env.REST.As(token).SubmitForReview(executionID, executionID+"-submit-for-review")
 	require.Empty(env.T, res.Code, "submit for review failed: %s", res.Code)
+	seedValidatedSubmission(env.T, env.DB, "tenant-1", executionID, taskID, executionID)
+}
+
+// seedValidatedSubmission 插入一条 validated submission，使 review 服务能按
+// reviews -> submissions -> executions 的现行关联解析到 execution 元数据。
+func seedValidatedSubmission(t *testing.T, db *pgxpool.Pool, tenantID, submissionID, taskID, executionID string) {
+	t.Helper()
+	_, err := db.Exec(context.Background(), `
+		INSERT INTO submissions (tenant_id, id, task_id, execution_id, branch, commit_sha, base_commit_sha, summary, diff_fingerprint, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'agentguild/' || $4, 'head-sha', 'base-sha', 'summary', 'fp-' || $2, 'validated', clock_timestamp(), clock_timestamp())`,
+		tenantID, submissionID, taskID, executionID)
+	require.NoError(t, err)
 }
 
 // CreateResubmissionExecution 模拟 revision requested 后 agent 重新提交产生的新 execution。
@@ -261,6 +275,7 @@ func (env *Env) CreateResubmissionExecution(taskID, oldExecutionID, newExecution
 		SET active_execution_id = $1, updated_at = clock_timestamp()
 		WHERE tenant_id = $2 AND id = $3`, newExecutionID, "tenant-1", taskID)
 	require.NoError(env.T, err)
+	seedValidatedSubmission(env.T, env.DB, "tenant-1", newExecutionID, taskID, newExecutionID)
 	return newExecutionID
 }
 
@@ -305,9 +320,10 @@ func (env *Env) SubmitDecisionCodeViaMCP(reviewID, decision string, scores []rev
 }
 
 // AddCommentViaREST 为 review 添加行级注释。
+// 行级注释路由要求人类 session（requireSession），token 参数用于映射到对应的 reviewer 会话。
 func (env *Env) AddCommentViaREST(reviewID, submissionID, text, token, requestID string) reviewapp.CommentView {
 	env.T.Helper()
-	res := env.REST.As(token).AddComment(reviewID, submissionID, text, requestID)
+	res := env.REST.WithSession(reviewerSessionForToken(token)).AddComment(reviewID, submissionID, text, requestID)
 	require.Empty(env.T, res.Code, "add comment failed: %s", res.Code)
 	return res.Comment
 }
@@ -1782,6 +1798,17 @@ func adminOwnerSession() *http.Cookie {
 	return cookie
 }
 
+// reviewerSessionForToken 将 reviewer token（如 token-reviewer、token-reviewer-2）
+// 映射为对应的人类 reviewer session，与 fakeVerifier 的 token 映射保持一致。
+func reviewerSessionForToken(token string) *http.Cookie {
+	ownerID := "reviewer-user-1"
+	var i int
+	if _, err := fmt.Sscanf(token, "token-reviewer-%d", &i); err == nil && i > 0 {
+		ownerID = fmt.Sprintf("reviewer-user-%d", i)
+	}
+	return tenantOwnerSession("tenant-1", ownerID)
+}
+
 func (env *Env) IdentityAuditEvents(agentID string) ([]IdentityAuditEvent, error) {
 	rows, err := env.DB.Query(context.Background(), `
 		SELECT intent
@@ -1932,6 +1959,10 @@ type acceptanceValidationProvider struct {
 
 func (a *acceptanceValidationProvider) GetValidationStatus(context.Context, string, string) (reviewapp.ValidationStatus, error) {
 	return acceptanceValidationStatus{pass: a.pass}, nil
+}
+
+func (a *acceptanceValidationProvider) GetValidationJobView(context.Context, string, string) (*gitapp.ValidationJobView, error) {
+	return nil, domain.ErrNotFound
 }
 
 type acceptanceValidationStatus struct {

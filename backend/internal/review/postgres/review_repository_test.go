@@ -365,9 +365,10 @@ func TestListUnprojectedReturnsSubmittedReviewsWithExecutionMetadata(t *testing.
 	ctx := context.Background()
 
 	insertExecutionAndTask(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
+	insertSubmission(t, db, "tenant-1", "sub-1", "task-1", "exe-1")
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
-	review := submitReviewWithRubric(t, db, "tenant-1", "review-1", "exe-1", reviewerID, rubricID, domain.DecisionAccepted)
+	review := submitReviewWithRubric(t, db, "tenant-1", "review-1", "sub-1", reviewerID, rubricID, domain.DecisionAccepted)
 
 	store := postgres.NewStore(db)
 	var records []application.ReviewSignalRecord
@@ -392,11 +393,13 @@ func TestListUnprojectedSkipsPendingAndAlreadyProjected(t *testing.T) {
 
 	insertExecutionAndTask(t, db, "tenant-1", "task-1", "exe-1", "agent-v1", "code")
 	insertExecutionAndTask(t, db, "tenant-1", "task-2", "exe-2", "agent-v1", "code")
+	insertSubmission(t, db, "tenant-1", "sub-1", "task-1", "exe-1")
+	insertSubmission(t, db, "tenant-1", "sub-2", "task-2", "exe-2")
 	reviewerID := insertReviewer(t, db, "tenant-1", "reviewer-1")
 	rubricID := insertRubricVersion(t, db, "tenant-1", 1)
-	pending := newReview("review-pending", "tenant-1", "exe-1", reviewerID, rubricID)
+	pending := newReview("review-pending", "tenant-1", "sub-1", reviewerID, rubricID)
 	require.NoError(t, postgres.NewReviewRepository(db).Insert(ctx, pending))
-	submitted := submitReviewWithRubric(t, db, "tenant-1", "review-submitted", "exe-2", reviewerID, rubricID, domain.DecisionAccepted)
+	submitted := submitReviewWithRubric(t, db, "tenant-1", "review-submitted", "sub-2", reviewerID, rubricID, domain.DecisionAccepted)
 
 	_, err := db.Exec(ctx, "UPDATE reviews SET projected_at=clock_timestamp() WHERE tenant_id='tenant-1' AND id=$1", submitted.ID)
 	require.NoError(t, err)
@@ -459,6 +462,18 @@ func insertExecutionAndTask(t *testing.T, db *pgxpool.Pool, tenantID, taskID, ex
 		INSERT INTO executions (tenant_id, id, task_id, agent_version_id, status, lease_generation, started_at)
 		VALUES ($1, $2, $3, $4, 'reviewing', 1, clock_timestamp())`,
 		tenantID, executionID, taskID, agentVersionID)
+	require.NoError(t, err)
+}
+
+// insertSubmission seeds a validated submission row linking an execution so that
+// review queries joining reviews -> submissions -> executions can resolve.
+func insertSubmission(t *testing.T, db *pgxpool.Pool, tenantID, submissionID, taskID, executionID string) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := db.Exec(ctx, `
+		INSERT INTO submissions (tenant_id, id, task_id, execution_id, branch, commit_sha, base_commit_sha, summary, diff_fingerprint, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'main', 'head-sha', 'base-sha', 'summary', 'fp', 'validated', clock_timestamp(), clock_timestamp())`,
+		tenantID, submissionID, taskID, executionID)
 	require.NoError(t, err)
 }
 

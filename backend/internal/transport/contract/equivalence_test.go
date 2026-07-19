@@ -27,7 +27,7 @@ func (fakeVerifier) Verify(ctx context.Context, rawToken string) (auth.Principal
 	case "token-publisher":
 		return auth.Principal{TenantID: "tenant-1", AgentID: "publisher", AgentVersionID: "publisher-v1", Scopes: []string{"tasks:publish", "tasks:read", "tasks:cancel"}}, nil
 	case "token-agent-1":
-		return auth.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1-v1", Scopes: []string{"tasks:claim", "tasks:execute"}}, nil
+		return auth.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1-v1", Scopes: []string{"tasks:claim", "tasks:execute"}, RepoScope: []string{"owner/*"}}, nil
 	default:
 		return auth.Principal{}, nil
 	}
