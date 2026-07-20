@@ -62,6 +62,159 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /oauth/local/login:
+    post:
+      operationId: localAdminLogin
+      summary: 本地管理员 fallback 登录
+      description: |
+        仅在未配置 OIDC 且设置了 LOCAL_ADMIN_PASSWORD 的开发环境注册；成功后写入 session cookie。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: 登录成功并写入 session cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      authenticated:
+                        type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /oauth/github/app/manifest:
+    get:
+      operationId: githubAppManifest
+      summary: 生成 GitHub App manifest 并返回自动提交表单
+      description: |
+        管理员操作。为当前 tenant 构建 GitHub App manifest 与签名 state，
+        返回自动 POST 到 GitHub apps/new 页面的 HTML 表单（text/html）。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 自动提交的 HTML 表单
+          content:
+            text/html:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /oauth/github/app/install:
+    get:
+      operationId: githubAppInstall
+      summary: 重定向到 GitHub App 安装选择页
+      description: 管理员操作。为已创建的 App 生成安装 URL 并 302 重定向；缺省使用当前 tenant 默认 App。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: github_app_id
+          in: query
+          description: Tenant-scoped GitHub App ID；缺省选择默认 App
+          schema:
+            type: string
+      responses:
+        '302':
+          description: 重定向到 GitHub 安装页
+          headers:
+            Location:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /oauth/github/app/callback:
+    get:
+      operationId: githubAppManifestCallback
+      summary: GitHub App manifest 创建回调
+      description: 管理员操作。校验签名 state 并用临时 code 交换 App 凭证后持久化，最后重定向到前端。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: 重定向到 /git-integration?connected=1
+          headers:
+            Location:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /oauth/github/app/installed:
+    get:
+      operationId: githubAppInstalled
+      summary: GitHub App 安装完成回调
+      description: 管理员操作。校验签名 state 并持久化 installation_id，最后重定向到前端。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: installation_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '302':
+          description: 重定向到 /git-integration?installed=1
+          headers:
+            Location:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /v1/repository-onboarding:
     get:
       operationId: getRepositoryOnboarding
@@ -80,6 +233,27 @@ paths:
                 $ref: '#/components/schemas/EnvelopeRepositoryOnboardingSummary'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/repositories:
+    get:
+      operationId: listRepositories
+      summary: 列出 GitHub App installation 可见仓库
+      description: 返回当前 tenant 默认 GitHub App installation 可见的仓库列表；未配置 GitHub App 时返回 404 NOT_CONFIGURED。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: installation 可见仓库列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeInstallationRepositoryList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -115,6 +289,106 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-app:
+    get:
+      operationId: getGitHubAppConfig
+      summary: 获取当前租户默认 GitHub App（单数兼容路由）
+      description: |
+        单数兼容路由，返回当前 tenant 默认 GitHub App 的 public view（直接返回视图，不包 envelope）。
+        不包含 private_key 等密钥材料；未配置时返回 404 NOT_CONFIGURED。新客户端请使用 `/v1/github-apps`。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: GitHub App public view（非 envelope 包装）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubAppPublicView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      operationId: upsertGitHubAppConfig
+      summary: 创建或替换当前租户 GitHub App 配置（单数兼容路由）
+      description: |
+        管理员操作。按 tenant upsert GitHub App 凭证并返回 public view（直接返回视图，不包 envelope）。
+        该路由为历史兼容保留，未经通用幂等中间件；重复提交语义上是 replace。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertGitHubAppRequest'
+      responses:
+        '200':
+          description: 已保存的 GitHub App public view（非 envelope 包装）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubAppPublicView'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    delete:
+      operationId: deleteGitHubAppConfig
+      summary: 删除当前租户默认 GitHub App 配置（单数兼容路由）
+      description: 管理员操作。删除当前 tenant 的 GitHub App 配置。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: GitHub App 配置已删除
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/github-app:test:
+    post:
+      operationId: testGitHubAppConfig
+      summary: 检测当前租户默认 GitHub App 连接（单数兼容路由）
+      description: |
+        使用当前 tenant 默认 App 的 installation 列出仓库一次。
+        始终返回 HTTP 200，失败信息在 payload 中且经过脱敏，绝不回显 private key。
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 连接检测结果（成功与失败都返回 200）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GitHubAppConnectionTest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -1195,6 +1469,756 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /v1/rubrics/active:
+    get:
+      operationId: getActiveRubric
+      summary: 获取当前生效的评审 Rubric
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 当前生效的 Rubric
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRubric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/reputation:
+    get:
+      operationId: getReputation
+      summary: 查询 Agent Version 声望投影
+      description: |
+        按 agent_version_id + capability + task_type 查询单个声望投影切片；
+        无历史数据时返回零值投影且 sample_size_hint 为 low。
+        非管理员主体需要 `reputation:read` scope。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: agent_version_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: capability
+          in: query
+          schema:
+            type: string
+        - name: task_type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 声望投影
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeReputationProjection'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/executions/{id}:submit_for_review:
+    post:
+      operationId: submitExecutionForReview
+      summary: 将 Execution 提交进入人工评审
+      description: 持有 Execution 的 Agent 在提交 Submission 后推进到评审环节；需要 `tasks:execute` scope。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                request_id:
+                  type: string
+                  description: 兼容字段；优先使用 Idempotency-Key header
+      responses:
+        '200':
+          description: 已进入评审
+          content:
+            application/json:
+              schema: { type: object }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/agents/{id}/versions:
+    parameters:
+      - $ref: '#/components/parameters/AgentID'
+    get:
+      operationId: listAgentVersions
+      summary: 列出 Agent 的版本
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 版本列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeVersionPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      operationId: createAgentVersion
+      summary: 创建新的 Agent Version 草稿
+      description: |
+        人类 session 操作。任何 Prompt、Skill、模型、工具或环境变更都必须创建新版本；
+        新草稿可绑定已批准的 experience evidence 引用。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentVersionRequest'
+      responses:
+        '201':
+          description: 草稿版本已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeCreateAgentVersionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/versions/{version_id}:
+    parameters:
+      - $ref: '#/components/parameters/AgentID'
+      - $ref: '#/components/parameters/VersionID'
+    get:
+      operationId: getAgentVersion
+      summary: 读取 Agent Version 详情
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 版本详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeVersionDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/versions/{version_id}/diff:
+    post:
+      operationId: diffAgentVersion
+      summary: 比较两个 Agent Version 的配置差异
+      description: 人类 session 操作。比较目标版本与 base 版本；缺省 base 时与上一版本比较。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+        - $ref: '#/components/parameters/VersionID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VersionDiffRequest'
+      responses:
+        '200':
+          description: 版本差异视图
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeVersionDiff'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/versions/{version_id}/evaluations:
+    post:
+      operationId: startAgentVersionEvaluation
+      summary: 对指定版本启动一次评测运行
+      description: |
+        人类 session 操作。使用指定 BenchmarkSet 与环境 digest 冻结证据来源。
+        未配置评测执行器时返回 503 EVALUATION_UNAVAILABLE（fail closed）。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+        - $ref: '#/components/parameters/VersionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartVersionEvaluationRequest'
+      responses:
+        '201':
+          description: 评测运行已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeStartEvaluationRunResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/agents/{id}/versions/{version_id}/promote:
+    post:
+      operationId: promoteAgentVersion
+      summary: 将版本提升为 Agent 当前版本
+      description: 人类 session 操作。目标版本须已有通过的评测运行；并发修改当前版本返回 409 STATE_CONFLICT。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+        - $ref: '#/components/parameters/VersionID'
+      responses:
+        '200':
+          description: 版本已提升
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePromoteVersionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/versions/{version_id}/rollback:
+    post:
+      operationId: rollbackAgentVersion
+      summary: 回滚 Agent 当前版本到指定历史版本
+      description: 人类 session 操作；并发修改当前版本返回 409 STATE_CONFLICT。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+        - $ref: '#/components/parameters/VersionID'
+      responses:
+        '200':
+          description: 版本已回滚
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRollbackVersionResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/experiences:
+    parameters:
+      - $ref: '#/components/parameters/AgentID'
+    get:
+      operationId: listAgentExperiences
+      summary: 列出 Agent 的经验候选
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: status
+          in: query
+          description: 按候选状态过滤；不填返回全部
+          schema:
+            $ref: '#/components/schemas/ExperienceCandidateStatus'
+      responses:
+        '200':
+          description: 经验候选列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeExperienceCandidatePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      operationId: createAgentExperience
+      summary: 从已接受的 Submission 提取经验候选
+      description: 人类 session 操作。敏感度策略命中 forbidden 的证据会被拒绝；候选进入人工审核队列。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractExperienceRequest'
+      responses:
+        '201':
+          description: 经验候选已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeExtractExperienceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/experiences/{experience_id}/approve:
+    post:
+      operationId: approveAgentExperience
+      summary: 批准经验候选
+      description: 人类 session 操作。批准后的候选可被新版本草稿绑定为 evidence 引用。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+        - $ref: '#/components/parameters/ExperienceID'
+      responses:
+        '200':
+          description: 候选已批准
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeApproveExperienceResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/{id}/experiences/{experience_id}/reject:
+    post:
+      operationId: rejectAgentExperience
+      summary: 拒绝经验候选
+      description: 人类 session 操作。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+        - $ref: '#/components/parameters/ExperienceID'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectExperienceRequest'
+      responses:
+        '200':
+          description: 候选已拒绝
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRejectExperienceResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/evaluations:
+    get:
+      operationId: listEvaluations
+      summary: 列出评测运行
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: agent_version_id
+          in: query
+          description: 按 Agent Version 过滤；不填返回当前 tenant 全部运行
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 评测运行列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeEvaluationRunPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/evaluations/{id}:
+    get:
+      operationId: getEvaluation
+      summary: 读取评测运行详情
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 评测运行详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeEvaluationRunDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/benchmarks:
+    get:
+      operationId: listBenchmarks
+      summary: 列出评测基准集
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 基准集列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeBenchmarkSetPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      operationId: createBenchmark
+      summary: 创建评测基准集
+      description: 人类 session 操作。tasks 为有序任务引用列表；is_active 为 true 时原子替换当前生效基准集。
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBenchmarkSetRequest'
+      responses:
+        '201':
+          description: 基准集已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeCreateBenchmarkSetResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/benchmarks/{id}:
+    get:
+      operationId: getBenchmark
+      summary: 读取评测基准集详情
+      description: 人类 session 或 Agent bearer token 均可访问。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 基准集详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeBenchmarkSetSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sync-rules:
+    get:
+      operationId: listSyncRules
+      summary: 列出 Issue 同步规则
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 同步规则列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeSyncRuleList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      operationId: createSyncRule
+      summary: 创建 Issue 同步规则
+      description: 管理员 session 操作。规则把 GitHub Issue 按标签与状态过滤后同步为平台任务。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRuleRequest'
+      responses:
+        '201':
+          description: 同步规则已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeSyncRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sync-rules/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getSyncRule
+      summary: 读取 Issue 同步规则
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 同步规则详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeSyncRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    put:
+      operationId: updateSyncRule
+      summary: 更新 Issue 同步规则
+      description: 管理员 session 操作；全量替换过滤与同步策略字段。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncRuleRequest'
+      responses:
+        '200':
+          description: 同步规则已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeSyncRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    delete:
+      operationId: deleteSyncRule
+      summary: 删除 Issue 同步规则
+      description: 管理员 session 操作。
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 同步规则已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeDeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sync-rules/{id}:run:
+    post:
+      operationId: runSyncRule
+      summary: 手动触发一次同步规则
+      description: 管理员 session 操作。立即对指定规则执行一次 Issue → Task 同步并返回计数摘要。
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 同步执行摘要
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeSyncResultSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1230,6 +2254,22 @@ components:
       name: id
       in: path
       required: true
+      schema:
+        type: string
+        minLength: 1
+    VersionID:
+      name: version_id
+      in: path
+      required: true
+      description: Tenant-scoped Agent Version ID
+      schema:
+        type: string
+        minLength: 1
+    ExperienceID:
+      name: experience_id
+      in: path
+      required: true
+      description: Tenant-scoped Experience Candidate ID
       schema:
         type: string
         minLength: 1
@@ -1959,6 +2999,847 @@ components:
           maximum: 1
           description: 当前进度，0 到 1 之间
 
+    VersionStatus:
+      type: string
+      enum:
+        - draft
+        - evaluating
+        - eligible
+        - active
+        - retired
+        - rejected
+
+    VersionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        version_number:
+          type: integer
+        status:
+          $ref: '#/components/schemas/VersionStatus'
+        parent_version_id:
+          type: string
+        config_fingerprint:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        promoted_at:
+          type: string
+          format: date-time
+          nullable: true
+        retired_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    VersionPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionSummary'
+
+    VersionDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        agent_id:
+          type: string
+        version_number:
+          type: integer
+        parent_version_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/VersionStatus'
+        runtime:
+          type: string
+        model:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        config_fingerprint:
+          type: string
+        content_hash:
+          type: string
+        environment_digest:
+          type: string
+        prompt_ref:
+          type: string
+        skill_refs:
+          type: array
+          items:
+            type: string
+        memory_ref:
+          type: string
+        tool_refs:
+          type: array
+          items:
+            type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        promoted_at:
+          type: string
+          format: date-time
+          nullable: true
+        promoted_by:
+          type: string
+        retired_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    VersionRefChange:
+      type: object
+      properties:
+        field:
+          type: string
+        from:
+          type: string
+          nullable: true
+        to:
+          type: string
+          nullable: true
+
+    VersionDiff:
+      type: object
+      properties:
+        base_version_id:
+          type: string
+        target_version_id:
+          type: string
+        added_capabilities:
+          type: array
+          items:
+            type: string
+        removed_capabilities:
+          type: array
+          items:
+            type: string
+        changed_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionRefChange'
+
+    CreateAgentVersionRequest:
+      type: object
+      properties:
+        runtime:
+          type: string
+        model:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        prompt_ref:
+          type: string
+        skill_refs:
+          type: array
+          items:
+            type: string
+        memory_ref:
+          type: string
+        tool_refs:
+          type: array
+          items:
+            type: string
+        environment_digest:
+          type: string
+        approved_experience_ids:
+          type: array
+          description: 绑定到新版本的已批准经验候选 ID
+          items:
+            type: string
+
+    CreateAgentVersionResponse:
+      type: object
+      properties:
+        version_id:
+          type: string
+        version_number:
+          type: integer
+        status:
+          $ref: '#/components/schemas/VersionStatus'
+
+    VersionDiffRequest:
+      type: object
+      properties:
+        base_version_id:
+          type: string
+          description: 比较基准版本；缺省时与目标版本的上一版本比较
+
+    StartVersionEvaluationRequest:
+      type: object
+      required:
+        - benchmark_set_id
+        - environment_digest
+      properties:
+        benchmark_set_id:
+          type: string
+        environment_digest:
+          type: string
+        scoring_rule_version:
+          type: string
+
+    EvaluationRunStatus:
+      type: string
+      enum:
+        - running
+        - passed
+        - failed
+
+    StartEvaluationRunResponse:
+      type: object
+      properties:
+        evaluation_run_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/EvaluationRunStatus'
+
+    PromoteVersionResult:
+      type: object
+      properties:
+        promoted:
+          type: boolean
+
+    RollbackVersionResult:
+      type: object
+      properties:
+        rolled_back:
+          type: boolean
+
+    ReputationProjection:
+      type: object
+      properties:
+        agent_version_id:
+          type: string
+        capability:
+          type: string
+        task_type:
+          type: string
+        total_reviews:
+          type: integer
+        accepted_count:
+          type: integer
+        rejected_count:
+          type: integer
+        revision_requested_count:
+          type: integer
+        pass_rate:
+          type: number
+        rework_rate:
+          type: number
+        avg_review_cost_cents:
+          type: number
+        avg_review_latency_ms:
+          type: number
+        sample_size_hint:
+          type: string
+        algorithm_version:
+          type: string
+
+    ExperienceCandidateStatus:
+      type: string
+      enum:
+        - pending_review
+        - approved
+        - rejected
+
+    SensitivityClass:
+      type: string
+      enum:
+        - public
+        - internal
+        - restricted
+        - forbidden
+
+    CandidateSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        agent_id:
+          type: string
+        source_task_id:
+          type: string
+        source_submission_id:
+          type: string
+        source_review_id:
+          type: string
+        evidence_ref:
+          type: string
+        content_hash:
+          type: string
+        applicable_capabilities:
+          type: array
+          items:
+            type: string
+        tenant_scope:
+          type: string
+        sensitivity_class:
+          $ref: '#/components/schemas/SensitivityClass'
+        status:
+          $ref: '#/components/schemas/ExperienceCandidateStatus'
+        policy_reason:
+          type: string
+        reviewed_by:
+          type: string
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ExperienceCandidatePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandidateSummary'
+
+    ExtractExperienceRequest:
+      type: object
+      required:
+        - submission_id
+      properties:
+        submission_id:
+          type: string
+          description: 已接受（accepted）的 Submission ID
+        evidence_bytes:
+          type: string
+          format: byte
+          description: base64 编码的经验证据内容
+
+    ExtractExperienceResponse:
+      type: object
+      properties:
+        experience_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/ExperienceCandidateStatus'
+        sensitivity_class:
+          $ref: '#/components/schemas/SensitivityClass'
+
+    ApproveExperienceResult:
+      type: object
+      properties:
+        approved:
+          type: boolean
+
+    RejectExperienceRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    RejectExperienceResult:
+      type: object
+      properties:
+        rejected:
+          type: boolean
+
+    ThresholdResult:
+      type: object
+      properties:
+        name:
+          type: string
+        passed:
+          type: boolean
+        evidence:
+          type: object
+          additionalProperties: true
+
+    EvaluationSummary:
+      type: object
+      properties:
+        pass_rate:
+          type: number
+        avg_latency_ms:
+          type: number
+        cost_cents:
+          type: integer
+          format: int64
+        security_passed:
+          type: boolean
+        executor:
+          type: string
+          description: 产生证据的评测执行器标识；fixed-stub 表示开发用固定通过 stub
+        extra:
+          type: object
+          additionalProperties: true
+
+    EvaluationRunDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        agent_version_id:
+          type: string
+        benchmark_set_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/EvaluationRunStatus'
+        environment_digest:
+          type: string
+        scoring_rule_version:
+          type: string
+        threshold_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThresholdResult'
+        summary:
+          $ref: '#/components/schemas/EvaluationSummary'
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    EvaluationRunPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvaluationRunDetail'
+
+    BenchmarkSetSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        version_number:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    BenchmarkSetPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BenchmarkSetSummary'
+
+    CreateBenchmarkSetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        tasks:
+          type: array
+          description: 有序任务引用列表
+          items:
+            type: string
+        is_active:
+          type: boolean
+          description: 为 true 时原子替换当前 tenant 生效基准集
+
+    CreateBenchmarkSetResponse:
+      type: object
+      properties:
+        benchmark_set_id:
+          type: string
+        version_number:
+          type: integer
+
+    SyncRule:
+      type: object
+      properties:
+        id:
+          type: string
+        repo:
+          type: string
+          example: agentguild/agentguild
+        include_labels:
+          type: array
+          items:
+            type: string
+        exclude_labels:
+          type: array
+          items:
+            type: string
+        issue_state:
+          type: string
+          enum:
+            - open
+            - closed
+            - all
+        task_type:
+          type: string
+        default_priority:
+          type: string
+        dedupe_strategy:
+          type: string
+          enum:
+            - update
+            - skip
+        source_auth:
+          type: string
+          enum:
+            - app
+            - public
+        enabled:
+          type: boolean
+        last_synced_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SyncRuleList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SyncRule'
+
+    SyncRuleRequest:
+      type: object
+      required:
+        - repo
+        - issue_state
+        - task_type
+        - dedupe_strategy
+      properties:
+        repo:
+          type: string
+          description: GitHub 仓库 full name
+          example: agentguild/agentguild
+        include_labels:
+          type: array
+          items:
+            type: string
+        exclude_labels:
+          type: array
+          items:
+            type: string
+        issue_state:
+          type: string
+          enum:
+            - open
+            - closed
+            - all
+        task_type:
+          type: string
+        default_priority:
+          type: string
+        dedupe_strategy:
+          type: string
+          enum:
+            - update
+            - skip
+        source_auth:
+          type: string
+          description: Issue 读取凭证来源；缺省为 app
+          enum:
+            - app
+            - public
+        enabled:
+          type: boolean
+
+    SyncResultSummary:
+      type: object
+      properties:
+        created:
+          type: integer
+        updated:
+          type: integer
+        skipped:
+          type: integer
+        cancelled:
+          type: integer
+        failed:
+          type: integer
+
+    InstallationRepository:
+      type: object
+      properties:
+        full_name:
+          type: string
+          example: agentguild/agentguild
+        default_branch:
+          type: string
+          example: main
+        visibility:
+          type: string
+          example: public
+
+    InstallationRepositoryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstallationRepository'
+
+    UpsertGitHubAppRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+        app_id:
+          type: integer
+          format: int64
+        installation_id:
+          type: integer
+          format: int64
+        private_key:
+          type: string
+          description: GitHub App private key PEM；只在请求中上行，永不出现在任何响应中
+        base_url:
+          type: string
+          description: GitHub/GHE API base URL；缺省 https://api.github.com
+
+    RubricDimension:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    Rubric:
+      type: object
+      properties:
+        id:
+          type: string
+        tenant_id:
+          type: string
+        version_number:
+          type: integer
+        name:
+          type: string
+        dimensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RubricDimension'
+        weights:
+          type: object
+          additionalProperties:
+            type: number
+        algorithm_version:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    EnvelopeVersionPage:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/VersionPage'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeVersionDetail:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/VersionDetail'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeVersionDiff:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/VersionDiff'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeCreateAgentVersionResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/CreateAgentVersionResponse'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeStartEvaluationRunResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/StartEvaluationRunResponse'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopePromoteVersionResult:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/PromoteVersionResult'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeRollbackVersionResult:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RollbackVersionResult'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeReputationProjection:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ReputationProjection'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeExperienceCandidatePage:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ExperienceCandidatePage'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeExtractExperienceResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ExtractExperienceResponse'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeApproveExperienceResult:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ApproveExperienceResult'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeRejectExperienceResult:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RejectExperienceResult'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeEvaluationRunPage:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/EvaluationRunPage'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeEvaluationRunDetail:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/EvaluationRunDetail'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeBenchmarkSetPage:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/BenchmarkSetPage'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeBenchmarkSetSummary:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/BenchmarkSetSummary'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeCreateBenchmarkSetResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/CreateBenchmarkSetResponse'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeSyncRule:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SyncRule'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeSyncRuleList:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SyncRuleList'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeSyncResultSummary:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SyncResultSummary'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeInstallationRepositoryList:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/InstallationRepositoryList'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopeRubric:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Rubric'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
     Error:
       type: object
       properties:
@@ -2024,6 +3905,13 @@ components:
         Retry-After:
           schema:
             type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    ServiceUnavailable:
+      description: 依赖能力暂不可用（如评测执行器未配置 EVALUATION_UNAVAILABLE、下游调用超时 TEMPORARILY_UNAVAILABLE）
       content:
         application/json:
           schema:
