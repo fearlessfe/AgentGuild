@@ -259,6 +259,59 @@ func TestStartEvaluationRunRecordsExecutorIdentity(t *testing.T) {
 	require.Equal(t, application.FixedBenchmarkExecutorID, detail.Summary.Executor)
 }
 
+func TestGetEvaluationRunDetailIncludesTaskResults(t *testing.T) {
+	db := testdb.StartPostgres(t)
+
+	tenantID := "tenant-task-results"
+	agentID := "agent-task-results"
+	ownerID := "owner"
+	versionID := randomID()
+	insertAgent(t, db, tenantID, agentID, ownerID)
+	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
+
+	versions := newFakeVersionLifecycle()
+	versions.AddVersion(&application.VersionInfo{ID: versionID, TenantID: tenantID, AgentID: agentID, Status: "draft"})
+
+	executor := &fakeExecutor{results: []domain.TaskResult{
+		{TaskRef: "task-1", Passed: true, LatencyMs: 100, Score: 1.0, Details: map[string]any{"note": "ok"}},
+		{TaskRef: "task-2", Passed: true, LatencyMs: 200, Score: 1.0},
+	}}
+
+	svc := newService(t, db, executor, versions)
+
+	bsResp, err := svc.CreateBenchmarkSet(context.Background(), application.CreateBenchmarkSet{
+		TenantID:  tenantID,
+		Name:      "Set",
+		Tasks:     []domain.BenchmarkTask{{TaskRef: "task-1"}, {TaskRef: "task-2"}},
+		CreatedBy: ownerID,
+		IsAdmin:   true,
+	})
+	require.NoError(t, err)
+
+	runResp, err := svc.StartEvaluationRun(context.Background(), application.StartEvaluationRun{
+		TenantID:           tenantID,
+		AgentID:            agentID,
+		VersionID:          versionID,
+		BenchmarkSetID:     bsResp.BenchmarkSet.ID(),
+		EnvironmentDigest:  "env",
+		ScoringRuleVersion: domain.ScoringRuleVersionV1,
+		ActorID:            ownerID,
+		IsAdmin:            false,
+	})
+	require.NoError(t, err)
+
+	detail, err := svc.GetEvaluationRunDetail(context.Background(), identityapp.Principal{TenantID: tenantID, OwnerID: ownerID}, tenantID, runResp.EvaluationRun.ID())
+	require.NoError(t, err)
+	require.Len(t, detail.TaskResults, 2)
+	require.Equal(t, runResp.EvaluationRun.ID(), detail.TaskResults[0].EvaluationRunID)
+	require.Equal(t, tenantID, detail.TaskResults[0].TenantID)
+	require.Equal(t, "task-1", detail.TaskResults[0].TaskRef)
+	require.Equal(t, 1.0, detail.TaskResults[0].Score)
+	require.True(t, detail.TaskResults[0].Passed)
+	require.Equal(t, "ok", detail.TaskResults[0].Details["note"])
+	require.Equal(t, "task-2", detail.TaskResults[1].TaskRef)
+}
+
 func TestStartEvaluationRunRejectingExecutorFailsClosed(t *testing.T) {
 	db := testdb.StartPostgres(t)
 

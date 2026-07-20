@@ -42,6 +42,13 @@ type EvaluationRunRepository interface {
 	Complete(context.Context, Tx, *domain.EvaluationRun) error
 	CreateResult(context.Context, Tx, *domain.EvaluationRunResult) error
 	ListResults(context.Context, string, string) ([]domain.EvaluationRunResult, error)
+	// ListRunning returns up to batchSize running runs across all tenants,
+	// oldest first. The harvest worker uses it to find candidate runs.
+	ListRunning(context.Context, int) ([]domain.EvaluationRun, error)
+	// LockRunningForUpdate re-reads a run inside the worker transaction and
+	// locks its row while it is still running; it returns domain.ErrNotFound
+	// when the run is missing or was already completed by a concurrent tick.
+	LockRunningForUpdate(context.Context, Tx, string, string) (*domain.EvaluationRun, error)
 }
 
 // VersionLifecyclePort abstracts the agentversion module so evaluation can
@@ -71,6 +78,94 @@ type BenchmarkExecutor interface {
 	Execute(ctx context.Context, benchmarkSet *domain.BenchmarkSet, environmentDigest string) ([]domain.TaskResult, error)
 }
 
+// PublishEvaluationTaskCommand carries everything needed to publish one
+// benchmark task as a real platform task.
+type PublishEvaluationTaskCommand struct {
+	TenantID     string
+	RequestID    string
+	Type         string
+	Title        string
+	Problem      string
+	Constraints  []string
+	Requirements []string
+	Deadline     time.Time
+}
+
+// EvaluationTaskPublisher publishes a benchmark task as a real platform task.
+// It is implemented in main.go by an adapter over the core task service, which
+// runs in its own transaction; it must never be called inside the evaluation
+// store transaction.
+type EvaluationTaskPublisher interface {
+	PublishEvaluationTask(ctx context.Context, cmd PublishEvaluationTaskCommand) (taskID string, err error)
+}
+
+// RunTaskRepository persists the mapping between an evaluation run's benchmark
+// tasks and the real platform tasks published for them.
+//
+// The harvest worker (phase 2) drives the resolution lifecycle: ListUnresolved
+// feeds the per-tick harvest loop, Resolve writes the harvested outcome, and
+// ListByRunTx re-reads all rows inside the worker transaction so completion
+// scoring sees resolutions written earlier in the same transaction.
+type RunTaskRepository interface {
+	Insert(context.Context, Tx, []domain.EvaluationRunTask) error
+	ListByRun(context.Context, string, string) ([]domain.EvaluationRunTask, error)
+	SetTaskID(context.Context, Tx, string, string, string, string) error
+	RecordPublishFailure(context.Context, Tx, string, string, string, string) error
+	ListUnresolved(context.Context, Tx, string, string) ([]domain.EvaluationRunTask, error)
+	ListByRunTx(context.Context, Tx, string, string) ([]domain.EvaluationRunTask, error)
+	Resolve(context.Context, Tx, string, string, string, RunTaskResolution) error
+}
+
+// RunTaskResolution is the outcome the harvest worker writes when resolving a
+// run-task row. Details is merged into the row's existing details document.
+type RunTaskResolution struct {
+	Passed     bool
+	LatencyMs  *float64
+	CostCents  *int64
+	Details    map[string]any
+	ResolvedAt time.Time
+}
+
+// EvaluationTaskSnapshot is the read model the harvest worker needs to resolve
+// one published evaluation task. Execution* fields describe the task's latest
+// execution (at most one execution per task is active at a time) and are empty
+// when the task was never claimed; SubmissionStatus is empty while no
+// submission exists for that execution; ObservedCostCents is nil when no cost
+// observation was recorded.
+type EvaluationTaskSnapshot struct {
+	TaskID               string
+	TaskStatus           string
+	ExecutionID          string
+	ExecutionVersionID   string
+	ExecutionStatus      string
+	ExecutionStartedAt   *time.Time
+	ExecutionSubmittedAt *time.Time
+	SubmissionStatus     string
+	ObservedCostCents    *int64
+}
+
+// EvaluationTaskObserver provides read-only snapshots of platform task state
+// for the evaluation harvest worker. It is implemented in the evaluation
+// module's own postgres layer with tenant-scoped queries over the core task,
+// execution and submission tables; it must never mutate platform state.
+type EvaluationTaskObserver interface {
+	// Observe returns the snapshot for one task, or domain.ErrNotFound when the
+	// task does not exist in the tenant.
+	Observe(ctx context.Context, tenantID, taskID string) (*EvaluationTaskSnapshot, error)
+}
+
+// VersionEnvironmentProvider reads the environment digest frozen on an agent
+// version, so an auto-started evaluation run inherits the version's
+// environment provenance. It is implemented in the evaluation module's own
+// postgres layer with tenant-scoped read-only queries (same precedent as
+// EvaluationTaskObserver).
+type VersionEnvironmentProvider interface {
+	// GetVersionEnvironmentDigest returns the version's environment digest (""
+	// when the version has none), or domain.ErrNotFound when the version does
+	// not exist in the tenant.
+	GetVersionEnvironmentDigest(ctx context.Context, tenantID, versionID string) (string, error)
+}
+
 // EvaluationService orchestrates benchmark set and evaluation run commands
 // and queries.
 type EvaluationService struct {
@@ -81,11 +176,23 @@ type EvaluationService struct {
 	executor      BenchmarkExecutor
 	policy        *Policy
 	newID         func() string
+	// taskPublisher, runTasks and taskDeadline are only set for the platform
+	// executor: StartEvaluationRun then publishes real tasks asynchronously and
+	// leaves the run running instead of completing it synchronously.
+	taskPublisher EvaluationTaskPublisher
+	runTasks      RunTaskRepository
+	taskDeadline  time.Duration
 }
 
 // EvaluationOptions configures the evaluation service.
 type EvaluationOptions struct {
 	NewID func() string
+	// TaskPublisher and RunTasks enable the platform execution path; they must
+	// be set together or not at all. TaskDeadline bounds how long a published
+	// evaluation task stays open and defaults to two hours.
+	TaskPublisher EvaluationTaskPublisher
+	RunTasks      RunTaskRepository
+	TaskDeadline  time.Duration
 }
 
 // Command DTOs
@@ -159,17 +266,18 @@ type EvaluationRunSummary struct {
 }
 
 type EvaluationRunDetail struct {
-	ID                 string                   `json:"id"`
-	TenantID           string                   `json:"tenant_id"`
-	AgentVersionID     string                   `json:"agent_version_id"`
-	BenchmarkSetID     string                   `json:"benchmark_set_id"`
-	Status             string                   `json:"status"`
-	EnvironmentDigest  string                   `json:"environment_digest"`
-	ScoringRuleVersion string                   `json:"scoring_rule_version"`
-	ThresholdResults   []domain.ThresholdResult `json:"threshold_results,omitempty"`
-	Summary            domain.EvaluationSummary `json:"summary"`
-	StartedAt          time.Time                `json:"started_at"`
-	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+	ID                 string                       `json:"id"`
+	TenantID           string                       `json:"tenant_id"`
+	AgentVersionID     string                       `json:"agent_version_id"`
+	BenchmarkSetID     string                       `json:"benchmark_set_id"`
+	Status             string                       `json:"status"`
+	EnvironmentDigest  string                       `json:"environment_digest"`
+	ScoringRuleVersion string                       `json:"scoring_rule_version"`
+	ThresholdResults   []domain.ThresholdResult     `json:"threshold_results,omitempty"`
+	Summary            domain.EvaluationSummary     `json:"summary"`
+	TaskResults        []domain.EvaluationRunResult `json:"task_results,omitempty"`
+	StartedAt          time.Time                    `json:"started_at"`
+	CompletedAt        *time.Time                   `json:"completed_at,omitempty"`
 }
 
 type BenchmarkSetPage struct {

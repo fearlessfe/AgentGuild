@@ -247,11 +247,86 @@ func TestLoadValidatesEvaluationExecutor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, config.EvaluationExecutorFixed, cfg.EvaluationExecutor)
 
+	// "platform" selects the real executor that publishes platform tasks.
+	env = validEnv()
+	env["EVALUATION_EXECUTOR"] = "platform"
+	cfg, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, config.EvaluationExecutorPlatform, cfg.EvaluationExecutor)
+	require.Equal(t, 2*time.Hour, cfg.EvaluationTaskDeadline)
+
+	// The evaluation harvest worker has its own interval and run timeout defaults.
+	require.Equal(t, 30*time.Second, cfg.EvaluationWorkerInterval)
+	require.Equal(t, 24*time.Hour, cfg.EvaluationRunTimeout)
+
+	// EVALUATION_TASK_DEADLINE overrides the default evaluation task deadline.
+	env = validEnv()
+	env["EVALUATION_EXECUTOR"] = "platform"
+	env["EVALUATION_TASK_DEADLINE"] = "30m"
+	cfg, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, 30*time.Minute, cfg.EvaluationTaskDeadline)
+
 	// Any other value is a startup configuration error.
 	env = validEnv()
 	env["EVALUATION_EXECUTOR"] = "real-runner"
 	_, err = config.Load(func(key string) string { return env[key] })
 	require.ErrorContains(t, err, "EVALUATION_EXECUTOR")
+}
+
+func TestLoadValidatesEvaluationWorkerTiming(t *testing.T) {
+	// EVALUATION_WORKER_INTERVAL and EVALUATION_RUN_TIMEOUT override the defaults.
+	env := validEnv()
+	env["EVALUATION_WORKER_INTERVAL"] = "45s"
+	env["EVALUATION_RUN_TIMEOUT"] = "12h"
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, 45*time.Second, cfg.EvaluationWorkerInterval)
+	require.Equal(t, 12*time.Hour, cfg.EvaluationRunTimeout)
+
+	// Non-positive or unparsable durations are rejected.
+	env = validEnv()
+	env["EVALUATION_WORKER_INTERVAL"] = "0s"
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "EVALUATION_WORKER_INTERVAL")
+
+	env = validEnv()
+	env["EVALUATION_RUN_TIMEOUT"] = "-1h"
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "EVALUATION_RUN_TIMEOUT")
+
+	env = validEnv()
+	env["EVALUATION_RUN_TIMEOUT"] = "soon"
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "EVALUATION_RUN_TIMEOUT")
+}
+
+func TestLoadParsesEvaluationAuto(t *testing.T) {
+	// EVALUATION_AUTO defaults to off.
+	env := validEnv()
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.False(t, cfg.EvaluationAuto)
+
+	// It follows the same boolean parsing as the other toggles.
+	for _, raw := range []string{"true", "1", "TRUE", "True"} {
+		env = validEnv()
+		env["EVALUATION_AUTO"] = raw
+		cfg, err = config.Load(func(key string) string { return env[key] })
+		require.NoError(t, err)
+		require.True(t, cfg.EvaluationAuto, "EVALUATION_AUTO=%q", raw)
+	}
+
+	env = validEnv()
+	env["EVALUATION_AUTO"] = "false"
+	cfg, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.False(t, cfg.EvaluationAuto)
+
+	env = validEnv()
+	env["EVALUATION_AUTO"] = "sometimes"
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "EVALUATION_AUTO")
 }
 
 func validEnv() map[string]string {

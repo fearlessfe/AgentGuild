@@ -30,6 +30,9 @@ type Config struct {
 	ValidationMaxAttempts                                  int
 	ValidationSandboxImage                                 string
 	EvaluationExecutor                                     string
+	EvaluationAuto                                         bool
+	EvaluationTaskDeadline                                 time.Duration
+	EvaluationWorkerInterval, EvaluationRunTimeout         time.Duration
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
@@ -53,9 +56,13 @@ type Config struct {
 type LookupEnv func(string) string
 
 // EvaluationExecutorFixed selects the fixed-pass stub benchmark executor. It is
-// intended for local development and demos only; any other executor value is a
-// configuration error, and an unset value disables evaluation execution.
+// intended for local development and demos only.
 const EvaluationExecutorFixed = "fixed"
+
+// EvaluationExecutorPlatform selects the platform benchmark executor: starting
+// an evaluation run publishes one real platform task per benchmark task and
+// the run stays running until the harvest worker resolves the results.
+const EvaluationExecutorPlatform = "platform"
 
 func Load(get LookupEnv) (Config, error) {
 	cfg := Config{
@@ -156,9 +163,21 @@ func Load(get LookupEnv) (Config, error) {
 		cfg.ValidationMaxAttempts = int(maxAttempts)
 	}
 	switch cfg.EvaluationExecutor {
-	case "", EvaluationExecutorFixed:
+	case "", EvaluationExecutorFixed, EvaluationExecutorPlatform:
 	default:
-		return Config{}, fmt.Errorf("EVALUATION_EXECUTOR must be %q or unset (evaluation execution disabled)", EvaluationExecutorFixed)
+		return Config{}, fmt.Errorf("EVALUATION_EXECUTOR must be %q, %q, or unset (evaluation execution disabled)", EvaluationExecutorFixed, EvaluationExecutorPlatform)
+	}
+	if cfg.EvaluationAuto, err = boolean(get, "EVALUATION_AUTO", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.EvaluationTaskDeadline, err = duration(get, "EVALUATION_TASK_DEADLINE", 2*time.Hour); err != nil {
+		return Config{}, err
+	}
+	if cfg.EvaluationWorkerInterval, err = duration(get, "EVALUATION_WORKER_INTERVAL", 30*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.EvaluationRunTimeout, err = duration(get, "EVALUATION_RUN_TIMEOUT", 24*time.Hour); err != nil {
+		return Config{}, err
 	}
 	for _, required := range [][2]string{{"DATABASE_URL", cfg.DatabaseURL}, {"CURSOR_SECRET", cfg.CursorSecret}} {
 		if required[1] == "" {

@@ -1,7 +1,9 @@
 package rest
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
@@ -22,18 +24,44 @@ func (s *Server) listBenchmarks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 	principal := identityPrincipalFromAuth(mustPrincipal(r))
 	var body struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Tasks       []string `json:"tasks"`
-		IsActive    bool     `json:"is_active"`
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Tasks       []json.RawMessage `json:"tasks"`
+		IsActive    bool              `json:"is_active"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
 
+	// Each task entry is either a bare task reference string (legacy form) or
+	// an object carrying the full task definition for real executors.
 	tasks := make([]evaldomain.BenchmarkTask, 0, len(body.Tasks))
-	for i, ref := range body.Tasks {
-		tasks = append(tasks, evaldomain.BenchmarkTask{TaskRef: ref, Ordering: i})
+	for i, raw := range body.Tasks {
+		var task struct {
+			TaskRef      string   `json:"task_ref"`
+			Title        string   `json:"title"`
+			Problem      string   `json:"problem"`
+			Constraints  []string `json:"constraints"`
+			Requirements []string `json:"requirements"`
+			IsSecurity   bool     `json:"is_security"`
+		}
+		var ref string
+		if err := json.Unmarshal(raw, &ref); err == nil {
+			task.TaskRef = ref
+		} else if err := json.Unmarshal(raw, &task); err != nil {
+			writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "tasks must contain task reference strings or task definition objects", "tasks")
+			return
+		}
+		task.TaskRef = strings.TrimSpace(task.TaskRef)
+		tasks = append(tasks, evaldomain.BenchmarkTask{
+			TaskRef:      task.TaskRef,
+			Ordering:     i,
+			Title:        task.Title,
+			Problem:      task.Problem,
+			Constraints:  task.Constraints,
+			Requirements: task.Requirements,
+			IsSecurity:   task.IsSecurity,
+		})
 	}
 
 	result, err := s.evaluations.CreateBenchmarkSet(r.Context(), evaluationapp.CreateBenchmarkSet{

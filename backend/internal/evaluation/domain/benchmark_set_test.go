@@ -40,3 +40,16 @@ func TestNewBenchmarkSetValidatesInputs(t *testing.T) {
 	_, err = domain.NewBenchmarkSet("bs-1", "tenant-1", "owner-1", 0)
 	require.ErrorIs(t, err, domain.ErrInvalidArgument)
 }
+
+func TestNewBenchmarkSetWithTasksRequiresTaskRef(t *testing.T) {
+	// The task definition fields are optional, but task_ref identifies the
+	// task inside the set and must be present.
+	_, err := domain.NewBenchmarkSetWithTasks(
+		"bs-1", "tenant-1", "owner-1", 1,
+		"Benchmark A", "",
+		[]domain.BenchmarkTask{{TaskRef: "", Ordering: 0, Title: "no ref"}},
+		time.Now(),
+	)
+	require.ErrorIs(t, err, domain.ErrInvalidArgument)
+	require.Equal(t, "task_ref", domain.FieldOf(err))
+}

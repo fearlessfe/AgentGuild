@@ -237,6 +237,79 @@ func TestRepositoryListEvaluationRunResults(t *testing.T) {
 	require.Equal(t, 100.0, results[0].Details["latency_ms"])
 }
 
+func TestRepositoryListRunningAndLockRunningForUpdate(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	store := evpostgres.NewStore(db)
+	bsRepo := evpostgres.NewBenchmarkSetRepository(db)
+	runRepo := evpostgres.NewEvaluationRunRepository(db)
+
+	tenantID := "tenant-running"
+	agentID := "agent-running"
+	ownerID := "owner"
+	versionID := randomID()
+	insertAgent(t, db, tenantID, agentID, ownerID)
+	insertAgentVersion(t, db, tenantID, agentID, versionID, 1, "draft")
+
+	bs, _ := evdomain.NewBenchmarkSetWithTasks(randomID(), tenantID, ownerID, 1, "Set", "", nil, time.Now())
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		return bsRepo.Create(context.Background(), tx, bs)
+	}))
+
+	older, _ := evdomain.NewEvaluationRun(randomID(), tenantID, versionID, bs.ID(), "env", evdomain.ScoringRuleVersionV1, time.Now().Add(-time.Hour))
+	newer, _ := evdomain.NewEvaluationRun(randomID(), tenantID, versionID, bs.ID(), "env", evdomain.ScoringRuleVersionV1, time.Now())
+	completed, _ := evdomain.NewEvaluationRun(randomID(), tenantID, versionID, bs.ID(), "env", evdomain.ScoringRuleVersionV1, time.Now().Add(-2*time.Hour))
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		if err := runRepo.Create(context.Background(), tx, older); err != nil {
+			return err
+		}
+		if err := runRepo.Create(context.Background(), tx, newer); err != nil {
+			return err
+		}
+		if err := runRepo.Create(context.Background(), tx, completed); err != nil {
+			return err
+		}
+		if err := completed.CompleteAt([]evdomain.ThresholdResult{{Name: "pass_rate", Passed: true}}, evdomain.EvaluationSummary{}, time.Now()); err != nil {
+			return err
+		}
+		return runRepo.Complete(context.Background(), tx, completed)
+	}))
+
+	// ListRunning returns running runs only, oldest first, bounded by batch size.
+	running, err := runRepo.ListRunning(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, running, 2)
+	require.Equal(t, older.ID(), running[0].ID())
+	require.Equal(t, newer.ID(), running[1].ID())
+
+	running, err = runRepo.ListRunning(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, running, 1)
+	require.Equal(t, older.ID(), running[0].ID())
+
+	_, err = runRepo.ListRunning(context.Background(), 0)
+	require.Error(t, err)
+
+	// LockRunningForUpdate locks running rows and reports completed or missing
+	// runs as not_found so concurrent ticks do not complete a run twice.
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		locked, err := runRepo.LockRunningForUpdate(context.Background(), tx, tenantID, older.ID())
+		require.NoError(t, err)
+		require.Equal(t, older.ID(), locked.ID())
+		require.Equal(t, evdomain.StatusRunning, locked.Status())
+		return nil
+	}))
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		_, err := runRepo.LockRunningForUpdate(context.Background(), tx, tenantID, completed.ID())
+		require.ErrorIs(t, err, evdomain.ErrNotFound)
+		return nil
+	}))
+	require.NoError(t, store.WithTx(context.Background(), func(tx application.Tx) error {
+		_, err := runRepo.LockRunningForUpdate(context.Background(), tx, tenantID, "missing")
+		require.ErrorIs(t, err, evdomain.ErrNotFound)
+		return nil
+	}))
+}
+
 func TestRepositoryGetLatestPassedForAgentVersion(t *testing.T) {
 	db := testdb.StartPostgres(t)
 	store := evpostgres.NewStore(db)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
+	"time"
 
 	"agentguild.dev/agentguild/backend/internal/evaluation/domain"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
@@ -40,6 +42,12 @@ func NewEvaluationService(
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
+	if (options.TaskPublisher == nil) != (options.RunTasks == nil) {
+		return nil, invalidArg("task_publisher")
+	}
+	if options.TaskPublisher != nil && options.TaskDeadline <= 0 {
+		options.TaskDeadline = 2 * time.Hour
+	}
 	return &EvaluationService{
 		store:         store,
 		benchmarkSets: benchmarkSets,
@@ -48,6 +56,9 @@ func NewEvaluationService(
 		executor:      executor,
 		policy:        policy,
 		newID:         options.NewID,
+		taskPublisher: options.TaskPublisher,
+		runTasks:      options.RunTasks,
+		taskDeadline:  options.TaskDeadline,
 	}, nil
 }
 
@@ -114,6 +125,8 @@ func (s *EvaluationService) StartEvaluationRun(
 	}
 
 	var run *domain.EvaluationRun
+	var benchmarkSet *domain.BenchmarkSet
+	var startedAt time.Time
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
@@ -131,7 +144,7 @@ func (s *EvaluationService) StartEvaluationRun(
 			return domain.ErrStateConflict
 		}
 
-		benchmarkSet, err := s.benchmarkSets.GetByID(ctx, cmd.TenantID, cmd.BenchmarkSetID)
+		benchmarkSet, err = s.benchmarkSets.GetByID(ctx, cmd.TenantID, cmd.BenchmarkSetID)
 		if err != nil {
 			return err
 		}
@@ -158,6 +171,25 @@ func (s *EvaluationService) StartEvaluationRun(
 		// Transition version to evaluating through the agentversion port.
 		if err := s.versions.MarkEvaluating(ctx, tx, cmd.TenantID, cmd.AgentID, cmd.VersionID); err != nil {
 			return err
+		}
+
+		if s.taskPublisher != nil {
+			// Platform executor: insert the run-task plan rows and commit. The
+			// real tasks are published after commit (see publishEvaluationTasks)
+			// and the run stays running until the harvest worker (phase 2)
+			// resolves every run-task row.
+			startedAt = now
+			plan := make([]domain.EvaluationRunTask, 0, len(benchmarkSet.Tasks()))
+			for _, task := range benchmarkSet.Tasks() {
+				plan = append(plan, domain.EvaluationRunTask{
+					TenantID: cmd.TenantID,
+					RunID:    run.ID(),
+					TaskRef:  task.TaskRef,
+					Ordering: task.Ordering,
+					Details:  map[string]any{},
+				})
+			}
+			return s.runTasks.Insert(ctx, tx, plan)
 		}
 
 		// Synchronous execution for the initial implementation.
@@ -195,7 +227,56 @@ func (s *EvaluationService) StartEvaluationRun(
 	if err != nil {
 		return nil, err
 	}
+	if s.taskPublisher != nil {
+		s.publishEvaluationTasks(ctx, run, benchmarkSet, startedAt)
+	}
 	return &StartEvaluationRunResponse{EvaluationRun: run}, nil
+}
+
+// publishEvaluationTasks publishes one real platform task per benchmark task
+// and backfills the run-task mapping with the returned task identifier.
+//
+// Ordering: this runs strictly after the evaluation transaction committed the
+// run and its plan rows. The publisher adapter delegates to the core task
+// service, which opens its own transaction — calling it inside the evaluation
+// transaction would nest two independent transactions and could deadlock or
+// publish tasks for a run that later rolls back. Publication failures are
+// recorded in the row's details and do not fail the run: the phase-2 harvest
+// worker treats unpublished rows as failed results.
+func (s *EvaluationService) publishEvaluationTasks(
+	ctx context.Context,
+	run *domain.EvaluationRun,
+	benchmarkSet *domain.BenchmarkSet,
+	startedAt time.Time,
+) {
+	deadline := startedAt.Add(s.taskDeadline)
+	for _, task := range benchmarkSet.Tasks() {
+		constraints := append([]string(nil), task.Constraints...)
+		constraints = append(constraints, "eval_run:"+run.ID())
+		taskID, err := s.taskPublisher.PublishEvaluationTask(ctx, PublishEvaluationTaskCommand{
+			TenantID:     run.TenantID(),
+			RequestID:    "eval:" + run.ID() + ":" + task.TaskRef,
+			Type:         "evaluation",
+			Title:        task.Title,
+			Problem:      task.Problem,
+			Constraints:  constraints,
+			Requirements: task.Requirements,
+			Deadline:     deadline,
+		})
+		if err != nil {
+			if recordErr := s.store.WithTx(ctx, func(tx Tx) error {
+				return s.runTasks.RecordPublishFailure(ctx, tx, run.TenantID(), run.ID(), task.TaskRef, err.Error())
+			}); recordErr != nil {
+				slog.Error("record evaluation task publish failure", "run_id", run.ID(), "task_ref", task.TaskRef, "error", recordErr)
+			}
+			continue
+		}
+		if err := s.store.WithTx(ctx, func(tx Tx) error {
+			return s.runTasks.SetTaskID(ctx, tx, run.TenantID(), run.ID(), task.TaskRef, taskID)
+		}); err != nil {
+			slog.Error("backfill evaluation run task id", "run_id", run.ID(), "task_ref", task.TaskRef, "error", err)
+		}
+	}
 }
 
 // CompleteEvaluationRun allows external callers to complete a running

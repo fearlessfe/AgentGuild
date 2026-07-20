@@ -7,21 +7,28 @@ import (
 // BenchmarkSet is a versioned collection of tasks used to evaluate an Agent
 // Version. Within a tenant the version_number monotonically increases.
 type BenchmarkSet struct {
-	id          string
-	tenantID    string
+	id            string
+	tenantID      string
 	versionNumber int
-	name        string
-	description string
-	isActive    bool
-	createdBy   string
-	createdAt   time.Time
-	tasks       []BenchmarkTask
+	name          string
+	description   string
+	isActive      bool
+	createdBy     string
+	createdAt     time.Time
+	tasks         []BenchmarkTask
 }
 
-// BenchmarkTask is a lightweight reference to a task inside a BenchmarkSet.
+// BenchmarkTask is a task definition inside a BenchmarkSet. TaskRef and
+// Ordering identify the task within the set; the remaining fields carry the
+// full task definition so a real executor can publish it as a platform task.
 type BenchmarkTask struct {
-	TaskRef  string
-	Ordering int
+	TaskRef      string
+	Ordering     int
+	Title        string
+	Problem      string
+	Constraints  []string
+	Requirements []string
+	IsSecurity   bool
 }
 
 // NewBenchmarkSet creates a minimal BenchmarkSet. Version numbers are normally
@@ -66,6 +73,11 @@ func NewBenchmarkSetWithTasks(
 	bs.name = name
 	bs.description = description
 	bs.createdAt = now
+	for _, task := range tasks {
+		if task.TaskRef == "" {
+			return nil, invalidArgument("task_ref")
+		}
+	}
 	bs.tasks = append([]BenchmarkTask(nil), tasks...)
 	return bs, nil
 }

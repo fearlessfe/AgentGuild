@@ -140,11 +140,13 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	applyMigration(t, db, "000016_validation_execution_state_sync.up.sql")
 	applyMigration(t, db, "000017_review_capability.up.sql")
 	applyMigration(t, db, "000018_version_promotion_audit.up.sql")
+	applyMigration(t, db, "000019_evaluation_platform_runner.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000019_evaluation_platform_runner.down.sql")
 	applyMigration(t, db, "000018_version_promotion_audit.down.sql")
 	applyMigration(t, db, "000017_review_capability.down.sql")
 	applyMigration(t, db, "000016_validation_execution_state_sync.down.sql")
@@ -185,6 +187,7 @@ func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	applyMigration(t, db, "000016_validation_execution_state_sync.up.sql")
 	applyMigration(t, db, "000017_review_capability.up.sql")
 	applyMigration(t, db, "000018_version_promotion_audit.up.sql")
+	applyMigration(t, db, "000019_evaluation_platform_runner.up.sql")
 }
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
 	t.Helper()

@@ -28,6 +28,8 @@ type fakeEvaluationService struct {
 		tenantID string
 		id       string
 	}
+
+	createCmd evaluationapp.CreateBenchmarkSet
 }
 
 func (f *fakeEvaluationService) ListBenchmarkSetSummaries(ctx context.Context, principal identityapp.Principal, tenantID string) ([]evaluationapp.BenchmarkSetSummary, error) {
@@ -39,7 +41,12 @@ func (f *fakeEvaluationService) GetBenchmarkSetSummary(ctx context.Context, prin
 }
 
 func (f *fakeEvaluationService) CreateBenchmarkSet(ctx context.Context, cmd evaluationapp.CreateBenchmarkSet) (*evaluationapp.CreateBenchmarkSetResponse, error) {
-	return nil, nil
+	f.createCmd = cmd
+	bs, err := evaldomain.NewBenchmarkSet("bs-1", cmd.TenantID, cmd.CreatedBy, 1)
+	if err != nil {
+		return nil, err
+	}
+	return &evaluationapp.CreateBenchmarkSetResponse{BenchmarkSet: bs}, nil
 }
 
 func (f *fakeEvaluationService) ListEvaluationRunDetails(ctx context.Context, principal identityapp.Principal, tenantID, agentVersionID string) ([]evaluationapp.EvaluationRunDetail, error) {
@@ -143,6 +150,10 @@ func TestGetEvaluationReturnsDetailWithThresholdsAndSummary(t *testing.T) {
 			ThresholdResults: []evaldomain.ThresholdResult{
 				{Name: "security", Passed: true, Evidence: map[string]any{"tool": "trivy"}},
 			},
+			TaskResults: []evaldomain.EvaluationRunResult{
+				{EvaluationRunID: "run-1", TenantID: "tenant-1", TaskRef: "task-1", Score: 1.0, Passed: true, Details: map[string]any{"resolution": "validated"}},
+				{EvaluationRunID: "run-1", TenantID: "tenant-1", TaskRef: "task-2", Score: 0.0, Passed: false},
+			},
 			Summary: evaldomain.EvaluationSummary{
 				PassRate:       1.0,
 				AvgLatencyMs:   100.0,
@@ -173,10 +184,16 @@ func TestGetEvaluationReturnsDetailWithThresholdsAndSummary(t *testing.T) {
 	require.Contains(t, body, `"avg_latency_ms":`)
 	require.Contains(t, body, `"cost_cents":`)
 	require.Contains(t, body, `"security_passed":`)
+	require.Contains(t, body, `"task_results":`)
+	require.Contains(t, body, `"task_ref":`)
+	require.Contains(t, body, `"score":`)
+	require.Contains(t, body, `"passed":`)
 	require.NotContains(t, body, `"ThresholdResults"`)
 	require.NotContains(t, body, `"PassRate"`)
 	require.NotContains(t, body, `"AvgLatencyMs"`)
 	require.NotContains(t, body, `"CostCents"`)
+	require.NotContains(t, body, `"TaskResults"`)
+	require.NotContains(t, body, `"TaskRef"`)
 
 	var envelope struct {
 		Data evaluationapp.EvaluationRunDetail `json:"data"`
@@ -193,6 +210,13 @@ func TestGetEvaluationReturnsDetailWithThresholdsAndSummary(t *testing.T) {
 	require.Len(t, envelope.Data.ThresholdResults, 1)
 	require.Equal(t, "security", envelope.Data.ThresholdResults[0].Name)
 	require.True(t, envelope.Data.ThresholdResults[0].Passed)
+	require.Len(t, envelope.Data.TaskResults, 2)
+	require.Equal(t, "task-1", envelope.Data.TaskResults[0].TaskRef)
+	require.Equal(t, 1.0, envelope.Data.TaskResults[0].Score)
+	require.True(t, envelope.Data.TaskResults[0].Passed)
+	require.Equal(t, "validated", envelope.Data.TaskResults[0].Details["resolution"])
+	require.Equal(t, "task-2", envelope.Data.TaskResults[1].TaskRef)
+	require.False(t, envelope.Data.TaskResults[1].Passed)
 	require.Equal(t, 1.0, envelope.Data.Summary.PassRate)
 	require.Equal(t, 100.0, envelope.Data.Summary.AvgLatencyMs)
 	require.Equal(t, int64(50), envelope.Data.Summary.CostCents)
@@ -200,4 +224,43 @@ func TestGetEvaluationReturnsDetailWithThresholdsAndSummary(t *testing.T) {
 	require.NotNil(t, envelope.Data.CompletedAt)
 	require.Equal(t, completed, *envelope.Data.CompletedAt)
 	require.NotZero(t, envelope.Meta.ServerTime)
+}
+
+func TestCreateBenchmarkAcceptsRefsAndTaskDefinitions(t *testing.T) {
+	evals := &fakeEvaluationService{}
+	server := rest.NewServer(&fakeApplication{}, &tokenVerifier{},
+		rest.WithSession(testSessionSecret, false),
+		rest.WithEvaluationService(evals),
+	).Router()
+
+	body := `{
+		"name": "Set",
+		"tasks": [
+			"task-legacy",
+			{"task_ref": "task-1", "title": "Fix the bug", "problem": "broken", "constraints": ["repo:org/repo", "base_commit:abc"], "requirements": ["tests pass"], "is_security": true}
+		],
+		"is_active": false
+	}`
+	res := postJSONWithSession(t, server, "/v1/benchmarks", body, sessionCookie(t, "owner-1", true))
+
+	require.Equal(t, http.StatusCreated, res.Code)
+	require.Len(t, evals.createCmd.Tasks, 2)
+
+	legacy := evals.createCmd.Tasks[0]
+	require.Equal(t, "task-legacy", legacy.TaskRef)
+	require.Equal(t, 0, legacy.Ordering)
+	require.Equal(t, "", legacy.Title)
+	require.False(t, legacy.IsSecurity)
+
+	def := evals.createCmd.Tasks[1]
+	require.Equal(t, "task-1", def.TaskRef)
+	require.Equal(t, 1, def.Ordering)
+	require.Equal(t, "Fix the bug", def.Title)
+	require.Equal(t, "broken", def.Problem)
+	require.Equal(t, []string{"repo:org/repo", "base_commit:abc"}, def.Constraints)
+	require.Equal(t, []string{"tests pass"}, def.Requirements)
+	require.True(t, def.IsSecurity)
+
+	res = postJSONWithSession(t, server, "/v1/benchmarks", `{"name":"Set","tasks":[42]}`, sessionCookie(t, "owner-1", true))
+	require.Equal(t, http.StatusBadRequest, res.Code)
 }

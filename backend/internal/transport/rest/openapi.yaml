@@ -3365,6 +3365,26 @@ components:
           type: object
           additionalProperties: true
 
+    EvaluationRunResult:
+      type: object
+      description: 单个基准任务在评测运行中的结果
+      properties:
+        evaluation_run_id:
+          type: string
+        tenant_id:
+          type: string
+        task_ref:
+          type: string
+          description: 基准集内的任务引用
+        score:
+          type: number
+        passed:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+          description: 结果明细；platform 执行器下包含 resolution（收割结论）等证据
+
     EvaluationSummary:
       type: object
       properties:
@@ -3407,6 +3427,11 @@ components:
             $ref: '#/components/schemas/ThresholdResult'
         summary:
           $ref: '#/components/schemas/EvaluationSummary'
+        task_results:
+          type: array
+          description: 各基准任务的评测结果；运行完成前为空
+          items:
+            $ref: '#/components/schemas/EvaluationRunResult'
         started_at:
           type: string
           format: date-time
@@ -3461,9 +3486,36 @@ components:
           type: string
         tasks:
           type: array
-          description: 有序任务引用列表
+          description: 有序任务列表；元素为任务引用字符串（旧形式）或完整任务定义对象
           items:
-            type: string
+            oneOf:
+              - type: string
+              - type: object
+                required:
+                  - task_ref
+                properties:
+                  task_ref:
+                    type: string
+                    description: 基准集内唯一的任务引用
+                  title:
+                    type: string
+                    description: 发布为平台任务时使用的任务标题
+                  problem:
+                    type: string
+                    description: 发布为平台任务时使用的任务问题描述
+                  constraints:
+                    type: array
+                    description: 任务约束；platform 执行器会追加 eval_run 约束
+                    items:
+                      type: string
+                  requirements:
+                    type: array
+                    description: 任务验收要求
+                    items:
+                      type: string
+                  is_security:
+                    type: boolean
+                    description: 是否安全类任务；用于安全通过率硬门槛
         is_active:
           type: boolean
           description: 为 true 时原子替换当前 tenant 生效基准集

@@ -98,13 +98,18 @@ func (s *EvaluationService) GetEvaluationRunSummary(ctx context.Context, princip
 }
 
 // GetEvaluationRunDetail returns the full detail of an evaluation run by ID,
-// including threshold results and summary metrics.
+// including threshold results, summary metrics and the per-task results.
 func (s *EvaluationService) GetEvaluationRunDetail(ctx context.Context, principal identityapp.Principal, tenantID, id string) (*EvaluationRunDetail, error) {
 	run, err := s.GetEvaluationRun(ctx, principal, tenantID, id)
 	if err != nil {
 		return nil, err
 	}
 	detail := toEvaluationRunDetail(run)
+	taskResults, err := s.runs.ListResults(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	detail.TaskResults = taskResults
 	return &detail, nil
 }
 

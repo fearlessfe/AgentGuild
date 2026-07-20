@@ -56,11 +56,21 @@ func (r *benchmarkSetRepository) Create(ctx context.Context, tx application.Tx, 
 		return err
 	}
 	for _, task := range bs.Tasks() {
-		_, err := tx.Exec(ctx, `
+		constraintsJSON, err := json.Marshal(task.Constraints)
+		if err != nil {
+			return err
+		}
+		requirementsJSON, err := json.Marshal(task.Requirements)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
 			INSERT INTO benchmark_set_tasks (
-				tenant_id, benchmark_set_id, task_ref, ordering
-			) VALUES ($1, $2, $3, $4)`,
+				tenant_id, benchmark_set_id, task_ref, ordering,
+				title, problem, constraints, requirements, is_security
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 			bs.TenantID(), bs.ID(), task.TaskRef, task.Ordering,
+			task.Title, task.Problem, constraintsJSON, requirementsJSON, task.IsSecurity,
 		)
 		if err != nil {
 			return err
@@ -126,7 +136,7 @@ func (r *benchmarkSetRepository) ListByTenant(ctx context.Context, tenantID stri
 
 func (r *benchmarkSetRepository) listTasks(ctx context.Context, tenantID, benchmarkSetID string) ([]domain.BenchmarkTask, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT task_ref, ordering
+		SELECT task_ref, ordering, title, problem, constraints, requirements, is_security
 		FROM benchmark_set_tasks
 		WHERE tenant_id=$1 AND benchmark_set_id=$2
 		ORDER BY ordering ASC, task_ref ASC`,
@@ -140,8 +150,22 @@ func (r *benchmarkSetRepository) listTasks(ctx context.Context, tenantID, benchm
 	var tasks []domain.BenchmarkTask
 	for rows.Next() {
 		var task domain.BenchmarkTask
-		if err := rows.Scan(&task.TaskRef, &task.Ordering); err != nil {
+		var constraintsJSON, requirementsJSON []byte
+		if err := rows.Scan(
+			&task.TaskRef, &task.Ordering, &task.Title, &task.Problem,
+			&constraintsJSON, &requirementsJSON, &task.IsSecurity,
+		); err != nil {
 			return nil, err
+		}
+		if len(constraintsJSON) > 0 {
+			if err := json.Unmarshal(constraintsJSON, &task.Constraints); err != nil {
+				return nil, err
+			}
+		}
+		if len(requirementsJSON) > 0 {
+			if err := json.Unmarshal(requirementsJSON, &task.Requirements); err != nil {
+				return nil, err
+			}
 		}
 		tasks = append(tasks, task)
 	}
@@ -275,6 +299,52 @@ func (r *evaluationRunRepository) ListByAgentVersion(ctx context.Context, tenant
 		runs = append(runs, *run)
 	}
 	return runs, rows.Err()
+}
+
+func (r *evaluationRunRepository) ListRunning(ctx context.Context, batchSize int) ([]domain.EvaluationRun, error) {
+	if batchSize <= 0 {
+		return nil, &domain.Error{Code: "invalid_argument", Message: "batch_size is invalid", Field: "batch_size"}
+	}
+	rows, err := r.q.Query(ctx, `
+		SELECT id, tenant_id, agent_version_id, benchmark_set_id, status,
+		       environment_digest, scoring_rule_version, threshold_results, summary,
+		       started_at, completed_at
+		FROM evaluation_runs
+		WHERE status='running'
+		ORDER BY started_at ASC
+		LIMIT $1`, batchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []domain.EvaluationRun
+	for rows.Next() {
+		run, err := scanEvaluationRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, *run)
+	}
+	return runs, rows.Err()
+}
+
+// LockRunningForUpdate locks the run row inside the worker transaction while
+// the run is still running. A concurrent tick that already completed the run
+// (or holds the lock and commits) makes this return domain.ErrNotFound, which
+// the worker treats as "nothing to do" — so a run is completed exactly once.
+func (r *evaluationRunRepository) LockRunningForUpdate(ctx context.Context, tx application.Tx, tenantID, id string) (*domain.EvaluationRun, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, tenant_id, agent_version_id, benchmark_set_id, status,
+		       environment_digest, scoring_rule_version, threshold_results, summary,
+		       started_at, completed_at
+		FROM evaluation_runs
+		WHERE tenant_id=$1 AND id=$2 AND status='running'
+		FOR UPDATE`,
+		tenantID, id,
+	)
+	return scanEvaluationRun(row)
 }
 
 func (r *evaluationRunRepository) Complete(ctx context.Context, tx application.Tx, run *domain.EvaluationRun) error {
