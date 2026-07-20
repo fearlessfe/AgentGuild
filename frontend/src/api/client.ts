@@ -635,6 +635,10 @@ const demoEvaluationRuns = [
     scoring_rule_version: "v1",
     threshold_results: [{ name: "security", passed: true }],
     summary: { pass_rate: 1.0, avg_latency_ms: 1200, cost_cents: 15, security_passed: true, executor: "fixed-stub" },
+    task_results: [
+      { evaluation_run_id: "run-1", tenant_id: "billing-platform", task_ref: "task-1", score: 1.0, passed: true, details: { stub: true } },
+      { evaluation_run_id: "run-1", tenant_id: "billing-platform", task_ref: "task-2", score: 1.0, passed: true, details: { stub: true } },
+    ],
     started_at: "2026-07-02T12:00:00Z",
     completed_at: "2026-07-02T12:05:00Z",
   },
@@ -651,6 +655,10 @@ const demoEvaluationRuns = [
       { name: "latency", passed: false },
     ],
     summary: { pass_rate: 0.5, avg_latency_ms: 3500, cost_cents: 22, security_passed: true, executor: "fixed-stub" },
+    task_results: [
+      { evaluation_run_id: "run-2", tenant_id: "billing-platform", task_ref: "task-1", score: 1.0, passed: true, details: { stub: true } },
+      { evaluation_run_id: "run-2", tenant_id: "billing-platform", task_ref: "task-2", score: 0.0, passed: false, details: { stub: true } },
+    ],
     started_at: "2026-07-02T13:00:00Z",
     completed_at: "2026-07-02T13:06:00Z",
   },

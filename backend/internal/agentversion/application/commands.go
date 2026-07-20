@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"sort"
 
 	"agentguild.dev/agentguild/backend/internal/agentversion/domain"
@@ -36,12 +37,13 @@ func NewVersionService(
 		options.NewID = randomID
 	}
 	return &VersionService{
-		store:        store,
-		versions:     versions,
-		evalProvider: evalProvider,
-		xpProvider:   xpProvider,
-		policy:       policy,
-		newID:        options.NewID,
+		store:            store,
+		versions:         versions,
+		evalProvider:     evalProvider,
+		xpProvider:       xpProvider,
+		draftCreatedHook: options.DraftCreatedHook,
+		policy:           policy,
+		newID:            options.NewID,
 	}, nil
 }
 
@@ -122,6 +124,16 @@ func (s *VersionService) CreateDraft(
 		return s.versions.Create(ctx, tx, version)
 	}); err != nil {
 		return nil, err
+	}
+
+	// Best-effort post-commit hook (EVALUATION_AUTO): a hook failure must never
+	// fail draft creation — the draft is already committed.
+	if s.draftCreatedHook != nil {
+		if err := s.draftCreatedHook.OnDraftCreated(ctx, version.TenantID, version.AgentID, version.ID, cmd.CreatedBy); err != nil {
+			slog.Warn("draft created hook failed",
+				"tenant_id", version.TenantID, "agent_id", version.AgentID,
+				"version_id", version.ID, "error", err)
+		}
 	}
 
 	return &CreateDraftResponse{Version: version}, nil

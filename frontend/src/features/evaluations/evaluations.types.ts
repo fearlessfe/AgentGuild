@@ -38,6 +38,15 @@ export type EvaluationSummaryView = {
 
 export type EvaluationRunStatus = "running" | "passed" | "failed";
 
+export type EvaluationRunTaskResultView = {
+  evaluation_run_id: string;
+  tenant_id: string;
+  task_ref: string;
+  score: number;
+  passed: boolean;
+  details?: Record<string, unknown>;
+};
+
 export type EvaluationRunView = {
   id: string;
   tenant_id: string;
@@ -48,6 +57,7 @@ export type EvaluationRunView = {
   scoring_rule_version: string;
   threshold_results?: ThresholdResultView[];
   summary?: EvaluationSummaryView;
+  task_results?: EvaluationRunTaskResultView[];
   started_at: string;
   completed_at?: string;
 };

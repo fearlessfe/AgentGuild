@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -88,6 +89,23 @@ func (fakeEvalProvider) GetLatestPassed(context.Context, application.Tx, string,
 	return &application.EvaluationRunInfo{ID: randomID(), Status: "passed"}, nil
 }
 
+type draftCreatedCall struct {
+	tenantID  string
+	agentID   string
+	versionID string
+	actorID   string
+}
+
+type fakeDraftCreatedHook struct {
+	calls []draftCreatedCall
+	err   error
+}
+
+func (f *fakeDraftCreatedHook) OnDraftCreated(_ context.Context, tenantID, agentID, versionID, actorID string) error {
+	f.calls = append(f.calls, draftCreatedCall{tenantID: tenantID, agentID: agentID, versionID: versionID, actorID: actorID})
+	return f.err
+}
+
 func newService(t *testing.T, db *pgxpool.Pool) (*application.VersionService, application.VersionRepository, application.Store) {
 	t.Helper()
 	repo := avpostgres.NewVersionRepository(db)
@@ -112,37 +130,87 @@ func TestCreateDraftUsesLatestVersionNumber(t *testing.T) {
 	updateCurrentVersion(t, store, repo, tenantID, agentID, initial.ID)
 
 	first, err := svc.CreateDraft(context.Background(), application.CreateDraft{
-		TenantID:  tenantID,
-		AgentID:   agentID,
-		CreatedBy: ownerID,
-		IsAdmin:   false,
-		Runtime:   "python",
-		Model:     "gpt-4",
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		CreatedBy:    ownerID,
+		IsAdmin:      false,
+		Runtime:      "python",
+		Model:        "gpt-4",
 		Capabilities: []string{"code"},
-		PromptRef: "sha256:prompt-v2",
-		SkillRefs: []string{"sha256:skill"},
-		MemoryRef: "sha256:memory",
-		ToolRefs:  []string{"sha256:tool"},
+		PromptRef:    "sha256:prompt-v2",
+		SkillRefs:    []string{"sha256:skill"},
+		MemoryRef:    "sha256:memory",
+		ToolRefs:     []string{"sha256:tool"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, 2, first.Version.VersionNumber)
 
 	second, err := svc.CreateDraft(context.Background(), application.CreateDraft{
-		TenantID:  tenantID,
-		AgentID:   agentID,
-		CreatedBy: ownerID,
-		IsAdmin:   false,
-		Runtime:   "python",
-		Model:     "gpt-4",
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		CreatedBy:    ownerID,
+		IsAdmin:      false,
+		Runtime:      "python",
+		Model:        "gpt-4",
 		Capabilities: []string{"code"},
-		PromptRef: "sha256:prompt-v3",
-		SkillRefs: []string{"sha256:skill"},
-		MemoryRef: "sha256:memory",
-		ToolRefs:  []string{"sha256:tool"},
+		PromptRef:    "sha256:prompt-v3",
+		SkillRefs:    []string{"sha256:skill"},
+		MemoryRef:    "sha256:memory",
+		ToolRefs:     []string{"sha256:tool"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, 3, second.Version.VersionNumber)
 	require.Equal(t, first.Version.ID, second.Version.ParentVersionID)
+}
+
+func TestCreateDraftInvokesDraftCreatedHook(t *testing.T) {
+	db := testdb.StartPostgres(t)
+	repo := avpostgres.NewVersionRepository(db)
+	store := avpostgres.NewStore(db)
+	policy := application.NewPolicy(repo)
+	hook := &fakeDraftCreatedHook{}
+	svc, err := application.NewVersionService(store, repo, fakeEvalProvider{}, nil, policy, application.VersionOptions{DraftCreatedHook: hook})
+	require.NoError(t, err)
+
+	tenantID := "tenant-hook"
+	agentID := "agent-hook"
+	ownerID := "owner"
+	insertAgent(t, db, tenantID, agentID, ownerID)
+
+	resp, err := svc.CreateDraft(context.Background(), application.CreateDraft{
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		CreatedBy:    ownerID,
+		Runtime:      "python",
+		Model:        "gpt-4",
+		Capabilities: []string{"code"},
+		PromptRef:    "sha256:prompt",
+		SkillRefs:    []string{"sha256:skill"},
+		MemoryRef:    "sha256:memory",
+		ToolRefs:     []string{"sha256:tool"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []draftCreatedCall{
+		{tenantID: tenantID, agentID: agentID, versionID: resp.Version.ID, actorID: ownerID},
+	}, hook.calls)
+
+	// A failing hook is best-effort: draft creation still succeeds.
+	hook.err = errors.New("hook boom")
+	second, err := svc.CreateDraft(context.Background(), application.CreateDraft{
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		CreatedBy:    ownerID,
+		Runtime:      "python",
+		Model:        "gpt-4",
+		Capabilities: []string{"code"},
+		PromptRef:    "sha256:prompt-v2",
+		SkillRefs:    []string{"sha256:skill"},
+		MemoryRef:    "sha256:memory",
+		ToolRefs:     []string{"sha256:tool"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, second.Version.VersionNumber)
+	require.Len(t, hook.calls, 2)
 }
 
 func TestCreateDraftAndFullLifecycle(t *testing.T) {
@@ -161,17 +229,17 @@ func TestCreateDraftAndFullLifecycle(t *testing.T) {
 
 	// Create draft with changed prompt.
 	resp, err := svc.CreateDraft(context.Background(), application.CreateDraft{
-		TenantID:  tenantID,
-		AgentID:   agentID,
-		CreatedBy: ownerID,
-		IsAdmin:   false,
-		Runtime:   "python",
-		Model:     "gpt-4",
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		CreatedBy:    ownerID,
+		IsAdmin:      false,
+		Runtime:      "python",
+		Model:        "gpt-4",
 		Capabilities: []string{"code"},
-		PromptRef: "sha256:new-prompt",
-		SkillRefs: []string{"sha256:skill"},
-		MemoryRef: "sha256:memory",
-		ToolRefs:  []string{"sha256:tool"},
+		PromptRef:    "sha256:new-prompt",
+		SkillRefs:    []string{"sha256:skill"},
+		MemoryRef:    "sha256:memory",
+		ToolRefs:     []string{"sha256:tool"},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp.Version)
@@ -395,17 +463,17 @@ func TestCreateDraftSameFingerprintReturnsNoChange(t *testing.T) {
 	insertAgent(t, db, tenantID, agentID, ownerID)
 
 	cfg := application.CreateDraft{
-		TenantID:  tenantID,
-		AgentID:   agentID,
-		CreatedBy: ownerID,
-		IsAdmin:   false,
-		Runtime:   "python",
-		Model:     "gpt-4",
+		TenantID:     tenantID,
+		AgentID:      agentID,
+		CreatedBy:    ownerID,
+		IsAdmin:      false,
+		Runtime:      "python",
+		Model:        "gpt-4",
 		Capabilities: []string{"code"},
-		PromptRef: "sha256:prompt",
-		SkillRefs: []string{"sha256:skill"},
-		MemoryRef: "sha256:memory",
-		ToolRefs:  []string{"sha256:tool"},
+		PromptRef:    "sha256:prompt",
+		SkillRefs:    []string{"sha256:skill"},
+		MemoryRef:    "sha256:memory",
+		ToolRefs:     []string{"sha256:tool"},
 	}
 
 	initial := newVersion(t, tenantID, agentID, 1, "", domain.StatusActive)

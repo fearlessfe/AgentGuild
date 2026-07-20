@@ -192,7 +192,11 @@ make db-down        # docker compose down
   - `VALIDATION_LEASE`（默认 `5m`）
   - `VALIDATION_MAX_ATTEMPTS`（默认 `3`）
   - `VALIDATION_SANDBOX_IMAGE`：validation worker 使用的受控容器镜像，必须以 `@sha256:<64 hex>` 固定 digest；缺失或未固定时验证 fail closed
-- `EVALUATION_EXECUTOR`：评测执行器选择。空/未设置 = 评测不可用，`StartEvaluationRun` 返回 `evaluation_unavailable` 领域错误（fail closed，不崩溃）；`=fixed` = 固定通过的 stub（仅开发/演示，启动时输出醒目 warning，评测运行 summary 的 `executor` 字段标记为 `fixed-stub`）；其他值 = 启动报错
+- `EVALUATION_EXECUTOR`：评测执行器选择。空/未设置 = 评测不可用，`StartEvaluationRun` 返回 `evaluation_unavailable` 领域错误（fail closed，不崩溃）；`=fixed` = 固定通过的 stub（仅开发/演示，启动时输出醒目 warning，评测运行 summary 的 `executor` 字段标记为 `fixed-stub`）；`=platform` = 真实执行器，启动评测时为每个基准任务发布一条真实平台任务（run 保持 `running`），由 evaluation harvest worker 收割任务结果并评分完成（summary 的 `executor` 字段标记为 `platform`）；其他值 = 启动报错
+- `EVALUATION_AUTO`：自动评测开关，默认 `false`。开启且评测执行器可用时，每个新 Draft 版本在创建后自动以建版人身份对当前 Active 基准集启动评测运行（best-effort，无 Active 基准集或状态冲突时跳过，不影响建版）
+- `EVALUATION_TASK_DEADLINE`：platform 执行器发布的评测任务截止时间，默认 `2h`
+- `EVALUATION_WORKER_INTERVAL`：evaluation harvest worker 的运行间隔，默认 `30s`（仅 `EVALUATION_EXECUTOR=platform` 时注册）
+- `EVALUATION_RUN_TIMEOUT`：评测运行超时，默认 `24h`；超时后未完成平台任务按失败计入评分并完成运行
 - `REVIEW_SEED_TENANT_ID`：启动时为指定 tenant 预置默认 review rubric 与 reviewer（可选）
 - `REVIEW_SEED_REVIEWER_USER_ID`：预置 reviewer 绑定的人类 session owner ID（默认 `default-reviewer`）
 - `SHUTDOWN_TIMEOUT`：优雅关闭超时，默认 `10s`

@@ -31,6 +31,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/domain"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	evaluationpostgres "agentguild.dev/agentguild/backend/internal/evaluation/postgres"
+	evaluationworker "agentguild.dev/agentguild/backend/internal/evaluation/worker"
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
@@ -91,7 +92,7 @@ func run() error {
 		return err
 	}
 
-	versionService, evaluationService, experienceService, err := buildVersionExperienceRuntime(cfg, pool)
+	versionService, evaluationService, experienceService, evaluationWorker, err := buildVersionExperienceRuntime(cfg, pool, service)
 	if err != nil {
 		return err
 	}
@@ -230,6 +231,9 @@ func run() error {
 	runWorker(workerCtx, &wg, cfg.OutboxInterval, "outbox", outbox.RunOnce)
 	reputation := reputationworker.NewWorker(postgres.NewStore(pool), cfg.ReputationWorkerInterval, 100, slog.Default())
 	runWorker(workerCtx, &wg, cfg.ReputationWorkerInterval, "reputation", reputation.RunOnce)
+	if evaluationWorker != nil {
+		runWorker(workerCtx, &wg, cfg.EvaluationWorkerInterval, "evaluation", evaluationWorker.RunOnce)
+	}
 	if gitRuntime != nil {
 		runWorker(workerCtx, &wg, cfg.ValidationWorkerInterval, "validation", func(ctx context.Context) error {
 			return runValidationWorker(ctx, gitRuntime.validationWorker, pool)
@@ -274,16 +278,12 @@ func githubManifestOptions(cfg config.Config) gitapp.ManifestOptions {
 	}
 }
 
-func buildVersionExperienceRuntime(cfg config.Config, pool *pgxpool.Pool) (*agentversionapp.VersionService, *evaluationapp.EvaluationService, *agentexperienceapp.CandidateService, error) {
+func buildVersionExperienceRuntime(cfg config.Config, pool *pgxpool.Pool, coreService *application.Service) (*agentversionapp.VersionService, *evaluationapp.EvaluationService, *agentexperienceapp.CandidateService, *evaluationworker.Worker, error) {
 	avStore := agentversionpostgres.NewStore(pool)
 	versionRepo := agentversionpostgres.NewVersionRepository(pool)
 	evalProvider := agentversionpostgres.NewEvaluationRunProvider(pool)
 	xpProvider := agentversionpostgres.NewExperienceCandidateProvider(pool)
 	avPolicy := agentversionapp.NewPolicy(versionRepo)
-	versionService, err := agentversionapp.NewVersionService(avStore, versionRepo, evalProvider, xpProvider, avPolicy, agentversionapp.VersionOptions{})
-	if err != nil {
-		return nil, nil, nil, err
-	}
 
 	evStore := evaluationpostgres.NewStore(pool)
 	bsRepo := evaluationpostgres.NewBenchmarkSetRepository(pool)
@@ -291,19 +291,55 @@ func buildVersionExperienceRuntime(cfg config.Config, pool *pgxpool.Pool) (*agen
 	versionLifecycle := agentversionpostgres.NewVersionLifecycleAdapter(pool)
 	// Evaluation is opt-in via EVALUATION_EXECUTOR: unset means evaluation runs
 	// fail closed with evaluation_unavailable; "fixed" selects the fixed-pass
-	// stub for local development and demos only.
+	// stub for local development and demos only; "platform" publishes real
+	// tasks through the platform's own delivery pipeline and registers the
+	// harvest worker that resolves and completes the runs.
 	var executor evaluationapp.BenchmarkExecutor
-	if cfg.EvaluationExecutor == config.EvaluationExecutorFixed {
+	var harvestWorker *evaluationworker.Worker
+	evOptions := evaluationapp.EvaluationOptions{}
+	switch cfg.EvaluationExecutor {
+	case config.EvaluationExecutorFixed:
 		slog.Warn("EVALUATION_EXECUTOR=fixed: benchmark evaluation uses a fixed-pass stub; results are not a real quality gate")
 		executor = evaluationapp.NewFixedBenchmarkExecutor()
-	} else {
+	case config.EvaluationExecutorPlatform:
+		slog.Info("EVALUATION_EXECUTOR=platform: benchmark evaluation publishes real platform tasks")
+		executor = evaluationapp.NewPlatformBenchmarkExecutor()
+		runTasks := evaluationpostgres.NewEvaluationRunTaskRepository(pool)
+		evOptions.TaskPublisher = evaluationTaskPublisher{service: coreService}
+		evOptions.RunTasks = runTasks
+		evOptions.TaskDeadline = cfg.EvaluationTaskDeadline
+		harvestWorker = evaluationworker.NewWorker(
+			evStore, runRepo, runTasks, bsRepo, versionLifecycle,
+			evaluationpostgres.NewEvaluationTaskObserver(pool),
+			cfg.EvaluationWorkerInterval, cfg.EvaluationRunTimeout, 10, slog.Default(),
+		)
+	default:
 		slog.Info("EVALUATION_EXECUTOR unset: evaluation runs are disabled and will fail closed")
 		executor = evaluationapp.NewRejectingBenchmarkExecutor()
 	}
 	evPolicy := evaluationapp.NewPolicy(versionRepo)
-	evaluationService, err := evaluationapp.NewEvaluationService(evStore, bsRepo, runRepo, versionLifecycle, executor, evPolicy, evaluationapp.EvaluationOptions{})
+	evaluationService, err := evaluationapp.NewEvaluationService(evStore, bsRepo, runRepo, versionLifecycle, executor, evPolicy, evOptions)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+
+	// EVALUATION_AUTO: when automatic evaluation is enabled and an executor is
+	// configured, every new draft version automatically starts an evaluation
+	// run against the tenant's active benchmark set (best-effort post-commit
+	// hook). Without an executor the hook stays disconnected and drafts are
+	// unaffected.
+	avOptions := agentversionapp.VersionOptions{}
+	if cfg.EvaluationExecutor != "" {
+		avOptions.DraftCreatedHook = evaluationapp.NewAutoEvaluator(
+			cfg.EvaluationAuto, evaluationService, bsRepo,
+			evaluationpostgres.NewVersionEnvironmentProvider(pool), slog.Default(),
+		)
+	} else if cfg.EvaluationAuto {
+		slog.Warn("EVALUATION_AUTO=true but EVALUATION_EXECUTOR is unset; automatic evaluation on draft creation is disabled")
+	}
+	versionService, err := agentversionapp.NewVersionService(avStore, versionRepo, evalProvider, xpProvider, avPolicy, avOptions)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
 	axStore := agentexperiencepostgres.NewStore(pool)
@@ -314,10 +350,10 @@ func buildVersionExperienceRuntime(cfg config.Config, pool *pgxpool.Pool) (*agen
 	axPolicy := agentexperienceapp.NewPolicy(versionRepo)
 	experienceService, err := agentexperienceapp.NewCandidateService(axStore, candidateRepo, submissionStore, executionStore, axPolicy, classifier, agentexperienceapp.CandidateOptions{})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
-	return versionService, evaluationService, experienceService, nil
+	return versionService, evaluationService, experienceService, harvestWorker, nil
 }
 
 func costProvider(enabled bool, cfg config.Config) telemetry.TraceCostProvider {
@@ -538,6 +574,31 @@ func repeat(ctx context.Context, interval time.Duration, name string, fn func(co
 type syncTaskSink struct {
 	service *application.Service
 	pool    *pgxpool.Pool
+}
+
+// evaluationTaskPublisher adapts the core task service to the evaluation
+// module's EvaluationTaskPublisher port. PublishSystemTask opens its own
+// transaction, so the evaluation service calls it only after its own
+// transaction has committed.
+type evaluationTaskPublisher struct {
+	service *application.Service
+}
+
+func (p evaluationTaskPublisher) PublishEvaluationTask(ctx context.Context, cmd evaluationapp.PublishEvaluationTaskCommand) (string, error) {
+	task, err := p.service.PublishSystemTask(ctx, application.PublishSystemTask{
+		TenantID:     cmd.TenantID,
+		RequestID:    cmd.RequestID,
+		Type:         cmd.Type,
+		Title:        cmd.Title,
+		Problem:      cmd.Problem,
+		Constraints:  cmd.Constraints,
+		Requirements: cmd.Requirements,
+		Deadline:     cmd.Deadline,
+	})
+	if err != nil {
+		return "", err
+	}
+	return task.ID, nil
 }
 
 func (s syncTaskSink) PublishSystemTask(ctx context.Context, in syncapp.PublishSystemTaskInput) (string, error) {

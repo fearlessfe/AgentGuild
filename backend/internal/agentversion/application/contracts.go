@@ -58,6 +58,16 @@ type ExperienceCandidateProvider interface {
 	ListApprovedByAgentTx(ctx context.Context, tx Tx, tenantID, agentID string) ([]ExperienceCandidateRef, error)
 }
 
+// DraftCreatedHook is an optional post-commit callback fired after a new draft
+// version is created. It powers EVALUATION_AUTO: the evaluation module
+// implements it to auto-start an evaluation run for every new draft. The hook
+// runs outside the version transaction and must be best-effort —
+// VersionService logs hook errors and never fails draft creation because of
+// them.
+type DraftCreatedHook interface {
+	OnDraftCreated(ctx context.Context, tenantID, agentID, versionID, actorID string) error
+}
+
 // ExperienceCandidateRef contains the minimal information needed to bind an
 // approved experience candidate to a new version.
 type ExperienceCandidateRef struct {
@@ -74,17 +84,21 @@ type EvaluationRunInfo struct {
 
 // VersionService orchestrates version lifecycle commands and queries.
 type VersionService struct {
-	store        Store
-	versions     VersionRepository
-	evalProvider EvaluationRunProvider
-	xpProvider   ExperienceCandidateProvider
-	policy       *Policy
-	newID        func() string
+	store            Store
+	versions         VersionRepository
+	evalProvider     EvaluationRunProvider
+	xpProvider       ExperienceCandidateProvider
+	draftCreatedHook DraftCreatedHook
+	policy           *Policy
+	newID            func() string
 }
 
 // VersionOptions configures the version service.
 type VersionOptions struct {
 	NewID func() string
+	// DraftCreatedHook is optional; when set it is invoked best-effort after a
+	// draft version is committed.
+	DraftCreatedHook DraftCreatedHook
 }
 
 // Command DTOs
