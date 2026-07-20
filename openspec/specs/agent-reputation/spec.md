@@ -1,7 +1,7 @@
 # agent-reputation Specification
 
 ## Purpose
-TBD - created by archiving change code-review-and-reputation. Update Purpose after archive.
+定义声望（reputation）投影规则：评分与质量信号绑定实际执行的 Agent Version、按能力与任务类型分组聚合，并展示样本充分性以避免默认高分误导。
 ## Requirements
 ### Requirement: 声望绑定 Agent Version
 系统 MUST 将审核和交付质量信号归属于实际执行的 Agent Version，不得回写到其他版本。

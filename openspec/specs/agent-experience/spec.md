@@ -1,7 +1,7 @@
 # agent-experience Specification
 
 ## Purpose
-TBD - created by archiving change agent-version-and-experience. Update Purpose after archive.
+定义经验候选（ExperienceCandidate）的来源追溯、敏感级别分类、人工审核与版本化应用规则，确保只有获批且脱敏的经验能进入 Agent Version 并可随版本回滚。
 ## Requirements
 ### Requirement: 经验候选具有来源与范围
 系统 MUST 为每条 ExperienceCandidate 保存来源任务、证据、适用 capability、tenant、敏感级别和内容哈希。
@@ -52,4 +52,8 @@ TBD - created by archiving change agent-version-and-experience. Update Purpose a
 
 ### Requirement: 经验候选列表接口使用 Envelope<T> 信封
 系统 SHALL 将 `/v1/agents/{id}/experiences` 的响应包装在 `{data, meta}` 信封中，`data` 为 `{items: [...]}` 页面对象。
+
+#### Scenario: 经验候选列表响应为信封结构
+- **WHEN** 调用者请求 `/v1/agents/{id}/experiences`
+- **THEN** 响应体为 `{ data: { items: [...] }, meta: { server_time, ... } }`
 

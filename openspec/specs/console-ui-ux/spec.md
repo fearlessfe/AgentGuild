@@ -1,7 +1,7 @@
 # console-ui-ux Specification
 
 ## Purpose
-TBD - created by archiving change improve-console-ui-ux. Update Purpose after archive.
+Define the console's responsive UI/UX baseline: readable review diffs, mobile workbench lists and controls, consistent iconography, loading/mutation feedback, and onboarding-readiness-aware navigation.
 ## Requirements
 ### Requirement: Review diff remains readable
 The console SHALL render review diffs so code lines remain readable in desktop and mobile viewports. Diff content MUST NOT wrap into character-by-character columns, and any overflow needed to preserve code readability MUST be contained within the diff region rather than causing page-level horizontal overflow.
@@ -78,4 +78,51 @@ The frontend test suite SHALL include targeted checks for the UI/UX baseline int
 - **THEN** tests cover desktop and mobile review diff readability
 - **AND** tests cover mobile task and agent list visibility
 - **AND** tests check that key routes do not create page-level horizontal overflow at mobile width
+
+### Requirement: Repository onboarding is discoverable
+The console SHALL make repository onboarding discoverable from persistent authenticated navigation or an equivalently prominent settings entry.
+
+#### Scenario: User scans authenticated navigation
+- **WHEN** an authenticated user views the application shell
+- **THEN** the repository onboarding entry is visible without first opening the overview/dashboard page
+
+#### Scenario: User identifies current module
+- **WHEN** an authenticated user opens the repository onboarding route
+- **THEN** the top-level module label and page header identify the repository onboarding context
+
+### Requirement: Repository onboarding separates setup from automation
+The console SHALL present repository access setup separately from Issue sync rule automation.
+
+#### Scenario: User opens sync rules
+- **WHEN** a user opens the sync rule page
+- **THEN** the page focuses on automation rules
+- **AND** repository access setup is linked to the repository onboarding module rather than embedded as the primary workflow
+
+#### Scenario: User opens repository onboarding
+- **WHEN** a user opens the repository onboarding module
+- **THEN** adding or selecting a repository does not automatically create an Issue sync rule
+
+### Requirement: Default console entry follows onboarding readiness
+控制台 SHALL 使用服务端仓库接入汇总状态决定隐式入口。仅当租户的 GitHub App 已配置并安装，且至少存在一个已接入仓库时，控制台 MUST 将用户送入任务中心；否则 MUST 将用户送入首次引导。
+
+#### Scenario: Ready tenant enters task center
+- **WHEN** 已登录用户进入根路径、完成本地登录或访问未知控制台路径
+- **AND** GitHub App 状态为已配置且 installation ID 大于零
+- **AND** 已接入仓库列表至少包含一项
+- **THEN** 控制台使用 replace navigation 进入 `/tasks`
+
+#### Scenario: Tenant without complete onboarding enters onboarding
+- **WHEN** 已登录用户进入隐式控制台入口
+- **AND** GitHub App 未配置、尚未安装或没有已接入仓库中的任一条件成立
+- **THEN** 控制台使用 replace navigation 进入 `/onboarding`
+
+#### Scenario: Readiness cannot be loaded
+- **WHEN** 控制台无法取得仓库接入汇总状态
+- **THEN** 控制台进入 `/onboarding`
+- **AND** 不得错误进入 `/tasks`
+
+#### Scenario: User explicitly opens a management route
+- **WHEN** 已登录用户显式访问 `/agents`、`/tasks` 或 `/onboarding`
+- **THEN** 控制台保留该显式路由
+- **AND** Agents 仍作为管理模块可用
 

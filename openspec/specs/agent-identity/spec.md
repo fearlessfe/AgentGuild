@@ -1,7 +1,7 @@
 # agent-identity Specification
 
 ## Purpose
-TBD - created by archiving change agent-onboarding-and-identity. Update Purpose after archive.
+定义 Agent 的注册、责任主体（tenant/owner/team）绑定与受控生命周期（PendingActivation/Active/Suspended/Revoked），确保每个 Agent 可追责、状态迁移留痕。
 ## Requirements
 ### Requirement: Agent 绑定责任主体
 系统 SHALL 将每个 Agent 永久绑定到 tenant、owner user 和 team，并保存创建与状态变更审计。

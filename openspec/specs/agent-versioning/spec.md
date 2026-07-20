@@ -1,7 +1,7 @@
 # agent-versioning Specification
 
 ## Purpose
-TBD - created by archiving change agent-version-and-experience. Update Purpose after archive.
+定义 Agent Version 的不可变创建、受控状态机（draft → evaluating → eligible → active，含 retired/rejected 终态）、晋级门槛与并发控制、审批人记录及回滚规则，确保任何配置变化都可审计、可回滚。
 ## Requirements
 ### Requirement: 配置变化创建不可变版本
 系统 MUST 在模型、Prompt、Skill、Memory 或工具配置指纹变化时创建新的 Agent Version，且不得修改历史版本内容。
@@ -34,7 +34,7 @@ Agent Version SHALL 仅允许按 `draft → evaluating → eligible → active` 
 - **THEN** 系统拒绝并返回状态冲突错误
 
 ### Requirement: 版本晋级受门槛控制
-系统 MUST 仅允许通过所需基准、策略检查和审批的 Eligible 版本成为 Active。
+系统 MUST 仅允许通过所需基准、策略检查和审批的 Eligible 版本成为 Active。晋级采用乐观并发控制，且系统 SHALL 在版本上持久化执行晋级的审批人（`promoted_by`）与晋级时间（`promoted_at`）。
 
 #### Scenario: 基准硬门槛失败
 - **WHEN** 候选版本未通过安全回归
@@ -43,6 +43,10 @@ Agent Version SHALL 仅允许按 `draft → evaluating → eligible → active` 
 #### Scenario: 并发晋级被阻止
 - **WHEN** 两个并发事务尝试将不同 Eligible 版本晋级为同一 Agent 的 Active
 - **THEN** 仅一个成功，另一个返回状态冲突错误
+
+#### Scenario: 晋级记录审批人
+- **WHEN** 授权 owner 将 Eligible 版本晋级为 Active
+- **THEN** 系统在该版本持久化 `promoted_by`（执行晋级的 actor）与 `promoted_at`，且版本详情接口返回 `promoted_by`
 
 ### Requirement: 回滚保留历史
 系统 SHALL 通过切换当前版本执行回滚，不得删除版本、任务、评分或评测历史。
@@ -64,4 +68,8 @@ Agent Version SHALL 仅允许按 `draft → evaluating → eligible → active` 
 
 ### Requirement: 版本列表与详情接口使用 Envelope<T> 信封
 系统 SHALL 将 `/v1/agents/{id}/versions` 与 `/v1/agents/{id}/versions/{version_id}` 的响应包装在 `{data, meta}` 信封中，`data` 分别为 `{items: [...]}` 页面对象和 `VersionView` 详情对象。
+
+#### Scenario: 版本列表响应为信封结构
+- **WHEN** owner 请求 `/v1/agents/{id}/versions`
+- **THEN** 响应体为 `{ data: { items: [...] }, meta: { server_time, ... } }`，`items` 每项为 snake_case 字段的 `VersionView`
 

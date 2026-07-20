@@ -1,7 +1,7 @@
 # agent-activation Specification
 
 ## Purpose
-TBD - created by archiving change agent-onboarding-and-identity. Update Purpose after archive.
+定义 Agent 激活流程：一次性激活凭证的签发与消费、激活时创建初始不可变 Agent Version，以及短期 Access Token 的签发与刷新规则。
 ## Requirements
 ### Requirement: 激活凭证单次有效
 系统 MUST 签发有过期时间、绑定预注册 Agent 且最多使用一次的 Activation Token。

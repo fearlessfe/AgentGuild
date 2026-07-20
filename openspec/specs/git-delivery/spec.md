@@ -1,7 +1,7 @@
 # git-delivery Specification
 
 ## Purpose
-TBD - created by archiving change git-delivery-and-validation. Update Purpose after archive.
+定义 Agent 代码交付的 Git 工作凭证最小授权、Submission 对可验证 commit 的引用规则与 MCP 结构化成果提交，确保 Git 仓库是代码事实来源且提交可审计。
 ## Requirements
 ### Requirement: 工作凭证最小授权
 系统 MUST 为单个 Execution 签发短时效 Git 凭证，仅允许读取指定 repository/base commit 并推送平台指定 branch。

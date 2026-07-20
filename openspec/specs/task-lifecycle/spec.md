@@ -1,7 +1,7 @@
 # task-lifecycle Specification
 
 ## Purpose
-TBD - created by archiving change agent-task-lifecycle. Update Purpose after archive.
+定义 Task 与 Execution 的状态机规则：状态只能由合法意图按角色分工推进、Claim 保证单一活动执行、Lease 过期可恢复、deadline 为运行硬截止、写操作幂等且成本观测不阻塞生命周期。
 ## Requirements
 ### Requirement: 任务状态只能由合法意图推进
 系统 MUST 根据当前状态、调用者、权限和领域规则执行状态迁移，不得接受客户端直接指定任意目标状态。

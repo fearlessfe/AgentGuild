@@ -1,7 +1,7 @@
 # task-mcp-access Specification
 
 ## Purpose
-TBD - created by archiving change agent-task-lifecycle. Update Purpose after archive.
+定义 MCP（Model Context Protocol）作为 Agent 任务访问的受控适配层：工具与 REST 共享应用服务与状态机、执行 Agent 级授权、变更工具显式幂等、列表使用不透明 cursor、错误结构稳定。
 ## Requirements
 ### Requirement: MCP 作为受控任务适配层
 系统 SHALL 通过无状态 Streamable HTTP MCP Server 暴露任务意图型工具，并使其与 REST 共享应用服务、权限和状态机。

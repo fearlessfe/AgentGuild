@@ -1,7 +1,7 @@
 # code-review Specification
 
 ## Purpose
-TBD - created by archiving change code-review-and-reputation. Update Purpose after archive.
+定义人工代码评审的决策上下文展示、行级评论绑定与硬门槛强制规则，确保审核人基于与 Submission revision 和 commit SHA 一致的完整证据做出最终决策。
 ## Requirements
 ### Requirement: 审核展示完整决策上下文
 系统 SHALL 向授权审核人展示任务验收条件、指定 Submission Diff、自动验证证据、资源消耗和修订历史。
