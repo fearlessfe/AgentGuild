@@ -20,6 +20,7 @@ import (
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
+	publictaskapp "agentguild.dev/agentguild/backend/internal/publictask/application"
 	syncapp "agentguild.dev/agentguild/backend/internal/sync/application"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -96,6 +97,12 @@ type repositoryOnboardingService interface {
 	Remove(ctx context.Context, principal gitapp.Principal, id string) error
 }
 
+type publicTaskService interface {
+	List(context.Context, publictaskapp.ListPublicTasks) (publictaskapp.Envelope[publictaskapp.TaskPage], error)
+	Get(context.Context, publictaskapp.GetPublicTask) (publictaskapp.Envelope[publictaskapp.TaskDetail], error)
+	Claim(context.Context, auth.Principal, publictaskapp.ClaimPublicTask) (publictaskapp.Envelope[publictaskapp.PublicClaimView], error)
+}
+
 type oidcProvider interface {
 	BeginAuthURL(state string) string
 	Exchange(context.Context, string) (*auth.Session, error)
@@ -130,6 +137,7 @@ type Server struct {
 	syncRules            *syncapp.RuleService
 	syncEngine           SyncEngine
 	repositoryOnboarding repositoryOnboardingService
+	publicTasks          publicTaskService
 	idempotencyStore     mutationIdempotencyStore
 	idempotencyHeartbeat time.Duration
 	idempotencyIOTimeout time.Duration
@@ -165,6 +173,11 @@ func WithSyncEngine(engine SyncEngine) Option {
 // WithRepositoryOnboardingService 挂载仓库 onboarding REST API。
 func WithRepositoryOnboardingService(svc repositoryOnboardingService) Option {
 	return func(s *Server) { s.repositoryOnboarding = svc }
+}
+
+// WithPublicTaskService mounts the isolated public task discovery API.
+func WithPublicTaskService(svc publicTaskService) Option {
+	return func(s *Server) { s.publicTasks = svc }
 }
 
 // WithIdempotencyStore enables durable replay protection for human mutation routes.
@@ -292,6 +305,11 @@ func (s *Server) Router() http.Handler {
 	r.Get("/skill.md", serveAgentSkill)
 
 	r.Route("/v1", func(r chi.Router) {
+		if s.publicTasks != nil {
+			r.With(s.optionalAuthenticate, s.rateLimit).Get("/public/tasks", s.listPublicTasks)
+			r.With(s.optionalAuthenticate, s.rateLimit).Get("/public/tasks/{id}", s.getPublicTask)
+			r.With(s.authenticate, s.rateLimit).Post("/public/tasks/{id}:claim", s.claimPublicTask)
+		}
 		if s.identity != nil {
 			// Agent self-service routes (bearer token only)
 			r.Post("/agents/me:activate", s.rateLimit(http.HandlerFunc(s.activateAgent)).ServeHTTP)
@@ -518,6 +536,69 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	})
+}
+
+func (s *Server) optionalAuthenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.authenticate(next).ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) listPublicTasks(w http.ResponseWriter, r *http.Request) {
+	limit, err := parseLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeFieldError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "limit is invalid", "limit")
+		return
+	}
+	principal := mustPrincipal(r)
+	result, err := s.publicTasks.List(r.Context(), publictaskapp.ListPublicTasks{
+		Limit: limit, Cursor: r.URL.Query().Get("cursor"),
+		AuthenticatedAgent: principal.AgentID != "" && principal.AgentVersionID != "",
+	})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) getPublicTask(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r)
+	result, err := s.publicTasks.Get(r.Context(), publictaskapp.GetPublicTask{
+		ID:                 chi.URLParam(r, "id"),
+		AuthenticatedAgent: principal.AgentID != "" && principal.AgentVersionID != "",
+	})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) claimPublicTask(w http.ResponseWriter, r *http.Request) {
+	principal := mustPrincipal(r)
+	var body struct {
+		RequestID string `json:"request_id"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	idempotencyKey, ok := resolveIdempotencyKey(r, body.RequestID, w)
+	if !ok {
+		return
+	}
+	result, err := s.publicTasks.Claim(r.Context(), principal, publictaskapp.ClaimPublicTask{
+		RequestID: idempotencyKey, PublicTaskID: chi.URLParam(r, "id"),
+	})
+	if err != nil {
+		mapDomainError(w, err, principal)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) publishTask(w http.ResponseWriter, r *http.Request) {

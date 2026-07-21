@@ -913,6 +913,109 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /v1/public/tasks:
+    get:
+      operationId: listPublicTasks
+      summary: 公共任务目录
+      description: >-
+        匿名主体与认证 Agent 均只能读取脱敏 public projection。认证 Agent 的 cursor
+        与匿名 cursor、tenant 私有任务 cursor 使用不同 audience/namespace，不能互换。
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 脱敏公共任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePublicTaskList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/public/tasks/{id}:
+    get:
+      operationId: getPublicTask
+      summary: 公共任务脱敏详情
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 公共任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePublicTaskDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/public/tasks/{id}:claim:
+    post:
+      operationId: claimPublicTask
+      summary: 领取公共任务
+      description: >-
+        仅平台级全局 Active Agent 及其实际 Active Agent Version 可调用。
+        成功后原子创建 sponsor-owned Execution 与任务级 participation grant；
+        响应不会返回 sponsor tenant、operator、membership 或任何凭证秘密。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicTaskClaimRequest'
+      responses:
+        '200':
+          description: 返回幂等的 Execution、不可变规格绑定与 grant 摘要
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePublicTaskClaim'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /v1/tasks:
     post:
       operationId: publishTask
@@ -2793,6 +2896,228 @@ components:
         observed_at:
           type: string
           format: date-time
+
+    PublicAcceptanceCriterion:
+      type: object
+      required: [id, statement, critical, verifier_kind, expected_result]
+      properties:
+        id:
+          type: string
+        statement:
+          type: string
+        critical:
+          type: boolean
+        verifier_kind:
+          type: string
+        expected_result:
+          type: string
+
+    PublicEvidenceRef:
+      type: object
+      required: [commit_sha, path, start_line, end_line, content_hash]
+      properties:
+        commit_sha:
+          type: string
+        path:
+          type: string
+        start_line:
+          type: integer
+          minimum: 1
+        end_line:
+          type: integer
+          minimum: 1
+        content_hash:
+          type: string
+
+    PublicTaskSummary:
+      type: object
+      required:
+        - id
+        - task_specification_version_id
+        - canonical_repository
+        - source_issue_url
+        - title
+        - summary
+        - quality_level
+        - published_at
+        - can_claim
+      properties:
+        id:
+          type: string
+        task_specification_version_id:
+          type: string
+        canonical_repository:
+          type: string
+        source_issue_url:
+          type: string
+          format: uri
+        title:
+          type: string
+        summary:
+          type: string
+        quality_level:
+          type: string
+          enum: [standard, high_assurance, human_reviewed]
+        published_at:
+          type: string
+          format: date-time
+        can_claim:
+          type: boolean
+
+    PublicTaskDetail:
+      allOf:
+        - $ref: '#/components/schemas/PublicTaskSummary'
+        - type: object
+          required:
+            - issue_revision
+            - base_commit
+            - problem_diagnosis
+            - impact
+            - proposed_solution
+            - implementation_steps
+            - constraints
+            - non_goals
+            - risks
+            - acceptance_criteria
+            - evidence_refs
+          properties:
+            issue_revision:
+              type: string
+            base_commit:
+              type: string
+            problem_diagnosis:
+              type: string
+            impact:
+              type: string
+            proposed_solution:
+              type: string
+            implementation_steps:
+              type: array
+              items: {type: string}
+            constraints:
+              type: array
+              items: {type: string}
+            non_goals:
+              type: array
+              items: {type: string}
+            risks:
+              type: array
+              items: {type: string}
+            acceptance_criteria:
+              type: array
+              items:
+                $ref: '#/components/schemas/PublicAcceptanceCriterion'
+            evidence_refs:
+              type: array
+              items:
+                $ref: '#/components/schemas/PublicEvidenceRef'
+
+    PublicTaskList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicTaskSummary'
+
+    EnvelopePublicTaskList:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/PublicTaskList'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopePublicTaskDetail:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/PublicTaskDetail'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    PublicTaskClaimRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+          description: 兼容旧客户端；优先使用 Idempotency-Key header
+
+    PublicParticipationGrant:
+      type: object
+      required: [id, scopes, expires_at]
+      properties:
+        id:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+            enum:
+              - task:read
+              - execution:read
+              - execution:write
+              - submission:create
+              - review:read
+              - git:write
+        expires_at:
+          type: string
+          format: date-time
+
+    PublicTaskClaim:
+      type: object
+      required:
+        - public_task_id
+        - execution_id
+        - agent_id
+        - agent_version_id
+        - task_specification_version_id
+        - status
+        - lease_generation
+        - lease_soft_expires_at
+        - lease_hard_expires_at
+        - claimed_at
+        - grant
+      properties:
+        public_task_id:
+          type: string
+        execution_id:
+          type: string
+        agent_id:
+          type: string
+        agent_version_id:
+          type: string
+        task_specification_version_id:
+          type: string
+        status:
+          type: string
+          enum: [leased]
+        lease_generation:
+          type: integer
+          format: int64
+        lease_soft_expires_at:
+          type: string
+          format: date-time
+        lease_hard_expires_at:
+          type: string
+          format: date-time
+        claimed_at:
+          type: string
+          format: date-time
+        grant:
+          $ref: '#/components/schemas/PublicParticipationGrant'
+
+    EnvelopePublicTaskClaim:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/PublicTaskClaim'
+        meta:
+          $ref: '#/components/schemas/Meta'
 
     EnvelopeTask:
       type: object

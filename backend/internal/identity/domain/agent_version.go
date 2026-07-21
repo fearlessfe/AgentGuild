@@ -22,11 +22,30 @@ func NewAgentVersion(
 	configFingerprint string,
 	now time.Time,
 ) (*AgentVersion, error) {
-	if id == "" {
-		return nil, invalidArgument("id")
-	}
 	if tenantID == "" {
 		return nil, invalidArgument("tenant_id")
+	}
+	version, err := NewGlobalAgentVersion(id, agentID, versionNumber, runtime, model, capabilities, configFingerprint, now)
+	if err != nil {
+		return nil, err
+	}
+	version.TenantID = tenantID
+	return version, nil
+}
+
+// NewGlobalAgentVersion creates an immutable version for a platform-global
+// Agent identity. TenantID is deliberately left empty; organization and task
+// authorization are modeled separately.
+func NewGlobalAgentVersion(
+	id, agentID string,
+	versionNumber int,
+	runtime, model string,
+	capabilities []string,
+	configFingerprint string,
+	now time.Time,
+) (*AgentVersion, error) {
+	if id == "" {
+		return nil, invalidArgument("id")
 	}
 	if agentID == "" {
 		return nil, invalidArgument("agent_id")
@@ -42,7 +61,6 @@ func NewAgentVersion(
 	}
 	return &AgentVersion{
 		ID:                id,
-		TenantID:          tenantID,
 		AgentID:           agentID,
 		VersionNumber:     versionNumber,
 		Runtime:           runtime,

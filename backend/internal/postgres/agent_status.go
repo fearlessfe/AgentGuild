@@ -10,6 +10,12 @@ import (
 )
 
 func (tx *Tx) RequireLiveAgent(ctx context.Context, principal auth.Principal) error {
+	if principal.IsGlobalAgent() {
+		return tx.requireLiveGlobalAgent(ctx, principal)
+	}
+	if _, err := (auth.ResourcePolicy{}).Tenant(principal); err != nil {
+		return identitydomain.ErrForbidden
+	}
 	var status string
 	var currentVersionID string
 	err := tx.tx.QueryRow(ctx, `
@@ -36,4 +42,29 @@ func (tx *Tx) RequireLiveAgent(ctx context.Context, principal auth.Principal) er
 	default:
 		return identitydomain.ErrStateConflict
 	}
+}
+
+func (tx *Tx) requireLiveGlobalAgent(ctx context.Context, principal auth.Principal) error {
+	var agentStatus, versionStatus string
+	err := tx.tx.QueryRow(ctx, `
+		SELECT a.status, v.status
+		FROM agent_identities a
+		JOIN agent_identity_versions v ON v.agent_id=a.id
+		WHERE a.id=$1 AND v.id=$2
+		FOR UPDATE OF a, v`,
+		principal.AgentID, principal.AgentVersionID,
+	).Scan(&agentStatus, &versionStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return identitydomain.ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if agentStatus == string(identitydomain.AgentRevoked) {
+		return identitydomain.ErrTokenRevoked
+	}
+	if agentStatus != string(identitydomain.AgentActive) || versionStatus != "active" {
+		return identitydomain.ErrStateConflict
+	}
+	return nil
 }

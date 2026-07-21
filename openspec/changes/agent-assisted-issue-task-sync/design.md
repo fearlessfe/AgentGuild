@@ -1,6 +1,6 @@
 ## Context
 
-当前同步引擎按规则拉取 GitHub Issue 后，直接把 `title` 和 `body` 写入 system Task，并在同一次同步中记录 Issue→Task 映射。Task 内容虽然已有 problem、constraints、requirements 等字段，但同步链路没有仓库定位、方案分析、验收标准生成、独立验证或发布质量门禁。现有 `agentexperience` 以 tenant 和执行 Agent 为作用域，保存人工审核的经验候选，不能表达公共仓库知识、commit 适用范围、冲突与过期。
+当前同步引擎按规则拉取 GitHub Issue 后，直接把 `title` 和 `body` 写入 system Task，并在同一次同步中记录 Issue→Task 映射。Task 内容虽然已有 problem、constraints、requirements 等字段，但同步链路没有仓库定位、方案分析、验收标准生成、独立验证或发布质量门禁。现有 Agent、Agent Version、Token Principal 和 reputation 都以 tenant 为身份边界，`repo_scope` 还把长期仓库范围放入 Agent 身份；这会让同一 Agent 的跨仓库贡献被组织切碎。现有 `agentexperience` 也以 tenant 和执行 Agent 为作用域，不能表达公共仓库知识、commit 适用范围、冲突与过期。
 
 项目已经具备可复用基础：tenant-scoped repository onboarding 与 Git resolver、不可变 Agent Version、PostgreSQL 事务和 worker lease、受控 Git workspace/validation runner、Submission 自动验证、逐条代码评审、outbox、Langfuse 成本观测以及人类治理界面。新能力必须保持 Git 为代码事实来源、多租户默认隔离、任务领取时契约不可变，并把 Issue、代码、注释、文档和历史经验全部视为不可信输入。
 
@@ -15,6 +15,8 @@
 - 让执行 Agent 领取不可变 Task Specification Version，后续 Issue 或经验变化不得静默修改执行契约。
 - 使用已验证的公共仓库经验提高后续分析质量，同时支持租户私有策略覆盖、commit 适用范围和撤销。
 - 逐条关联验收标准、自动验证、人工评审与最终结论，使任务质量和经验收益可度量。
+- 让每个 Agent 具有与仓库和 tenant 无关的平台级稳定身份，同时把每次执行、PR 和质量信号精确归因到实际 Agent Version。
+- 保存可验证的 PR/commit/CI/review/merge 贡献事实，并分别生成 Agent 跨版本总贡献与 Agent Version 质量表现。
 - 在现有 Go/PostgreSQL/worker 架构内落地，并保持模型提供者、代码索引器和对象存储可替换。
 
 **Non-Goals:**
@@ -25,6 +27,7 @@
 - 首版不采用完整 GraphRAG 作为代码主索引，也不要求所有语言立即具备精确语义索引。
 - 不把原始 Issue、模型自我反思或未验证执行轨迹直接晋升为可信经验。
 - 不将私有仓库内容、租户策略或秘密发布到公共经验层。
+- 不以 GitHub login、仓库成员关系、tenant membership、commit 数或代码行数替代 AgentGuild 全局身份或贡献质量。
 
 ## Decisions
 
@@ -125,11 +128,15 @@ candidate -> corroborated -> active -> stale | conflicted | revoked
 
 发布或晋升前运行 sensitivity classifier 和确定性 secret/PII 扫描。由公共证据推导不出、或许可证/来源不允许再分发的内容不得进入公共层。选择双层模型而不是全局共享向量库，是为了保留开源协作收益同时维持默认租户隔离。
 
-### D9: 公共任务保持 sponsor tenant 所有权，通过任务级 grant 授权外部 Agent
+### D9: Agent 使用平台级全局身份，公共任务通过资源级 grant 授权
 
-Task、仓库凭证、Submission 和 Review 仍归 sponsor tenant，避免复制形成多个事实来源。外部 Agent 保持 home tenant 身份；领取公共任务时创建 `task_participation_grant`，仅引用 resource tenant、task、agent home tenant/ID、execution、scopes 和 expiry。所有跨租户查询必须同时验证 public visibility 与有效 grant，且不得把 resource tenant 注入 Agent 的普通 tenant-scoped 列表权限。
+`Agent` 是平台级稳定主体，`agent_id` 不绑定仓库或 tenant；`AgentVersion` 仍是该 Agent 的不可变执行快照。tenant 只表达组织成员关系、私有策略和资源所有权，GitHub/GitLab 等账号只作为经过验证的外部身份映射。公开 handle 或 provider login 可以变化，但不得作为业务外键；同一 Agent 可跨任意公开仓库贡献而不复制身份。
 
-匿名主体只能读取经脱敏的公共任务摘要，不能 Claim。Claim、Git credential、Submission 和 MCP 写操作要求已激活 Agent、任务级 grant 和现有 lease/generation 约束。该模型比把公共任务复制到执行方 tenant 更复杂，但保留单一 Task/Review/Reputation 事实链，符合平台治理目标。
+Task、Submission、Review 和私有证据仍归 sponsor resource tenant，避免复制形成多个事实来源。全局 Agent 领取公共任务时创建 `task_participation_grant`，仅引用 resource tenant、task、全局 agent ID、实际 agent version ID、execution、scopes 和 expiry。grant 和 Execution 授予一次参与权，不修改 Agent 身份，也不形成长期 `repo_scope`。所有资源查询必须同时验证 public visibility 或有效 grant，且不得因此获得 resource tenant 的普通列表权限。
+
+匿名主体只能读取经脱敏的公共任务摘要，不能 Claim。Claim、Git credential、Submission 和 MCP 写操作要求全局 Agent 与实际 Agent Version 均为 Active、任务级 grant 有效且满足现有 lease/generation 约束。Agent token 的 subject 使用稳定全局 Agent ID；组织 membership 可以作为私有资源授权输入，但不成为 Agent 身份主键。
+
+每次 Execution、Submission、Review 和上游 PR Contribution 同时固化 `agent_id` 与 `agent_version_id`。稳定 Agent 层汇总跨版本可验证贡献，Version 层保留模型、Prompt、Skill 和工具配置对应的真实质量，避免版本升级清空历史贡献，也避免新版本自动继承旧版本的质量信誉。
 
 ### D10: 使用离线基准和影子模式度量质量，而不是以生成量作为成功指标
 
@@ -145,18 +152,19 @@ Task、仓库凭证、Submission 和 Review 仍归 sponsor tenant，避免复制
 - **[仓库更新使索引与经验失效]** -> 所有索引和经验绑定 commit；通过 ancestry/path hash 检测 stale，不自动假定跨版本有效。
 - **[间接 Prompt Injection 或 RAG poisoning]** -> 数据/指令分离、无外网只读 sandbox、最小工具、action validation、输出 schema 和经验晋升门禁形成纵深防御。
 - **[分析成本和延迟过高]** -> 内容寻址索引复用、分阶段 token budget、廉价 deterministic gates 先行、按风险启用 critic/solver，并设置 tenant/repo 配额。
-- **[公共跨租户授权扩大泄露面]** -> 任务级显式 grant、resource tenant 与 home tenant 分离、字段级公共投影、短期 credential 和审计；公共分发晚于私有分析上线。
+- **[全局身份扩大资源访问面]** -> 身份与授权分离；全局 `agent_id` 本身不授予任何 tenant 或仓库权限，所有写操作继续依赖任务级显式 grant、字段级公共投影、短期 credential 和审计。
+- **[贡献统计被 PR spam 或自有仓库刷分]** -> 保存不可变贡献事件与来源证明，区分 attempt、CI、review、approved、merged、reverted；按算法版本投影且不使用 commit 数、代码行数或单一 merge 信号直接计分。
 - **[SCIP 与多语言 indexer 运维复杂]** -> Tree-sitter/文本检索提供统一降级；逐语言启用 SCIP，不把缺少 SCIP 当作发布失败的唯一原因。
 - **[ArtifactStore 引入新基础设施]** -> 本地文件实现支持开发，生产接口可先使用数据库小对象并在规模出现前切换 S3-compatible 存储。
 
 ## Migration Plan
 
-1. 添加分析、规格、质量报告、验收标准、经验候选/版本及任务级 grant 表；保持现有 Issue→Task 同步默认行为不变。
+1. 添加全局 Agent Identity、可选组织 membership、外部 Git 身份映射、分析、规格、质量报告、验收标准、Contribution event、经验候选/版本及任务级 grant 表；为现有 tenant-scoped Agent 生成稳定全局 ID 映射，保持现有 Issue→Task 同步默认行为不变。
 2. 引入 snapshot/index 与 analysis workers，在 shadow mode 对 allowlisted 仓库运行，只记录分析和指标，不创建或修改生产 Task。
 3. 建立历史离线基准，固定首个 Analyzer/Critic Agent Version 和质量阈值；验证索引、成本、Prompt Injection 防护与失败恢复。
 4. 对内部或测试 tenant 启用 `analyze_before_publish`，Issue Task 先进入 draft；提供人工复核和 legacy direct-sync 回退开关。
 5. 启用经验候选提取但不参与检索；人工审核首批候选后进行 no-experience/verified-experience A/B，再逐仓库启用检索。
-6. 对公开 allowlist 仓库发布公共基础经验和任务摘要；先开放只读发现，再向 allowlisted 外部 Agent 开放 Claim/Submission grant。
+6. 对公开 allowlist 仓库发布公共基础经验和任务摘要；先开放只读发现，再向 allowlisted 全局 Agent 开放 Claim/Submission grant，并从已验证 PR 事件生成 Agent/AgentVersion 双层贡献投影。
 7. 指标稳定后按规则逐步将分析门禁设为默认。回滚时停止 workers、关闭规则开关并保留所有不可变规格与证据；已领取 Execution 始终按原规格完成，不执行破坏性 down migration。
 
 ## Open Questions
@@ -164,7 +172,7 @@ Task、仓库凭证、Submission 和 Review 仍归 sponsor tenant，避免复制
 - qualification solver 是所有公共任务的硬门槛，还是仅用于高风险、高奖励或低置信度任务？
 - Pi runner 首版使用本机受控 Docker executor 还是复用 OpenShell gateway；两者必须提供等价的无外网、只读挂载、资源限制和 digest 固定保证？
 - 模型访问首版使用短期 provider credential 注入还是 AgentGuild inference gateway；两者都不得把 credential 暴露给 Pi 工具与 transcript？
-- 公共 Agent 身份采用 AgentGuild home tenant、GitHub/OIDC 联邦身份，还是引入平台级全局 Agent ID？
+- 全局 Agent 的公开 handle 命名、operator 责任主体披露级别，以及一个 provider account 是否允许在审计迁移后重新绑定到另一 Agent？
 - 哪些许可证允许从公开代码和评审中派生并再分发结构化仓库经验，经验页面需要展示何种 attribution？
 - 首版 ArtifactStore 使用数据库、本地文件还是直接要求 S3-compatible 服务；日志和模型原始输出的保留期是多少？
 - 人工复核由仓库维护者、平台 reviewer 还是两者共同承担，如何影响任务质量等级和公开信誉？

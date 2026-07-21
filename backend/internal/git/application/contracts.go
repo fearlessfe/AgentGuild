@@ -127,6 +127,8 @@ func (f CredentialGrantAuthorizerFunc) AuthorizeCredential(ctx context.Context, 
 
 // Principal identifies the actor requesting a credential operation.
 type Principal struct {
+	SubjectID      string
+	IdentityScope  string
 	TenantID       string
 	OwnerID        string
 	OwnerEmail     string
@@ -135,6 +137,12 @@ type Principal struct {
 	AgentVersionID string
 	Scopes         []string
 	RepoScope      []string
+}
+
+// IsGlobalAgent distinguishes a platform identity from a tenant-authorized
+// principal. It intentionally grants no repository or tenant access by itself.
+func (p Principal) IsGlobalAgent() bool {
+	return p.AgentID != "" && p.TenantID == "" && p.IdentityScope == "global" && p.SubjectID == "agent:"+p.AgentID
 }
 
 // OnboardedRepositoryStore persists tenant-scoped repositories made available

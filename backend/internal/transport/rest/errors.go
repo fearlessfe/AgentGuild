@@ -16,6 +16,7 @@ import (
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	publictaskdomain "agentguild.dev/agentguild/backend/internal/publictask/domain"
 )
 
 // ViolationView 是路径违规错误的结构化违规项；仅在领域错误携带违规明细时出现。
@@ -174,6 +175,9 @@ func errorCodeOf(err error) string {
 	if code := agentexperiencedomain.CodeOf(err); code != "" {
 		return code
 	}
+	if code := publictaskdomain.CodeOf(err); code != "" {
+		return code
+	}
 	return ""
 }
 
@@ -192,6 +196,9 @@ func errorFieldOf(err error) string {
 		return field
 	}
 	if field := agentexperiencedomain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := publictaskdomain.FieldOf(err); field != "" {
 		return field
 	}
 	return ""

@@ -16,6 +16,9 @@ func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, comma
 	if err := s.policy.Require(principal, "tasks:claim"); err != nil {
 		return result, err
 	}
+	if _, err := s.resources.Tenant(principal); err != nil {
+		return result, err
+	}
 	var rejection *rejectionAudit
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
@@ -86,6 +89,9 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 		var result Envelope[ExecutionView]
 		return result, err
 	}
+	if _, err := s.resources.Tenant(principal); err != nil {
+		return Envelope[ExecutionView]{}, err
+	}
 	return s.mutateExecution(ctx, principal, "execution_start", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "start", func(execution *domain.Execution, now time.Time, generation int64) error {
 		return execution.Start(now, generation, command.Stage, command.Progress)
 	})
@@ -95,6 +101,9 @@ func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Princip
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err
+	}
+	if _, err := s.resources.Tenant(principal); err != nil {
+		return Envelope[ExecutionView]{}, err
 	}
 	return s.mutateExecution(ctx, principal, "execution_heartbeat", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "heartbeat", func(execution *domain.Execution, now time.Time, generation int64) error {
 		_, err := execution.Heartbeat(now, generation, command.Stage, command.Progress)
@@ -107,6 +116,9 @@ type executionMutation func(*domain.Execution, time.Time, int64) error
 func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal, operation, requestID, executionID string, generation int64, request any, intent string, mutate executionMutation) (Envelope[ExecutionView], error) {
 	var result Envelope[ExecutionView]
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
+		return result, err
+	}
+	if _, err := s.resources.Tenant(principal); err != nil {
 		return result, err
 	}
 	var rejection *rejectionAudit
@@ -198,6 +210,9 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 
 func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, query GetExecution) (Envelope[ExecutionView], error) {
 	var result Envelope[ExecutionView]
+	if _, err := s.resources.Tenant(principal); err != nil {
+		return result, err
+	}
 	var requireOwner bool
 	if s.policy.Require(principal, "tasks:read") == nil {
 		requireOwner = false

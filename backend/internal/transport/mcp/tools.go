@@ -338,6 +338,8 @@ func registerTools(server *mcp.Server, svc applicationService, submissions submi
 
 func gitPrincipal(p auth.Principal) gitapp.Principal {
 	return gitapp.Principal{
+		SubjectID:      p.SubjectID,
+		IdentityScope:  p.IdentityScope,
 		TenantID:       p.TenantID,
 		OwnerID:        p.OwnerID,
 		OwnerEmail:     p.OwnerEmail,

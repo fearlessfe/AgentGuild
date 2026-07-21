@@ -33,7 +33,11 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
-	err := s.store.WithTx(ctx, func(tx Tx) error {
+	tenantID, err := s.resources.Tenant(principal)
+	if err != nil {
+		return result, err
+	}
+	err = s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
 		}
@@ -44,7 +48,7 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 		if err != nil {
 			return err
 		}
-		record, err := tx.GetTask(ctx, principal.TenantID, query.TaskID)
+		record, err := tx.GetTask(ctx, tenantID, query.TaskID)
 		if err != nil {
 			return err
 		}
@@ -53,7 +57,7 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 			return err
 		}
 		views := []TaskView{view}
-		if err := s.attachTaskSources(ctx, principal.TenantID, views); err != nil {
+		if err := s.attachTaskSources(ctx, tenantID, views); err != nil {
 			return err
 		}
 		view = views[0]
@@ -68,6 +72,10 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
+	tenantID, err := s.resources.Tenant(principal)
+	if err != nil {
+		return result, err
+	}
 	limit := query.Limit
 	if limit == 0 {
 		limit = 20
@@ -75,7 +83,7 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 	if limit < 1 || limit > 100 {
 		return result, invalid("limit")
 	}
-	err := s.store.WithTx(ctx, func(tx Tx) error {
+	err = s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
 		}
@@ -87,9 +95,9 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 			return err
 		}
 		filter := filterDigest(query)
-		listQuery := TaskListQuery{TenantID: principal.TenantID, Statuses: query.Statuses, Type: query.Type, PublisherAgentVersionID: query.PublisherAgentVersionID, Limit: limit + 1}
+		listQuery := TaskListQuery{TenantID: tenantID, Statuses: query.Statuses, Type: query.Type, PublisherAgentVersionID: query.PublisherAgentVersionID, Limit: limit + 1}
 		if query.Cursor != "" {
-			cursor, err := s.decodeCursor(query.Cursor, principal.TenantID, filter, now)
+			cursor, err := s.decodeCursor(query.Cursor, tenantID, filter, now)
 			if err != nil {
 				return err
 			}
@@ -111,13 +119,13 @@ func (s *Service) ListTasks(ctx context.Context, principal auth.Principal, query
 				return err
 			}
 		}
-		if err := s.attachTaskSources(ctx, principal.TenantID, views); err != nil {
+		if err := s.attachTaskSources(ctx, tenantID, views); err != nil {
 			return err
 		}
 		result = Envelope[TaskPage]{Data: TaskPage{Items: views}, Meta: Meta{ServerTime: now, PollAfterSeconds: defaultPollAfterSeconds}}
 		if hasMore {
 			last := records[len(records)-1]
-			result.Meta.NextCursor = s.encodeCursor(cursorPayload{Version: cursorSortVersion, TenantID: principal.TenantID, Filter: filter, CreatedAt: last.CreatedAt, ID: last.ID, ExpiresAt: now.Add(s.cursorTTL)})
+			result.Meta.NextCursor = s.encodeCursor(cursorPayload{Version: cursorSortVersion, TenantID: tenantID, Filter: filter, CreatedAt: last.CreatedAt, ID: last.ID, ExpiresAt: now.Add(s.cursorTTL)})
 		}
 		return nil
 	})

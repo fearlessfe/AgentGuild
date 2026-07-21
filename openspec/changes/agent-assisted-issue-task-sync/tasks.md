@@ -119,18 +119,24 @@
 - [ ] 10.11 新增经验候选列表、批准、拒绝、撤销、冲突处理和版本查询 REST API
 - [ ] 10.12 覆盖私有证据公共泄漏、重复非独立证据、过期经验、负面经验、撤销回滚和 tenant 隔离测试
 
-## 11. 公共任务与跨租户 Grant
+## 11. 全局 Agent 身份、贡献度与公共任务 Grant
 
-- [ ] 11.1 实现 public task projection 领域与 repository，只投影通过公共门禁且通过敏感性/可见性检查的字段
-- [ ] 11.2 实现 task participation grant 领域、expiry、scope、revocation 和完整审计 repository
-- [ ] 11.3 新增独立公共任务发现 REST API，支持匿名脱敏读取、认证 Agent 分页和与 tenant cursor 隔离
-- [ ] 11.4 实现跨租户 Claim 事务，验证公共投影、Agent home tenant 状态和资格并原子创建 Execution 与 grant
-- [ ] 11.5 扩展 Principal/authorizer，显式区分 home tenant 与 resource tenant，禁止 grant 扩大普通 tenant 列表权限
-- [ ] 11.6 将 grant 校验接入 Task、Execution、heartbeat、Submission、Review 结果和所有相关读取路径
-- [ ] 11.7 将 grant 校验接入 Git credential 与 proxy，限制 repository、branch、base commit、Execution 和过期时间
-- [ ] 11.8 实现 Agent revoked、Task cancelled、Execution terminal、grant expiry 和滥用策略触发的撤销/失效流程
-- [ ] 11.9 保证 sponsor tenant 持有唯一 Task/Execution/Submission/Review 事实，不向 Agent home tenant 复制业务记录
-- [ ] 11.10 覆盖本地/外部 Agent 并发 Claim、grant replay、跨任务访问、列表泄漏、过期 credential 和错误资源 tenant 测试
+- [x] 11.1 将 Agent 领域重构为平台级全局 Identity，移除 tenant/repository 作为身份主键的语义，并以独立 membership 表达可选组织归属
+- [x] 11.2 新增全局 Agent、Agent Version、organization membership 和 provider external identity 的 up/down 迁移，为现有 tenant-scoped Agent 建立确定性全局 ID 映射与回滚策略
+- [x] 11.3 扩展 Token issuer/verifier 与 Principal，使用稳定全局 `agent_id` 和实际 `agent_version_id`，允许公共操作不依赖 tenant claim，同时保持私有资源显式授权
+- [x] 11.4 实现 GitHub/GitLab 外部身份验证与稳定 provider subject 映射，覆盖 login 改名、重复绑定、撤销和未验证 PR 作者
+- [x] 11.5 实现 Contribution 与 append-only ContributionEvent 领域/存储，绑定 Agent、Version、Task、Execution、spec version、canonical repo、Issue、PR、commit 和 outcome
+- [x] 11.6 实现 Agent lifetime contribution 与 Agent Version performance 双层算法版本化投影，覆盖 attempt、CI、review、approved、merged、reverted、Issue reopen、样本量和反刷信号
+- [x] 11.7 实现 public task projection 领域与 repository，只投影通过公共门禁且通过敏感性/可见性检查的字段
+- [x] 11.8 实现 task participation grant 领域、expiry、scope、revocation 和完整审计 repository，绑定全局 Agent 与实际 Agent Version
+- [x] 11.9 新增独立公共任务发现 REST API，支持匿名脱敏读取、认证 Agent 分页和与 tenant cursor 隔离
+- [x] 11.10 实现公共 Claim 事务，验证公共投影、全局 Agent/Version 状态和资格并原子创建 Execution 与 grant
+- [x] 11.11 扩展 Principal/authorizer，显式区分全局 Agent 身份与 resource tenant 授权，禁止 grant 扩大普通 tenant 列表权限
+- [ ] 11.12 将 grant 校验接入 Task、Execution、heartbeat、Submission、Review 结果和所有相关读取路径
+- [ ] 11.13 将 grant 校验接入 Git credential 与 proxy，限制 repository、branch、base commit、Execution 和过期时间
+- [ ] 11.14 实现 Agent/Version revoked、Task cancelled、Execution terminal、grant expiry 和滥用策略触发的撤销/失效流程
+- [ ] 11.15 保证 sponsor tenant 持有唯一 Task/Execution/Submission/Review 事实，不复制 Agent Identity；Contribution 同时引用资源事实与全局 Agent
+- [ ] 11.16 覆盖两个全局 Agent 并发 Claim、grant replay、跨任务访问、列表泄漏、过期 credential、错误资源 tenant 和组织 membership 不扩权测试
 
 ## 12. MCP 契约扩展
 
@@ -153,6 +159,7 @@
 - [ ] 13.8 为所有新页面补充 loading、empty、partial failure、forbidden 和 retry 状态及键盘可访问性
 - [ ] 13.9 编写前端单元测试，覆盖真实 API 数据、规格版本固定、criterion evidence、经验隔离和公共字段脱敏
 - [ ] 13.10 编写 Playwright 流程，覆盖 Issue→分析→门禁→公共任务→外部 Claim→提交→验收→经验候选
+- [ ] 13.11 新增全局 Agent 公开档案，展示跨版本已验证贡献、Version 表现、能力/语言/仓库分布、样本量和算法版本，不暴露 operator 或私有 membership
 
 ## 14. 离线评测、影子发布与可观测性
 
@@ -162,6 +169,7 @@
 - [ ] 14.4 实现 repository experience no-experience/verified-experience A/B 分桶与结果归因
 - [ ] 14.5 增加 worker backlog、lease expiry、retry exhaustion、provider error、gate failure、经验冲突和 grant denial 指标
 - [ ] 14.6 定义 allowlist rollout 与自动回退阈值，确保错误接受率恶化时停用新版本或经验检索
+- [ ] 14.7 增加 Contribution 投影回放与新旧 algorithm version 对比，验证重复 webhook、PR spam、revert、Issue reopen 和自有仓库信号不会破坏可解释性
 
 ## 15. 安全、文档与端到端验收
 
@@ -173,5 +181,5 @@
 - [ ] 15.6 运行并通过前端 `npm run build`、`npm test -- --run` 和新增完整 Playwright E2E
 - [ ] 15.7 在至少一个 allowlisted 开源仓库完成 shadow 分析冒烟，核对证据、验收、成本和不发布行为
 - [ ] 15.8 在测试 tenant 完成 fail-closed Draft→Open→Claim→Submission→逐条验收→Review→经验候选闭环
-- [ ] 15.9 在两个隔离 tenant 完成公共任务 Claim 与越权负例验收，确认无 tenant 列表、私有证据或经验泄漏
+- [ ] 15.9 使用两个无共同 membership 的全局 Agent 完成同一公共任务并发 Claim、跨资源越权和 Contribution 归因负例验收，确认无 tenant 列表、operator、私有证据或经验泄漏
 - [ ] 15.10 完成发布前治理评审，记录剩余开放问题、质量阈值、试点仓库和逐阶段回滚负责人

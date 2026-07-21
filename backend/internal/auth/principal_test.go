@@ -22,7 +22,7 @@ func TestPrincipalRequiresEveryIdentityComponent(t *testing.T) {
 		principal auth.Principal
 		field     string
 	}{
-		{"tenant", auth.Principal{Type: auth.PrincipalTypeAgent, AgentID: "agent", AgentVersionID: "version", Scopes: []string{"tasks:read"}}, "tenant_id"},
+		{"global identity scope", auth.Principal{Type: auth.PrincipalTypeAgent, AgentID: "agent", AgentVersionID: "version", Scopes: []string{"tasks:read"}}, "identity_scope"},
 		{"agent", auth.Principal{TenantID: "tenant", Type: auth.PrincipalTypeAgent, AgentVersionID: "version", Scopes: []string{"tasks:read"}}, "agent_id"},
 		{"version", auth.Principal{TenantID: "tenant", Type: auth.PrincipalTypeAgent, AgentID: "agent", Scopes: []string{"tasks:read"}}, "agent_version_id"},
 	}
@@ -34,6 +34,63 @@ func TestPrincipalRequiresEveryIdentityComponent(t *testing.T) {
 				t.Fatalf("Require() error=%v, want invalid_argument/%s", err, tt.field)
 			}
 		})
+	}
+}
+
+func TestScopePolicyGlobalAgentRequiresStableSubject(t *testing.T) {
+	p := auth.Principal{
+		IdentityScope:  auth.IdentityScopeGlobal,
+		Type:           auth.PrincipalTypeAgent,
+		AgentID:        "agent-1",
+		AgentVersionID: "version-1",
+		Scopes:         []string{"tasks:read"},
+	}
+	err := (auth.ScopePolicy{}).Require(p, "tasks:read")
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Field != "sub" {
+		t.Fatalf("expected sub field error, got %v", err)
+	}
+
+	p.SubjectID = auth.AgentSubject(p.AgentID)
+	if err := (auth.ScopePolicy{}).Require(p, "tasks:read"); err != nil {
+		t.Fatalf("valid global Agent should pass, got %v", err)
+	}
+}
+
+func TestResourcePolicySeparatesGlobalIdentityFromTenantAuthorization(t *testing.T) {
+	global := auth.Principal{
+		SubjectID: auth.AgentSubject("agent-global"), IdentityScope: auth.IdentityScopeGlobal,
+		Type: auth.PrincipalTypeAgent, AgentID: "agent-global", AgentVersionID: "version-global",
+		Scopes: []string{"tasks:read", "tasks:claim"},
+	}
+	requireScope := auth.ScopePolicy{}
+	if err := requireScope.Require(global, "tasks:read"); err != nil {
+		t.Fatalf("global Agent scope should remain valid: %v", err)
+	}
+	resources := auth.ResourcePolicy{}
+	if _, err := resources.Tenant(global); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("global Agent unexpectedly gained tenant list access: %v", err)
+	}
+	if err := resources.RequireTenant(global, "tenant-sponsor"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("global Agent unexpectedly gained sponsor tenant access: %v", err)
+	}
+}
+
+func TestResourcePolicyAllowsOnlyExactTenantPrincipal(t *testing.T) {
+	policy := auth.ResourcePolicy{}
+	tenantAgent := auth.Principal{
+		IdentityScope: auth.IdentityScopeTenant, TenantID: "tenant-1",
+		Type: auth.PrincipalTypeAgent, AgentID: "agent-1", AgentVersionID: "version-1",
+	}
+	if err := policy.RequireTenant(tenantAgent, "tenant-1"); err != nil {
+		t.Fatalf("own tenant should be allowed: %v", err)
+	}
+	if err := policy.RequireTenant(tenantAgent, "tenant-2"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("other tenant should be forbidden: %v", err)
+	}
+	human := auth.Principal{Type: auth.PrincipalTypeHuman, TenantID: "tenant-1"}
+	if err := policy.RequireTenant(human, "tenant-1"); err != nil {
+		t.Fatalf("human session tenant should be allowed: %v", err)
 	}
 }
 

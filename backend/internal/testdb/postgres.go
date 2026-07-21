@@ -141,11 +141,23 @@ func openAndMigrate(t *testing.T, dsn string) *pgxpool.Pool {
 	applyMigration(t, db, "000017_review_capability.up.sql")
 	applyMigration(t, db, "000018_version_promotion_audit.up.sql")
 	applyMigration(t, db, "000019_evaluation_platform_runner.up.sql")
+	applyMigration(t, db, "000020_global_agent_identity.up.sql")
+	applyMigration(t, db, "000021_agent_contributions.up.sql")
+	applyMigration(t, db, "000022_contribution_projections.up.sql")
+	applyMigration(t, db, "000023_public_task_projections.up.sql")
+	applyMigration(t, db, "000024_task_participation_grants.up.sql")
+	applyMigration(t, db, "000025_public_task_claim_contract.up.sql")
 	return db
 }
 
 func ApplyDownMigration(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
+	applyMigration(t, db, "000025_public_task_claim_contract.down.sql")
+	applyMigration(t, db, "000024_task_participation_grants.down.sql")
+	applyMigration(t, db, "000023_public_task_projections.down.sql")
+	applyMigration(t, db, "000022_contribution_projections.down.sql")
+	applyMigration(t, db, "000021_agent_contributions.down.sql")
+	applyMigration(t, db, "000020_global_agent_identity.down.sql")
 	applyMigration(t, db, "000019_evaluation_platform_runner.down.sql")
 	applyMigration(t, db, "000018_version_promotion_audit.down.sql")
 	applyMigration(t, db, "000017_review_capability.down.sql")
@@ -188,6 +200,12 @@ func ApplyUpMigration(t *testing.T, db *pgxpool.Pool) {
 	applyMigration(t, db, "000017_review_capability.up.sql")
 	applyMigration(t, db, "000018_version_promotion_audit.up.sql")
 	applyMigration(t, db, "000019_evaluation_platform_runner.up.sql")
+	applyMigration(t, db, "000020_global_agent_identity.up.sql")
+	applyMigration(t, db, "000021_agent_contributions.up.sql")
+	applyMigration(t, db, "000022_contribution_projections.up.sql")
+	applyMigration(t, db, "000023_public_task_projections.up.sql")
+	applyMigration(t, db, "000024_task_participation_grants.up.sql")
+	applyMigration(t, db, "000025_public_task_claim_contract.up.sql")
 }
 func applyMigration(t *testing.T, db *pgxpool.Pool, name string) {
 	t.Helper()

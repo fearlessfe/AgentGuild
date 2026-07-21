@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 服务端执行 Scope 与资源边界校验
-系统 MUST 在每次受保护操作中校验 home tenant、resource tenant、Agent 状态、Scope、repository 范围和适用的任务级 grant，能力声明和公共可见性不得扩大权限。
+系统 MUST 在每次受保护操作中校验全局 Agent 与实际 Agent Version 状态、Scope、resource tenant、repository 资源边界和适用的任务级 grant；全局身份、能力声明、历史贡献和公共可见性不得自行扩大权限。
 
 #### Scenario: 能力匹配但仓库越权
 - **WHEN** Agent 声明支持目标语言但请求访问未授权 repository
@@ -11,25 +11,25 @@
 - **WHEN** Agent 能读取公共 Task 摘要但尚未取得该 Task 的 participation grant
 - **THEN** 系统拒绝其读取执行私有字段、获取 Git credential 或提交成果
 
-#### Scenario: 资源 tenant 与 home tenant 不同
-- **WHEN** 外部 Agent 对公共 Task 执行受保护操作
-- **THEN** 系统分别校验 Agent home tenant 身份和 sponsor resource tenant 中的任务级授权，不得把任一 tenant ID 隐式替换为另一方
+#### Scenario: 全局 Agent 访问 sponsor tenant 资源
+- **WHEN** 全局 Agent 对 sponsor resource tenant 的公共 Task 执行受保护操作
+- **THEN** 系统校验稳定 `agent_id`、实际 `agent_version_id` 和该 resource tenant 中的任务级授权，不要求或推导 Agent 所属 tenant
 
 ### Requirement: 仓库范围与通配符
-系统 SHALL 支持为 Agent 配置 repository 范围列表，并在资源访问时校验目标仓库是否匹配；公共任务仅可通过匹配的有效 task participation grant 临时授权该任务对应的单个仓库和分支，不得形成通配符扩权。
+系统 SHALL 将 repository、branch、base commit 和 Execution 权限放入独立 membership、task participation grant 或短期 credential，不得把长期 `repo_scope` 作为全局 Agent 身份字段或因一次任务授权永久修改 Agent。
 
 #### Scenario: Agent 访问未授权仓库
-- **WHEN** Agent 请求访问不在其 `repo_scope` 中且没有匹配任务级 grant 的仓库
+- **WHEN** Agent 请求访问没有匹配 membership、任务级 grant 或短期 credential 的仓库
 - **THEN** 系统返回 `FORBIDDEN` 且不披露仓库是否存在
 
 #### Scenario: Grant 临时授权目标仓库
 - **WHEN** 外部 Agent 持有某公共 Task 的有效 grant 并请求该 Execution 的 Git credential
-- **THEN** 系统仅授权 Task 绑定仓库、平台分支和 base commit，不修改 Agent 的长期 `repo_scope`
+- **THEN** 系统仅授权 Task 绑定仓库、平台分支和 base commit，不修改 Agent Identity、Version 或组织 membership
 
 ## ADDED Requirements
 
 ### Requirement: 跨租户任务级 Grant 最小化且短期有效
-系统 SHALL 将 task participation grant 绑定 resource tenant、Task、Agent home tenant/ID、Execution、scopes 和 expiry，并 MUST 在 Agent 状态变化、Execution 终止、Task 撤销或策略撤销时停止授权。
+系统 SHALL 将 task participation grant 绑定 resource tenant、Task、全局 Agent ID、实际 Agent Version ID、Execution、scopes 和 expiry，并 MUST 在 Agent/Version 状态变化、Execution 终止、Task 撤销或策略撤销时停止授权。
 
 #### Scenario: Grant 正常到期
 - **WHEN** 数据库时间达到 grant expiry
@@ -55,11 +55,11 @@
 - **THEN** 系统拒绝或返回脱敏质量结论，不返回内部内容
 
 ### Requirement: 跨租户授权决策完整审计
-系统 SHALL 记录所有 task participation grant 的创建、使用、续期、拒绝、撤销和过期事件，审计 MUST 包含 actor、home/resource tenant、Task、Execution、scope、时间与安全原因。
+系统 SHALL 记录所有 task participation grant 的创建、使用、续期、拒绝、撤销和过期事件，审计 MUST 包含 actor、全局 Agent ID、实际 Agent Version ID、resource tenant、Task、Execution、scope、时间与安全原因。
 
 #### Scenario: 管理员调查跨租户访问
 - **WHEN** sponsor tenant 授权管理员查询某公共 Task 的访问历史
-- **THEN** 系统提供完整 grant 决策链且对非必要 home tenant 数据脱敏
+- **THEN** 系统提供完整 grant 决策链，只展示必要的公开 Agent 身份与贡献字段并隐藏 operator、membership 等非必要信息
 
 #### Scenario: 越权访问被拒绝
 - **WHEN** 外部 Agent 请求 grant 范围外资源

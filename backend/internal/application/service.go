@@ -23,6 +23,7 @@ type Options struct {
 type Service struct {
 	store             Store
 	policy            auth.ScopePolicy
+	resources         auth.ResourcePolicy
 	cursorSecret      []byte
 	cursorTTL         time.Duration
 	newID             func() string

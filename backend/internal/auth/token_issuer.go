@@ -54,6 +54,8 @@ func (i *TokenIssuer) Issue(agent *domain.Agent, version *domain.AgentVersion, n
 		return "", errors.New("agent version id is required")
 	}
 	claims := jwt.MapClaims{
+		"sub":              AgentSubject(agent.ID),
+		"identity_scope":   IdentityScopeTenant,
 		"tenant_id":        agent.TenantID,
 		"agent_id":         agent.ID,
 		"agent_version_id": version.ID,
@@ -68,6 +70,47 @@ func (i *TokenIssuer) Issue(agent *domain.Agent, version *domain.AgentVersion, n
 	if i.config.Audience != "" {
 		claims["aud"] = i.config.Audience
 	}
+	return i.sign(claims)
+}
+
+// IssueGlobal issues a token for a platform-global Agent identity. The token
+// intentionally contains no tenant or repository scope; resource access must be
+// granted independently by membership or a task participation grant.
+func (i *TokenIssuer) IssueGlobal(agent *domain.AgentIdentity, version *domain.AgentVersion, scopes []string, now time.Time) (string, error) {
+	if agent == nil || agent.ID == "" {
+		return "", errors.New("agent identity is incomplete")
+	}
+	if agent.Status != domain.AgentActive {
+		return "", errors.New("agent identity is not active")
+	}
+	if version == nil || version.ID == "" {
+		return "", errors.New("agent version is required")
+	}
+	if version.AgentID != agent.ID {
+		return "", errors.New("agent version does not belong to agent")
+	}
+	if agent.CurrentVersionID != "" && agent.CurrentVersionID != version.ID {
+		return "", errors.New("agent version is not current")
+	}
+	claims := jwt.MapClaims{
+		"sub":              AgentSubject(agent.ID),
+		"identity_scope":   IdentityScopeGlobal,
+		"agent_id":         agent.ID,
+		"agent_version_id": version.ID,
+		"scopes":           append([]string(nil), scopes...),
+		"iat":              now.Unix(),
+		"exp":              now.Add(i.config.TTL).Unix(),
+	}
+	if i.config.Issuer != "" {
+		claims["iss"] = i.config.Issuer
+	}
+	if i.config.Audience != "" {
+		claims["aud"] = i.config.Audience
+	}
+	return i.sign(claims)
+}
+
+func (i *TokenIssuer) sign(claims jwt.MapClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	if i.config.KeyID != "" {
 		token.Header["kid"] = i.config.KeyID
@@ -132,6 +175,8 @@ func (v *RS256Verifier) Verify(_ context.Context, rawToken string) (Principal, e
 		return principal, errors.New("token is missing exp claim")
 	}
 	principal = Principal{
+		SubjectID:      stringClaim(claims, "sub"),
+		IdentityScope:  stringClaim(claims, "identity_scope"),
 		TenantID:       stringClaim(claims, "tenant_id"),
 		Type:           PrincipalTypeAgent,
 		AgentID:        stringClaim(claims, "agent_id"),
@@ -139,8 +184,21 @@ func (v *RS256Verifier) Verify(_ context.Context, rawToken string) (Principal, e
 		Scopes:         stringSliceClaim(claims, "scopes"),
 		RepoScope:      stringSliceClaim(claims, "repo_scope"),
 	}
-	if principal.TenantID == "" || principal.AgentID == "" || principal.AgentVersionID == "" {
+	if principal.AgentID == "" || principal.AgentVersionID == "" {
 		return principal, errors.New("token is missing required identity claims")
+	}
+	if principal.SubjectID != "" && principal.SubjectID != AgentSubject(principal.AgentID) {
+		return principal, errors.New("token subject does not match agent identity")
+	}
+	if principal.TenantID == "" {
+		if principal.IdentityScope != IdentityScopeGlobal || principal.SubjectID != AgentSubject(principal.AgentID) {
+			return principal, errors.New("global token is missing required identity claims")
+		}
+		principal.RepoScope = nil
+	} else if principal.IdentityScope == "" {
+		// Backward compatibility for tenant-scoped tokens issued before the global
+		// identity migration.
+		principal.IdentityScope = IdentityScopeTenant
 	}
 	return principal, nil
 }

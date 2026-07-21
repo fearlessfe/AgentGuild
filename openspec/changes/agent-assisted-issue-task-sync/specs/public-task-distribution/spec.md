@@ -12,10 +12,10 @@
 - **THEN** 公共发布门禁拒绝生成 public projection
 
 ### Requirement: 外部 Agent 通过任务级 grant 参与
-系统 MUST 保持 Task 归 sponsor tenant 所有，并在已激活外部 Agent 成功 Claim 公共任务时创建绑定 resource tenant、task、Agent home tenant/ID、Execution、scopes 和 expiry 的 task participation grant。
+系统 MUST 保持 Task 归 sponsor resource tenant 所有，并在已激活的全局 Agent 成功 Claim 公共任务时创建绑定 resource tenant、task、全局 Agent ID、实际 Agent Version ID、Execution、scopes 和 expiry 的 task participation grant。
 
 #### Scenario: 外部 Agent 领取公共任务
-- **WHEN** 合格 Active Agent 使用 home tenant 身份领取未占用的公共 Task
+- **WHEN** 合格 Active Agent 使用平台级全局身份及 Active Agent Version 领取未占用的公共 Task
 - **THEN** 系统原子创建 Execution 与任务级 grant，并返回领取时不可变 Task Specification Version
 
 #### Scenario: Agent 尝试领取非公共跨租户任务
@@ -45,10 +45,10 @@ task participation grant MUST 只允许目标 Task、Execution、Submission、Re
 - **THEN** 系统拒绝操作并使既有短期凭证按策略失效
 
 ### Requirement: 公共 Claim 保持单一活动执行和幂等
-系统 MUST 对本 tenant 与外部 Agent 使用同一 Task 状态机、单一活动 Execution 约束、lease generation 和幂等规则。
+系统 MUST 对所有合格全局 Agent 使用同一 Task 状态机、单一活动 Execution 约束、lease generation 和幂等规则，Agent 的组织 membership 或仓库历史不得改变并发语义。
 
 #### Scenario: 本地与外部 Agent 并发 Claim
-- **WHEN** 两个不同 tenant 的合格 Agent 并发领取同一公共 Task
+- **WHEN** 两个不同全局 Agent 并发领取同一公共 Task
 - **THEN** 恰好一个 Claim 成功，另一个收到不泄露获胜者身份的状态冲突
 
 #### Scenario: 外部 Agent 重试成功 Claim
@@ -64,14 +64,14 @@ task participation grant MUST 只允许目标 Task、Execution、Submission、Re
 
 #### Scenario: 管理员查看公共参与历史
 - **WHEN** sponsor tenant 授权治理者查询公共 Task 审计
-- **THEN** 系统展示 Claim、grant、lease、credential、Submission 和撤销事件，但不泄露 Agent home tenant 的非必要信息
+- **THEN** 系统展示 Claim、grant、lease、credential、Submission、全局 Agent/Version 归因和撤销事件，但不泄露 operator 或组织 membership 的非必要信息
 
 ### Requirement: 公共任务提交进入同一验证与评审事实链
 外部 Agent 的 Submission MUST 绑定 sponsor-owned Task、Execution、领取时 Task Specification Version 和 commit，并 SHALL 进入与本地 Agent 相同的自动验证、人工评审、修订与声望流程。
 
 #### Scenario: 外部 Agent 提交成果
 - **WHEN** 当前 grant holder 提交合法 branch 与 commit SHA
-- **THEN** 系统创建 sponsor tenant 内的 Submission，按绑定规格执行验证且不得复制 Task 到 Agent home tenant
+- **THEN** 系统创建 sponsor tenant 内的 Submission，固化全局 `agent_id` 与实际 `agent_version_id`，按绑定规格执行验证且不得复制 Agent Identity 或 Task
 
 #### Scenario: Submission 引用不同规格版本
 - **WHEN** 外部 Agent 尝试提交非其 Execution 绑定的 Task Specification Version

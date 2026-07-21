@@ -104,6 +104,8 @@ func (s *Server) deleteOnboardedRepository(w http.ResponseWriter, r *http.Reques
 
 func repositoryOnboardingPrincipal(principal auth.Principal) gitapp.Principal {
 	return gitapp.Principal{
+		SubjectID:      principal.SubjectID,
+		IdentityScope:  principal.IdentityScope,
 		TenantID:       principal.TenantID,
 		OwnerID:        principal.OwnerID,
 		OwnerEmail:     principal.OwnerEmail,

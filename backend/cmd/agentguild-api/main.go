@@ -44,6 +44,8 @@ import (
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
+	publictaskapp "agentguild.dev/agentguild/backend/internal/publictask/application"
+	publictaskpostgres "agentguild.dev/agentguild/backend/internal/publictask/postgres"
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
@@ -124,6 +126,13 @@ func run() error {
 
 	restOptions := make([]resttransport.Option, 0, 14)
 	restOptions = append(restOptions, resttransport.WithIdempotencyStore(store))
+	publicTaskService, err := publictaskapp.NewService(publictaskpostgres.NewRepository(pool), publictaskapp.Options{
+		CursorSecret: []byte(cfg.CursorSecret),
+	})
+	if err != nil {
+		return fmt.Errorf("build public task service: %w", err)
+	}
+	restOptions = append(restOptions, resttransport.WithPublicTaskService(publicTaskService))
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
 	}

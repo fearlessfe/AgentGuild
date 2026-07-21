@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: MCP 工具执行 Agent 级授权
-每次 MCP 工具调用 MUST 校验 Agent 状态、home tenant、Scope、repository 范围、资源 tenant、工具所需权限，以及跨租户公共任务所需的有效 task participation grant。
+每次 MCP 工具调用 MUST 校验全局 Agent 与实际 Agent Version 状态、Scope、资源 tenant、工具所需权限，以及公共任务所需的有效 task participation grant；长期 repository 关系不得作为 Agent 身份前提。
 
 #### Scenario: 缺少发布 Scope
 - **WHEN** Agent 在缺少 `tasks:publish` 时调用任务发布工具
@@ -12,7 +12,7 @@
 - **THEN** 系统拒绝操作且不披露持有者身份
 
 #### Scenario: 外部 Agent 缺少任务级 grant
-- **WHEN** Agent 使用有效 home tenant Token 调用其它 tenant 公共 Task 的 claim 后写工具，但没有匹配 Task 和 Execution 的有效 grant
+- **WHEN** Agent 使用有效全局 Token 调用 sponsor tenant 公共 Task 的 claim 后写工具，但没有匹配 Task、Agent Version 和 Execution 的有效 grant
 - **THEN** 系统拒绝调用且不把公共可见性当作写权限
 
 #### Scenario: Grant 不允许访问其它资源
@@ -44,7 +44,7 @@ MCP 工具 SHALL 返回 `data` 与 `meta` 结构，meta 包含服务端时间、
 - **THEN** MCP 返回脱敏引用和公开结论，不返回内部原文或凭证
 
 ### Requirement: MCP 公共任务发现不扩大 tenant 列表权限
-系统 SHALL 提供独立公共任务发现语义，并 MUST 将其与 Agent home tenant 的普通任务列表和 resource tenant 私有列表隔离。
+系统 SHALL 提供独立公共任务发现语义，并 MUST 将其与组织/tenant 私有任务列表和 resource tenant 私有列表隔离；全局 Agent 身份与公共目录访问不得产生任何隐式 tenant membership。
 
 #### Scenario: Agent 发现公共任务
 - **WHEN** Active Agent 使用有效 Token 调用公共任务发现工具

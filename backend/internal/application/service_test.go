@@ -288,6 +288,17 @@ func TestListTasksFiltersByTypeAndReturnsPollAfterSeconds(t *testing.T) {
 	}
 }
 
+func TestTenantTaskListRejectsGlobalAgentEvenWithReadScope(t *testing.T) {
+	svc, _ := newServiceFixture()
+	global := auth.Principal{
+		SubjectID: auth.AgentSubject("global-agent"), IdentityScope: auth.IdentityScopeGlobal,
+		Type: auth.PrincipalTypeAgent, AgentID: "global-agent",
+		AgentVersionID: "global-version", Scopes: []string{"tasks:read"},
+	}
+	_, err := svc.ListTasks(context.Background(), global, application.ListTasks{})
+	assertDomainError(t, err, "forbidden", "")
+}
+
 func TestGetExecutionIncludesUsageAndAuditSummary(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})

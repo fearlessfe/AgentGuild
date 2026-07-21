@@ -36,11 +36,60 @@ func TestTokenIssuerIssuesRS256AgentAccessToken(t *testing.T) {
 	principal, err := verifier.Verify(context.Background(), rawToken)
 	require.NoError(t, err)
 	require.Equal(t, auth.PrincipalTypeAgent, principal.Type)
+	require.Equal(t, auth.AgentSubject("agent-1"), principal.SubjectID)
+	require.Equal(t, auth.IdentityScopeTenant, principal.IdentityScope)
 	require.Equal(t, "tenant-1", principal.TenantID)
 	require.Equal(t, "agent-1", principal.AgentID)
 	require.Equal(t, "version-1", principal.AgentVersionID)
 	require.Equal(t, []string{"tasks:read", "tasks:execute"}, principal.Scopes)
 	require.Equal(t, []string{"acme/repo"}, principal.RepoScope)
+}
+
+func TestTokenIssuerIssuesTenantIndependentGlobalAgentToken(t *testing.T) {
+	key := newTokenKey(t)
+	issuer, err := auth.NewRS256TokenIssuer(key, auth.TokenIssuerConfig{
+		Issuer:   "agentguild",
+		Audience: "agentguild-agents",
+	})
+	require.NoError(t, err)
+	now := time.Unix(1_700_000_000, 0)
+	agent, err := domain.NewAgentIdentity("agent-global-1", "guild-bot", "Guild Bot", nil, now)
+	require.NoError(t, err)
+	version, err := domain.NewGlobalAgentVersion("version-global-1", agent.ID, 1, "pi", "gpt-5", []string{"go"}, "sha256:config", now)
+	require.NoError(t, err)
+	require.NoError(t, agent.Activate(version, agent.ID, now))
+
+	rawToken, err := issuer.IssueGlobal(agent, version, []string{"tasks:read"}, now)
+	require.NoError(t, err)
+	verifier := auth.NewRS256Verifier(&key.PublicKey, auth.TokenVerifierConfig{
+		Issuer:   "agentguild",
+		Audience: "agentguild-agents",
+		Now:      func() time.Time { return now.Add(time.Minute) },
+	})
+	principal, err := verifier.Verify(context.Background(), rawToken)
+	require.NoError(t, err)
+	require.True(t, principal.IsGlobalAgent())
+	require.Empty(t, principal.TenantID)
+	require.Empty(t, principal.RepoScope)
+	require.Equal(t, agent.ID, principal.AgentID)
+	require.Equal(t, version.ID, principal.AgentVersionID)
+	require.Equal(t, []string{"tasks:read"}, principal.Scopes)
+	require.NoError(t, (auth.ScopePolicy{}).Require(principal, "tasks:read"))
+}
+
+func TestTokenIssuerRejectsGlobalVersionFromAnotherAgent(t *testing.T) {
+	key := newTokenKey(t)
+	issuer, err := auth.NewRS256TokenIssuer(key, auth.TokenIssuerConfig{})
+	require.NoError(t, err)
+	now := time.Unix(1_700_000_000, 0)
+	agent, err := domain.NewAgentIdentity("agent-global-1", "guild-bot", "Guild Bot", nil, now)
+	require.NoError(t, err)
+	agent.Status = domain.AgentActive
+	version, err := domain.NewGlobalAgentVersion("version-global-1", "other-agent", 1, "pi", "gpt-5", nil, "sha256:config", now)
+	require.NoError(t, err)
+
+	_, err = issuer.IssueGlobal(agent, version, nil, now)
+	require.Error(t, err)
 }
 
 func TestTokenIssuerUsesFifteenMinuteTTL(t *testing.T) {
