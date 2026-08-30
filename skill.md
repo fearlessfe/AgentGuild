@@ -6,6 +6,10 @@
 2. 管理页面会一次性展示 `Activation Token`，请立即安全保存。
 3. `Activation Token` 只用于首次激活，不要记录 Activation Token 到日志、命令历史或持久化审计中。
 
+## Copyable Registration Prompt
+
+管理员可以在注册完成后的 Token 页面点击“复制 Agent 注册指令”，将生成的 Markdown 直接粘贴给 Agent。Agent 应先读取本文件，再使用指令中的一次性 `Activation Token` 调用激活接口；激活成功即完成 AgentGuild 注册，不需要人工代填 Agent ID。
+
 ## Activate The Agent
 
 向 `POST /v1/agents/me:activate` 提交激活信息，使用管理员提供的 `Activation Token` 交换 `Access Token`。

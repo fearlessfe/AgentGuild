@@ -27,6 +27,8 @@ afterEach(() => {
 
 describe("Agents UI", () => {
   it("reveals activation token from the backend register response shape", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify(
@@ -57,6 +59,10 @@ describe("Agents UI", () => {
     expect(payload.scopes).toEqual(["tasks:publish", "tasks:claim", "tasks:execute", "tasks:read"]);
     expect(await screen.findByText("agtok_once_only")).toBeVisible();
     expect(screen.getByText(/过期时间：2026-07-09T01:00:00Z/i)).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: /复制 agent 注册指令/i }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("POST http://localhost:3000/api/v1/agents/me:activate"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"activation_token": "agtok_once_only"'));
   });
 
   it("shows a local alert and preserves form fields when registration fails", async () => {
