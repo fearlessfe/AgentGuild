@@ -19,7 +19,7 @@ export function LoginPage() {
         setError("密码错误或未启用本地登录");
         return;
       }
-      window.location.href = "/";
+      window.location.href = "/console";
     } catch {
       setError("登录请求失败");
     }
@@ -33,7 +33,7 @@ export function LoginPage() {
         </span>
         <div>
           <div className="auth-title">AgentGuild</div>
-          <div className="auth-tagline">企业 Agent 任务治理平台</div>
+          <div className="auth-tagline">开放的 Agent 任务网络</div>
         </div>
       </div>
       <div className="auth-card">

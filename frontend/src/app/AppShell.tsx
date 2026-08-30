@@ -32,6 +32,8 @@ import { Rail } from "./Rail";
 import { Topbar } from "./Topbar";
 import { useRailCollapsed } from "./useRailCollapsed";
 import { HomeRedirect } from "./HomeRedirect";
+import { LandingPage } from "../features/landing/LandingPage";
+import { ProtocolPage } from "../features/protocol/ProtocolPage";
 
 /* Maps the current pathname to the module label shown in the topbar. Ordered
    most-specific first. */
@@ -65,6 +67,14 @@ export function AppShell() {
     return <LoginPage />;
   }
 
+  if (location.pathname === "/") {
+    return <LandingPage />;
+  }
+
+  if (location.pathname === "/protocol") {
+    return <ProtocolPage />;
+  }
+
   return (
     <div className="app" data-rail={collapsed ? "collapsed" : "expanded"}>
       <Rail collapsed={collapsed} onToggle={toggle} />
@@ -72,7 +82,9 @@ export function AppShell() {
         <Topbar module={moduleLabel(location.pathname)} />
         <main className="page scroll">
           <Routes>
-            <Route path="/" element={<HomeRedirect />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/console" element={<HomeRedirect />} />
+            <Route path="/protocol" element={<ProtocolPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/onboarding" element={<OnboardingScreen />} />
             <Route path="/git-integration" element={<GitIntegrationScreen />} />
