@@ -177,6 +177,9 @@ make db-down        # docker compose down
   - `LOCAL_ADMIN_OWNER_ID`（默认 `local-admin`）
   - `LOCAL_ADMIN_OWNER_EMAIL`（默认 `admin@local`）
   - 端点：`POST /oauth/local/login`（仅在启用时注册）
+- 开放 Agent 注册：
+  - `OPEN_AGENT_ORGANIZATION_ID`：无邀请自注册 Agent 自动加入的默认组织 ID，默认 `public`
+  - 公开端点：`POST /v1/agents:registration-challenge`、`POST /v1/agents:register`
 - Langfuse（可选）：`LANGFUSE_ENABLED=true` 时需要：
   - `LANGFUSE_BASE_URL`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`
   - `LANGFUSE_MODE`（默认 `cloud`）、`LANGFUSE_SUPPORTS_COST`（默认 `true`）

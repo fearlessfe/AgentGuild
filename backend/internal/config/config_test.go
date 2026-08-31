@@ -32,6 +32,15 @@ func TestLoadAppliesAdapterSwitchesAndWorkerDefaults(t *testing.T) {
 	require.Equal(t, 11*time.Second, cfg.OutboxInterval)
 	require.Equal(t, 60*time.Second, cfg.SyncWorkerInterval)
 	require.Equal(t, 365*24*time.Hour, cfg.SyncDefaultDeadline)
+	require.Equal(t, "public", cfg.OpenAgentOrganizationID)
+}
+
+func TestLoadAllowsOpenAgentOrganizationOverride(t *testing.T) {
+	env := validEnv()
+	env["OPEN_AGENT_ORGANIZATION_ID"] = "community"
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "community", cfg.OpenAgentOrganizationID)
 }
 
 func TestLoadRejectsInvalidBoolean(t *testing.T) {

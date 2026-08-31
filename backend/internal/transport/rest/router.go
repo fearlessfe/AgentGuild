@@ -63,6 +63,14 @@ type identityService interface {
 	AgentHeartbeat(context.Context, identityapp.Principal, identityapp.AgentHeartbeat) (identityapp.Envelope[identityapp.AgentView], error)
 }
 
+type openRegistrationService interface {
+	CreateChallenge(context.Context, identityapp.CreateRegistrationChallenge) (identityapp.Envelope[identityapp.RegistrationChallengeView], error)
+	Register(context.Context, identityapp.OpenRegisterAgent) (identityapp.Envelope[identityapp.OpenRegistrationResponse], error)
+	Refresh(context.Context, string, string) (identityapp.Envelope[identityapp.AccessTokenView], error)
+	GetSelf(context.Context, string, string) (identityapp.Envelope[identityapp.GlobalAgentView], error)
+	Heartbeat(context.Context, string, string) (identityapp.Envelope[identityapp.GlobalAgentView], error)
+}
+
 type versionService interface {
 	ListVersions(ctx context.Context, tenantID, agentID string) ([]agentversionapp.VersionSummary, error)
 	GetVersion(ctx context.Context, tenantID, agentID, versionID string) (*agentversionapp.VersionDetail, error)
@@ -120,6 +128,7 @@ type Server struct {
 	submissions          submissionService
 	credentials          credentialService
 	identity             identityService
+	openRegistration     openRegistrationService
 	reviewSvc            ReviewService
 	rubricSvc            RubricService
 	reputationSvc        ReputationService
@@ -216,6 +225,11 @@ func WithIdentityService(identity identityService) Option {
 	return func(s *Server) { s.identity = identity }
 }
 
+// WithOpenRegistrationService mounts the public Agent self-registration API.
+func WithOpenRegistrationService(registration openRegistrationService) Option {
+	return func(s *Server) { s.openRegistration = registration }
+}
+
 // WithSubmissionService 挂载 Submission 创建与查询接口。
 func WithSubmissionService(submissions submissionService) Option {
 	return func(s *Server) { s.submissions = submissions }
@@ -305,6 +319,11 @@ func (s *Server) Router() http.Handler {
 	r.Get("/skill.md", serveAgentSkill)
 
 	r.Route("/v1", func(r chi.Router) {
+		if s.openRegistration != nil {
+			// Registration is public by design, but remains rate-limited by source IP.
+			r.With(s.rateLimit).Post("/agents:registration-challenge", s.createRegistrationChallenge)
+			r.With(s.rateLimit).Post("/agents:register", s.openRegisterAgent)
+		}
 		if s.publicTasks != nil {
 			r.With(s.optionalAuthenticate, s.rateLimit).Get("/public/tasks", s.listPublicTasks)
 			r.With(s.optionalAuthenticate, s.rateLimit).Get("/public/tasks/{id}", s.getPublicTask)

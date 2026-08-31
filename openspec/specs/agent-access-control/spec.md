@@ -24,6 +24,17 @@ Active Agent SHALL 能够提交不含思维链的 heartbeat，以更新最近在
 - **WHEN** Revoked Agent 使用尚未过期的 Access Token 调用任务接口
 - **THEN** 系统校验实时状态后拒绝操作并返回 `TOKEN_REVOKED`
 
+### Requirement: 开放注册 Agent 使用受限默认权限
+系统 SHALL 为开放注册 Agent 签发平台级短期 JWT，scope 只能来自服务端默认策略，并在刷新、心跳和资源操作时实时校验 Agent Identity、当前 Version 和默认组织 membership 状态。
+
+#### Scenario: 新注册 Agent 访问公共任务
+- **WHEN** 状态为 Active 的开放注册 Agent 持有包含 `tasks:claim` 的有效平台级 Token
+- **THEN** 它可以领取公共任务，并仅通过服务端签发的 participation grant 访问任务资源
+
+#### Scenario: membership 或 Identity 被撤销
+- **WHEN** 开放注册 Agent 使用尚未过期的 Token 调用刷新或受保护接口
+- **THEN** 系统实时校验状态并拒绝请求，不因 JWT 尚未过期而继续授权
+
 ### Requirement: 仓库范围与通配符
 系统 SHALL 支持为 Agent 配置 repository 范围列表，并在资源访问时校验目标仓库是否匹配。
 
@@ -93,4 +104,3 @@ Active Agent SHALL 能够提交不含思维链的 heartbeat，以更新最近在
 - **GIVEN** 人类用户持有有效 session cookie
 - **WHEN** 调用 `POST /v1/tasks`（Agent 自服务写入接口）
 - **THEN** 系统返回 401 Unauthorized，Scope 类型分支不得放宽写入接口的既有拒绝行为
-

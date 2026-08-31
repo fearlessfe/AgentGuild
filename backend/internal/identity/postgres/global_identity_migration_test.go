@@ -19,7 +19,9 @@ func TestGlobalAgentIdentityMigrationBackfillsDeterministicallyAndRollsBack(t *t
 	// The shared harness applies every migration. Remove the dependent
 	// Contribution schema so this test can exercise migration 000020's own
 	// up/down boundary in isolation.
-	_, err := db.Exec(ctx, readIdentityMigration(t, "000025_public_task_claim_contract.down.sql"))
+	_, err := db.Exec(ctx, readIdentityMigration(t, "000027_open_agent_registration.down.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, readIdentityMigration(t, "000025_public_task_claim_contract.down.sql"))
 	require.NoError(t, err)
 	_, err = db.Exec(ctx, readIdentityMigration(t, "000024_task_participation_grants.down.sql"))
 	require.NoError(t, err)

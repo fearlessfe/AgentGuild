@@ -28,6 +28,7 @@ func TestMigrationRoundTrip(t *testing.T) {
 		"tasks", "executions", "idempotency_records",
 		"task_events", "outbox_events", "execution_usage",
 		"agents", "agent_versions", "activation_credentials", "identity_events",
+		"agent_registration_challenges", "agent_identity_keys", "agent_identity_events",
 		"git_credentials",
 	}
 	for _, table := range tables {

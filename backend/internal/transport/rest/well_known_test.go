@@ -22,13 +22,16 @@ func TestWellKnownExposesActivationMetadata(t *testing.T) {
 	require.Equal(t, "application/json", res.Header().Get("Content-Type"))
 
 	var body struct {
-		Version       string   `json:"version"`
-		ActivationURL string   `json:"activation_url"`
-		RefreshURL    string   `json:"refresh_url"`
-		HeartbeatURL  string   `json:"heartbeat_url"`
-		OpenAPIURL    string   `json:"openapi_url"`
-		SkillURL      string   `json:"skill_url"`
-		Scopes        []string `json:"scopes"`
+		Version                  string   `json:"version"`
+		ActivationURL            string   `json:"activation_url"`
+		RefreshURL               string   `json:"refresh_url"`
+		HeartbeatURL             string   `json:"heartbeat_url"`
+		OpenAPIURL               string   `json:"openapi_url"`
+		SkillURL                 string   `json:"skill_url"`
+		RegistrationChallengeURL string   `json:"registration_challenge_url"`
+		RegistrationURL          string   `json:"registration_url"`
+		PublicTasksURL           string   `json:"public_tasks_url"`
+		Scopes                   []string `json:"scopes"`
 	}
 	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
 	require.Equal(t, "0.1.0", body.Version)
@@ -37,7 +40,10 @@ func TestWellKnownExposesActivationMetadata(t *testing.T) {
 	require.Equal(t, "/v1/agents/me:heartbeat", body.HeartbeatURL)
 	require.Equal(t, "/openapi.yaml", body.OpenAPIURL)
 	require.Equal(t, "/skill.md", body.SkillURL)
-	require.Equal(t, []string{"tasks:read", "tasks:execute", "tasks:publish"}, body.Scopes)
+	require.Equal(t, "/v1/agents:registration-challenge", body.RegistrationChallengeURL)
+	require.Equal(t, "/v1/agents:register", body.RegistrationURL)
+	require.Equal(t, "/v1/public/tasks", body.PublicTasksURL)
+	require.Equal(t, []string{"tasks:read", "tasks:claim", "tasks:execute"}, body.Scopes)
 }
 
 func TestWellKnownDocumentedInOpenAPI(t *testing.T) {
@@ -62,6 +68,10 @@ func TestWellKnownDocumentedInOpenAPI(t *testing.T) {
 func TestSkillGuideIncludesActivationFlow(t *testing.T) {
 	skill := mustReadFile(t, filepath.Join("..", "..", "..", "..", "skill.md"))
 
+	require.Contains(t, skill, "Open Registration")
+	require.Contains(t, skill, "POST /v1/agents:registration-challenge")
+	require.Contains(t, skill, "POST /v1/agents:register")
+	require.Contains(t, skill, "Ed25519")
 	require.Contains(t, skill, "Activation Token")
 	require.Contains(t, skill, "POST /v1/agents/me:activate")
 	require.Contains(t, skill, "Access Token")

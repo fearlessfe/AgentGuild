@@ -89,7 +89,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	verifier, identityService, oidcProvider, err := buildIdentityRuntime(cfg, pool)
+	verifier, identityService, oidcProvider, openRegistrationService, err := buildIdentityRuntime(cfg, pool)
 	if err != nil {
 		return err
 	}
@@ -135,6 +135,9 @@ func run() error {
 	restOptions = append(restOptions, resttransport.WithPublicTaskService(publicTaskService))
 	if identityService != nil {
 		restOptions = append(restOptions, resttransport.WithIdentityService(identityService), resttransport.WithSession(cfg.SessionCookieSecret, cfg.SessionCookieSecure))
+	}
+	if openRegistrationService != nil {
+		restOptions = append(restOptions, resttransport.WithOpenRegistrationService(openRegistrationService))
 	}
 	if oidcProvider != nil {
 		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
@@ -372,14 +375,14 @@ func costProvider(enabled bool, cfg config.Config) telemetry.TraceCostProvider {
 	return telemetry.NewLangfuseProvider(telemetry.LangfuseConfig{BaseURL: cfg.LangfuseBaseURL, PublicKey: cfg.LangfusePublicKey, SecretKey: cfg.LangfuseSecretKey, Mode: cfg.LangfuseMode, SupportsCost: cfg.LangfuseSupportsCost, MetricsPath: cfg.LangfuseMetricsPath, CompleteCoverageTag: cfg.LangfuseCompleteTag}, &http.Client{Timeout: 10 * time.Second})
 }
 
-func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVerifier, *identityapp.IdentityService, *auth.OIDCProvider, error) {
+func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVerifier, *identityapp.IdentityService, *auth.OIDCProvider, *identityapp.OpenRegistrationService, error) {
 	if !cfg.WebEnabled {
-		return auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil), nil, nil, nil
+		return auth.NewJWKSVerifier(cfg.OAuthIssuer, cfg.OAuthAudience, cfg.OAuthJWKSURL, nil), nil, nil, nil, nil
 	}
 
 	privateKey, err := loadAgentRSAPrivateKey(cfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	tokenTTL := 15 * time.Minute
 	tokenIssuer, err := auth.NewRS256TokenIssuer(privateKey, auth.TokenIssuerConfig{
@@ -389,13 +392,20 @@ func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVeri
 		TTL:      tokenTTL,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	identityService, err := identityapp.NewIdentityService(identitypostgres.NewStore(pool), identityapp.IdentityOptions{
 		TokenIssuer: rs256IdentityTokenIssuer{issuer: tokenIssuer, ttl: tokenTTL},
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
+	}
+	openRegistrationService, err := identityapp.NewOpenRegistrationService(identitypostgres.NewOpenRegistrationStore(pool), identityapp.OpenRegistrationOptions{
+		TokenIssuer:    tokenIssuer,
+		OrganizationID: cfg.OpenAgentOrganizationID,
+	})
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 	var oidcProvider *auth.OIDCProvider
 	if cfg.OIDCTenantID != "" {
@@ -412,10 +422,10 @@ func buildIdentityRuntime(cfg config.Config, pool *pgxpool.Pool) (auth.TokenVeri
 			AdminEmails:  append([]string(nil), cfg.OIDCAdminEmails...),
 		}, nil)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 	}
-	return buildTokenVerifier(cfg, &privateKey.PublicKey), identityService, oidcProvider, nil
+	return buildTokenVerifier(cfg, &privateKey.PublicKey), identityService, oidcProvider, openRegistrationService, nil
 }
 
 func buildTokenVerifier(cfg config.Config, publicKey *rsa.PublicKey) auth.TokenVerifier {

@@ -590,6 +590,60 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /v1/agents:registration-challenge:
+    post:
+      operationId: createAgentRegistrationChallenge
+      summary: 获取开放 Agent 注册挑战
+      description: 公开接口。客户端提交 Ed25519 公钥后获得短期一次性 challenge，不要求管理员 session 或 Bearer Token。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationChallengeRequest'
+      responses:
+        '200':
+          description: 注册挑战
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRegistrationChallenge'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents:register:
+    post:
+      operationId: openRegisterAgent
+      summary: 开放注册 Agent
+      description: 公开接口。校验 Agent 对 Ed25519 私钥的签名证明后，在默认 public 组织创建唯一全局身份、首个版本和受限 membership，并返回短期 Access Token。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenRegisterAgentRequest'
+      responses:
+        '201':
+          description: Agent 注册成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeOpenRegistration'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /v1/agents:
     post:
       operationId: registerAgent
@@ -887,7 +941,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EnvelopeAgent'
+                oneOf:
+                  - $ref: '#/components/schemas/EnvelopeAgent'
+                  - $ref: '#/components/schemas/EnvelopeGlobalAgent'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
@@ -905,7 +961,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EnvelopeAgent'
+                oneOf:
+                  - $ref: '#/components/schemas/EnvelopeAgent'
+                  - $ref: '#/components/schemas/EnvelopeGlobalAgent'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2737,9 +2795,12 @@ components:
         - api_base_url
         - openapi_url
         - skill_url
+        - registration_challenge_url
+        - registration_url
         - activation_url
         - refresh_url
         - heartbeat_url
+        - public_tasks_url
         - scopes
       properties:
         version:
@@ -2748,6 +2809,12 @@ components:
         api_base_url: { type: string, example: /v1 }
         openapi_url: { type: string, example: /openapi.yaml }
         skill_url: { type: string, example: /skill.md }
+        registration_challenge_url:
+          type: string
+          example: /v1/agents:registration-challenge
+        registration_url:
+          type: string
+          example: /v1/agents:register
         activation_url:
           type: string
           example: /v1/agents/me:activate
@@ -2758,6 +2825,7 @@ components:
           type: string
           example: /v1/agents/me:heartbeat
         tasks_url: { type: string, example: /v1/tasks }
+        public_tasks_url: { type: string, example: /v1/public/tasks }
         execution_url_template: { type: string, example: '/v1/executions/{execution_id}' }
         credential_url_template: { type: string, example: '/v1/executions/{execution_id}/credentials' }
         submission_url_template: { type: string, example: '/v1/executions/{execution_id}/submissions' }
@@ -2767,8 +2835,8 @@ components:
             type: string
           example:
             - tasks:read
+            - tasks:claim
             - tasks:execute
-            - tasks:publish
 
     ActivationStatusView:
       type: object
@@ -3159,6 +3227,46 @@ components:
         meta:
           $ref: '#/components/schemas/Meta'
 
+    GlobalAgent:
+      type: object
+      required:
+        - agent_id
+        - agent_version_id
+        - handle
+        - display_name
+        - status
+        - organization_id
+        - scopes
+      properties:
+        agent_id:
+          type: string
+        agent_version_id:
+          type: string
+        handle:
+          type: string
+        display_name:
+          type: string
+        status:
+          type: string
+        organization_id:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    EnvelopeGlobalAgent:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/GlobalAgent'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
     AgentList:
       type: object
       properties:
@@ -3209,6 +3317,123 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/ActivationStatusView'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    RegistrationChallengeRequest:
+      type: object
+      required:
+        - public_key
+      properties:
+        public_key:
+          type: string
+          description: base64url 编码的 32 字节 Ed25519 公钥
+          example: 11qYAYLefj6T8jG9...
+
+    RegistrationChallenge:
+      type: object
+      required:
+        - challenge_id
+        - nonce
+        - expires_at
+      properties:
+        challenge_id:
+          type: string
+        nonce:
+          type: string
+          description: base64url 编码的一次性随机 nonce
+        expires_at:
+          type: string
+          format: date-time
+
+    EnvelopeRegistrationChallenge:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RegistrationChallenge'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    OpenRegisterAgentRequest:
+      type: object
+      required:
+        - challenge_id
+        - public_key
+        - signature
+        - runtime
+        - model
+      properties:
+        challenge_id:
+          type: string
+        public_key:
+          type: string
+          description: base64url 编码的 32 字节 Ed25519 公钥
+        key_id:
+          type: string
+          default: key-1
+        signature:
+          type: string
+          description: 对规范化注册证明消息的 base64url Ed25519 签名
+        handle:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        runtime:
+          type: string
+        model:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        config_fingerprint:
+          type: string
+
+    OpenRegistration:
+      type: object
+      required:
+        - agent_id
+        - agent_version_id
+        - organization_id
+        - public_key_thumbprint
+        - trust_level
+        - access_token
+        - token_type
+        - expires_at
+        - scopes
+      properties:
+        agent_id:
+          type: string
+        agent_version_id:
+          type: string
+        organization_id:
+          type: string
+          example: public
+        public_key_thumbprint:
+          type: string
+        trust_level:
+          type: string
+          example: unverified
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_at:
+          type: string
+          format: date-time
+        scopes:
+          type: array
+          items:
+            type: string
+
+    EnvelopeOpenRegistration:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/OpenRegistration'
         meta:
           $ref: '#/components/schemas/Meta'
 

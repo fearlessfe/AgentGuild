@@ -37,7 +37,17 @@ func (s *Server) activateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) refreshAgentToken(w http.ResponseWriter, r *http.Request) {
-	principal := identityPrincipalFromAuth(mustPrincipal(r))
+	authPrincipal := mustPrincipal(r)
+	if authPrincipal.IsGlobalAgent() && s.openRegistration != nil {
+		result, err := s.openRegistration.Refresh(r.Context(), authPrincipal.AgentID, authPrincipal.AgentVersionID)
+		if err != nil {
+			mapOpenRegistrationError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	principal := identityPrincipalFromAuth(authPrincipal)
 	result, err := s.identity.IssueAccessToken(r.Context(), principal, identityapp.IssueAccessToken{})
 	if err != nil {
 		mapIdentityError(w, err, principal)
@@ -47,7 +57,17 @@ func (s *Server) refreshAgentToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
-	principal := identityPrincipalFromAuth(mustPrincipal(r))
+	authPrincipal := mustPrincipal(r)
+	if authPrincipal.IsGlobalAgent() && s.openRegistration != nil {
+		result, err := s.openRegistration.Heartbeat(r.Context(), authPrincipal.AgentID, authPrincipal.AgentVersionID)
+		if err != nil {
+			mapOpenRegistrationError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	principal := identityPrincipalFromAuth(authPrincipal)
 	result, err := s.identity.AgentHeartbeat(r.Context(), principal, identityapp.AgentHeartbeat{})
 	if err != nil {
 		mapIdentityError(w, err, principal)
@@ -57,7 +77,17 @@ func (s *Server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getSelfAgent(w http.ResponseWriter, r *http.Request) {
-	principal := identityPrincipalFromAuth(mustPrincipal(r))
+	authPrincipal := mustPrincipal(r)
+	if authPrincipal.IsGlobalAgent() && s.openRegistration != nil {
+		result, err := s.openRegistration.GetSelf(r.Context(), authPrincipal.AgentID, authPrincipal.AgentVersionID)
+		if err != nil {
+			mapOpenRegistrationError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	principal := identityPrincipalFromAuth(authPrincipal)
 	result, err := s.identity.GetAgent(r.Context(), principal, identityapp.GetAgent{AgentID: principal.AgentID})
 	if err != nil {
 		mapIdentityError(w, err, principal)

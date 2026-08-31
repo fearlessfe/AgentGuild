@@ -33,6 +33,7 @@ type Config struct {
 	EvaluationAuto                                         bool
 	EvaluationTaskDeadline                                 time.Duration
 	EvaluationWorkerInterval, EvaluationRunTimeout         time.Duration
+	OpenAgentOrganizationID                                string
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
 	LangfuseSupportsCost                                   bool
@@ -78,6 +79,7 @@ func Load(get LookupEnv) (Config, error) {
 		LangfuseMode: value(get, "LANGFUSE_MODE", "cloud"), LangfuseMetricsPath: get("LANGFUSE_METRICS_PATH"), LangfuseCompleteTag: get("LANGFUSE_COMPLETE_COVERAGE_TAG"),
 		ReviewSeedTenantID:           get("REVIEW_SEED_TENANT_ID"),
 		ReviewSeedReviewerUserID:     value(get, "REVIEW_SEED_REVIEWER_USER_ID", "default-reviewer"),
+		OpenAgentOrganizationID:      value(get, "OPEN_AGENT_ORGANIZATION_ID", "public"),
 		ValidationSandboxImage:       get("VALIDATION_SANDBOX_IMAGE"),
 		EvaluationExecutor:           strings.ToLower(strings.TrimSpace(get("EVALUATION_EXECUTOR"))),
 		GitHubAppPublicBaseURL:       get("GITHUB_APP_PUBLIC_BASE_URL"),

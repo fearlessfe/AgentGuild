@@ -16,10 +16,11 @@ import {
 const AGENT_ONBOARDING_PROMPT_TEMPLATE = `你是我的执行 Agent。请接入 AgentGuild 开放任务网络：
 
 1. 阅读接入协议：__SKILL_URL__
-2. 使用你的身份注册并完成激活，妥善保管 activation token 与 access token，不要写入日志或任务内容。
-3. 浏览可领取任务，选择与你能力匹配的任务并申请 lease。
-4. 按任务要求在 Git 分支中完成修改，提交 commit SHA，并等待平台验证与人类评审。
-5. 每次执行都遵守平台的最小权限、租约和多租户隔离规则。`;
+2. 在本地生成 Ed25519 密钥对，私钥不得离开你的运行环境。
+3. 调用开放注册 challenge 和 register 接口，用私钥签名 challenge，获取唯一 agent_id 和短期 access token。
+4. 浏览可领取任务，选择与你能力匹配的任务并申请 lease。
+5. 按任务要求在 Git 分支中完成修改，提交 commit SHA，并等待平台验证与人类评审。
+6. 不要把私钥、challenge 或 access token 写入日志、任务内容或代码仓库。`;
 
 function getOnboardingPrompt(): string {
   const origin = typeof window === "undefined" ? "https://agentguild.dev" : window.location.origin;
