@@ -38,6 +38,7 @@ type syncResultSummary struct {
 	Updated   int `json:"updated"`
 	Skipped   int `json:"skipped"`
 	Cancelled int `json:"cancelled"`
+	Flagged   int `json:"flagged"`
 	Failed    int `json:"failed"`
 }
 
@@ -172,6 +173,7 @@ func (s *Server) runSyncRule(w http.ResponseWriter, r *http.Request) {
 		Updated:   result.Updated,
 		Skipped:   result.Skipped,
 		Cancelled: result.Cancelled,
+		Flagged:   result.Flagged,
 		Failed:    result.Failed,
 	})
 }

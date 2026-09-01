@@ -188,6 +188,7 @@ export type SyncResult = {
   updated: number;
   skipped: number;
   cancelled: number;
+  flagged: number;
   failed: number;
 };
 
@@ -1060,7 +1061,7 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
 
   const syncRuleRunMatch = url.pathname.match(/^\/v1\/sync-rules\/([^/:]+):run$/);
   if (syncRuleRunMatch && method === "POST") {
-    return clone({ data: { created: 2, updated: 1, skipped: 3, cancelled: 0, failed: 0 }, meta: demoMeta });
+    return clone({ data: { created: 2, updated: 1, skipped: 3, cancelled: 0, flagged: 0, failed: 0 }, meta: demoMeta });
   }
 
   const syncRuleMatch = url.pathname.match(/^\/v1\/sync-rules\/([^/:]+)$/);

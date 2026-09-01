@@ -13,10 +13,11 @@ export function SyncResultScreen({ result, onClose }: SyncResultScreenProps) {
     { label: "更新", value: String(result.updated) },
     { label: "跳过", value: String(result.skipped) },
     { label: "取消", value: String(result.cancelled) },
+    { label: "待处理", value: String(result.flagged) },
     { label: "失败", value: String(result.failed), positive: result.failed === 0 },
   ];
 
-  const total = result.created + result.updated + result.skipped + result.cancelled + result.failed;
+  const total = result.created + result.updated + result.skipped + result.cancelled + result.flagged + result.failed;
 
   return (
     <div className="stack">
@@ -36,6 +37,11 @@ export function SyncResultScreen({ result, onClose }: SyncResultScreenProps) {
           {result.cancelled > 0 && (
             <p className="text-sm muted">
               有 <strong>{result.cancelled}</strong> 个操作被取消。
+            </p>
+          )}
+          {result.flagged > 0 && (
+            <p className="text-sm muted">
+              有 <strong>{result.flagged}</strong> 个已领取任务对应的 Issue 已关闭，任务状态未被强制改变。
             </p>
           )}
           {result.failed > 0 && (

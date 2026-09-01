@@ -102,6 +102,7 @@ describe("SyncRuleScreen repository inventory", () => {
       updated: 0,
       skipped: 0,
       cancelled: 0,
+      flagged: 0,
       failed: 0,
     }));
   });

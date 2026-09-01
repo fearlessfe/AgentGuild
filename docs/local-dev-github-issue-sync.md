@@ -15,7 +15,7 @@ make db-up
 ### 1.2 应用数据库迁移
 
 ```bash
-# 按序执行所有迁移脚本（至少需要 000010）
+# 按序执行所有迁移脚本（必须包含当前最新迁移）
 for f in backend/migrations/0000*_*.up.sql; do
   psql "$DATABASE_URL" -f "$f"
 done
@@ -116,9 +116,11 @@ curl -s -b cookies.txt -X POST http://localhost:8080/v1/sync-rules \
   -H 'Content-Type: application/json' \
   -d '{
     "repo": "org/repo-name",
-    "status": "open",
+    "issue_state": "all",
     "include_labels": ["agent-ready"],
-    "task_type": "code"
+    "task_type": "code",
+    "source_auth": "public",
+    "dedupe_strategy": "update"
   }'
 # 记录返回的 sync rule id，后续使用
 ```
@@ -134,6 +136,7 @@ curl -s -b cookies.txt -X POST "http://localhost:8080/v1/sync-rules/${RULE_ID}:r
 
 - 打开前端 **Task Center**，确认出现从 GitHub Issue 生成的任务。
 - 每个任务应带有来源标签，格式类似 `Issue #N @ org/repo-name`。
+- 规则使用 `issue_state=all` 是为了让后续轮询能够观察到 Issue 关闭并处理已存在映射；必须配合专用标签，避免首次同步拉取整个仓库的历史 Issue。
 
 ### 3.4 验证取消逻辑
 
@@ -165,5 +168,5 @@ Task Center 中**不应**出现重复任务，确认去重机制正常工作。
 | 后端启动报 `DATABASE_URL not set` | 检查是否执行了 `source .local/env.sh` |
 | GitHub App Manifest 回调失败 | 确认 `GITHUB_APP_PUBLIC_BASE_URL` 已设置且隧道仍在运行 |
 | 同步后任务未出现 | 检查 Issue 是否带有 `agent-ready` 标签；查看后端日志确认 sync job 是否报错 |
-| 关闭 Issue 后任务未取消 | 确认任务状态为 `unclaimed`；已认领任务设计上不自动取消 |
-| 重复任务出现 | 检查 `external_id` 唯一索引是否正确应用（migration `000010` 是否已执行） |
+| 关闭 Issue 后任务未取消 | 确认规则使用 `issue_state=all` 且 Issue 仍带包含标签；已认领任务会计入 `flagged`，不会被强制取消 |
+| 重复任务出现 | 确认当前全部迁移已应用，尤其是 `issue_task_map` 的唯一键 |

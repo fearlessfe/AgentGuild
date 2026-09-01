@@ -4310,6 +4310,9 @@ components:
           type: integer
         cancelled:
           type: integer
+        flagged:
+          type: integer
+          description: 已领取任务对应的 Issue 已关闭，但任务未被强制取消
         failed:
           type: integer
 

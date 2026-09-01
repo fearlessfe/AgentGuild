@@ -194,6 +194,7 @@ func TestSyncRunRuleReturnsSummary(t *testing.T) {
 		Updated:   2,
 		Skipped:   3,
 		Cancelled: 4,
+		Flagged:   6,
 		Failed:    5,
 	}}
 	server := newTestServer(&fakeApplication{},
@@ -210,6 +211,7 @@ func TestSyncRunRuleReturnsSummary(t *testing.T) {
 			Updated   int `json:"updated"`
 			Skipped   int `json:"skipped"`
 			Cancelled int `json:"cancelled"`
+			Flagged   int `json:"flagged"`
 			Failed    int `json:"failed"`
 		} `json:"data"`
 	}
@@ -218,6 +220,7 @@ func TestSyncRunRuleReturnsSummary(t *testing.T) {
 	require.Equal(t, 2, body.Data.Updated)
 	require.Equal(t, 3, body.Data.Skipped)
 	require.Equal(t, 4, body.Data.Cancelled)
+	require.Equal(t, 6, body.Data.Flagged)
 	require.Equal(t, 5, body.Data.Failed)
 	require.Equal(t, "tenant-1", engine.tenantID)
 	require.Equal(t, "rule-123", engine.ruleID)
