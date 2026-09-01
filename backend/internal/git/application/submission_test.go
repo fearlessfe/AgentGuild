@@ -6,10 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
 	"agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	"github.com/stretchr/testify/require"
 )
 
@@ -219,6 +221,44 @@ func TestGetSubmissionTenantIsolation(t *testing.T) {
 	require.ErrorIs(t, err, git.ErrSubmissionNotFound)
 }
 
+func TestGlobalAgentSubmissionUsesSponsorTenantAndGrantScopedReads(t *testing.T) {
+	recorder := &recordingNotifier{}
+	fixture := newSubmissionFixtureWithNotifier(t, recorder)
+	externalGrant := application.SubmissionAuthorizerFunc(func(context.Context, application.Principal, application.CreateSubmission, time.Time) (application.SubmissionGrant, error) {
+		return application.SubmissionGrant{
+			ResourceTenantID: "tenant-1", External: true,
+			TaskID: "task-1", Repo: "owner/repo", BaseCommit: "base-sha",
+		}, nil
+	})
+	svc, err := application.NewSubmissionService(fixture.store, fixture.verifier, recorder, externalGrant, sequenceIDs("sub-global"))
+	require.NoError(t, err)
+	participation := &submissionParticipationAuthorizer{grant: &participationdomain.Grant{
+		ResourceTenantID: "tenant-1", TaskID: "task-1", ExecutionID: "exec-1",
+	}}
+	svc.SetParticipationAuthorizer(participation)
+	principal := globalSubmissionPrincipal()
+
+	created, err := svc.CreateSubmission(context.Background(), principal, newSubmissionCmd())
+	require.NoError(t, err)
+	require.Empty(t, created.Data.TenantID)
+	require.Equal(t, "tenant-1", fixture.store.submissions[created.Data.ID].TenantID)
+	require.Len(t, recorder.calls, 1)
+	require.Equal(t, "tenant-1", recorder.calls[0].TenantID)
+
+	got, err := svc.GetSubmission(context.Background(), principal, application.GetSubmission{SubmissionID: created.Data.ID})
+	require.NoError(t, err)
+	require.Empty(t, got.Data.TenantID)
+	listed, err := svc.ListSubmissions(context.Background(), principal, application.ListSubmissions{ExecutionID: "exec-1"})
+	require.NoError(t, err)
+	require.Len(t, listed.Data, 1)
+	require.Empty(t, listed.Data[0].TenantID)
+	require.Equal(t, []participationdomain.ResourceKind{participationdomain.ResourceSubmission, participationdomain.ResourceExecution}, participation.kinds)
+
+	participation.err = participationdomain.ErrForbidden
+	_, err = svc.GetSubmission(context.Background(), principal, application.GetSubmission{SubmissionID: "another-submission"})
+	require.ErrorIs(t, err, participationdomain.ErrForbidden)
+}
+
 type submissionFixture struct {
 	svc      *application.SubmissionService
 	store    *memoryStore
@@ -276,6 +316,27 @@ func newSubmissionCmd() application.CreateSubmission {
 
 func agentPrincipal() application.Principal {
 	return application.Principal{TenantID: "tenant-1", AgentID: "agent-1", AgentVersionID: "agent-1", Scopes: []string{"tasks:execute"}, RepoScope: []string{"owner/repo"}}
+}
+
+func globalSubmissionPrincipal() application.Principal {
+	return application.Principal{
+		SubjectID: auth.AgentSubject("global-agent"), IdentityScope: auth.IdentityScopeGlobal,
+		AgentID: "global-agent", AgentVersionID: "global-version", Scopes: []string{"tasks:execute"},
+	}
+}
+
+type submissionParticipationAuthorizer struct {
+	grant *participationdomain.Grant
+	err   error
+	kinds []participationdomain.ResourceKind
+}
+
+func (a *submissionParticipationAuthorizer) Authorize(_ context.Context, _ auth.Principal, kind participationdomain.ResourceKind, _ string, _ participationdomain.Scope) (*participationdomain.Grant, error) {
+	a.kinds = append(a.kinds, kind)
+	if a.err != nil {
+		return nil, a.err
+	}
+	return a.grant, nil
 }
 
 func TestCreateSubmissionRejectsAfterTaskDeadline(t *testing.T) {

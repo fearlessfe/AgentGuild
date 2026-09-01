@@ -11,6 +11,7 @@ type Repository interface {
 	Insert(context.Context, *domain.Grant, domain.ActorType, string) error
 	GetByID(context.Context, string) (*domain.Grant, error)
 	Authorize(context.Context, domain.AccessRequest) (*domain.Grant, error)
+	AuthorizeResource(context.Context, domain.ResourceAccessRequest) (*domain.Grant, error)
 	Renew(context.Context, string, string, time.Time) (*domain.Grant, error)
 	Revoke(context.Context, string, string, string) (*domain.Grant, error)
 	ExpireDue(context.Context, int) (int, error)

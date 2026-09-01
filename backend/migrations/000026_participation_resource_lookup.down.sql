@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS task_participation_grants_task_lookup;
+DROP INDEX IF EXISTS task_participation_grants_execution_lookup;

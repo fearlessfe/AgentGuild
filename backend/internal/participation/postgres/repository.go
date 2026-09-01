@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"time"
@@ -14,6 +16,8 @@ import (
 )
 
 type Repository struct{ pool *pgxpool.Pool }
+
+var errAmbiguousResource = errors.New("ambiguous sponsor resource")
 
 func NewRepository(pool *pgxpool.Pool) application.Repository { return &Repository{pool: pool} }
 
@@ -106,6 +110,172 @@ func (r *Repository) Authorize(ctx context.Context, request domain.AccessRequest
 		return nil, authorizeErr
 	}
 	return grant, nil
+}
+
+func (r *Repository) AuthorizeResource(ctx context.Context, request domain.ResourceAccessRequest) (*domain.Grant, error) {
+	if err := domain.ValidateResourceAccessRequest(request); err != nil {
+		return nil, err
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	now, err := databaseNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	grant, err := resolveGrantForResource(ctx, tx, request)
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errAmbiguousResource) {
+		reason := "resource_not_found"
+		if errors.Is(err, errAmbiguousResource) {
+			reason = "ambiguous_resource"
+		}
+		if err := appendAudit(ctx, tx, auditForUnresolvedResource(request, reason, now)); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, domain.ErrForbidden
+	}
+	if err != nil {
+		return nil, err
+	}
+	access := domain.AccessRequest{
+		ResourceTenantID: grant.ResourceTenantID, TaskID: grant.TaskID,
+		ExecutionID: grant.ExecutionID, AgentID: request.AgentID,
+		AgentVersionID: request.AgentVersionID, Scope: request.Scope,
+		ActorType: request.ActorType, ActorID: request.ActorID,
+	}
+	authorizeErr := grant.Authorizes(access, now)
+	reasonOverride := ""
+	if authorizeErr == nil {
+		active, err := activeAgentVersion(ctx, tx, request.AgentID, request.AgentVersionID)
+		if err != nil {
+			return nil, err
+		}
+		if !active {
+			authorizeErr = domain.ErrForbidden
+			reasonOverride = "agent_or_version_inactive"
+		}
+	}
+	if errors.Is(authorizeErr, domain.ErrExpired) && grant.Status == domain.StatusActive {
+		if err := grant.Expire(now); err != nil {
+			return nil, err
+		}
+		if err := updateGrant(ctx, tx, grant); err != nil {
+			return nil, err
+		}
+		if err := appendAudit(ctx, tx, auditForGrant(grant, domain.EventExpired, domain.ActorSystem, "grant-authorizer", request.Scope, "expired", now)); err != nil {
+			return nil, err
+		}
+	}
+	eventType, reason := domain.EventAllowed, "allowed"
+	if authorizeErr != nil {
+		eventType, reason = domain.EventDenied, reasonCode(authorizeErr)
+		if reasonOverride != "" {
+			reason = reasonOverride
+		}
+	}
+	if err := appendAudit(ctx, tx, auditForRequestWithGrant(access, grant.ID, eventType, reason, now)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	if authorizeErr != nil {
+		return nil, authorizeErr
+	}
+	return grant, nil
+}
+
+func activeAgentVersion(ctx context.Context, tx pgx.Tx, agentID, agentVersionID string) (bool, error) {
+	var active bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM agent_identities a
+			JOIN agent_identity_versions v ON v.agent_id=a.id
+			WHERE a.id=$1 AND a.status='active'
+			  AND v.id=$2 AND v.status='active'
+		)`, agentID, agentVersionID).Scan(&active)
+	return active, err
+}
+
+func resolveGrantForResource(ctx context.Context, tx pgx.Tx, request domain.ResourceAccessRequest) (*domain.Grant, error) {
+	count, err := resourceTenantCount(ctx, tx, request.Kind, request.ResourceID)
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, pgx.ErrNoRows
+	}
+	if count != 1 {
+		return nil, errAmbiguousResource
+	}
+	query := selectGrantAliased
+	switch request.Kind {
+	case domain.ResourceTask:
+		query += ` WHERE g.task_id=$1`
+	case domain.ResourceExecution:
+		query += ` WHERE g.execution_id=$1`
+	case domain.ResourceSubmission:
+		query = selectGrantAliased + `
+			JOIN submissions s
+			  ON s.tenant_id=g.resource_tenant_id
+			 AND s.task_id=g.task_id AND s.execution_id=g.execution_id
+			WHERE s.id=$1`
+	case domain.ResourceReview:
+		query = selectGrantAliased + `
+			JOIN submissions s
+			  ON s.tenant_id=g.resource_tenant_id
+			 AND s.task_id=g.task_id AND s.execution_id=g.execution_id
+			JOIN reviews r
+			  ON r.tenant_id=s.tenant_id AND r.submission_id=s.id
+			WHERE r.id=$1`
+	default:
+		return nil, domain.ErrInvalidArgument
+	}
+	// A Task can have historical executions and therefore multiple grants. Prefer
+	// the requesting Agent/Version and a currently active grant, while retaining
+	// a mismatched candidate so the denied cross-resource attempt is auditable.
+	query += `
+		ORDER BY (g.agent_id=$2 AND g.agent_version_id=$3) DESC,
+		         (g.agent_id=$2 AND g.agent_version_id=$3
+		          AND g.status='active' AND $4=ANY(g.scopes)) DESC,
+		         (g.status='active') DESC, g.expires_at DESC, g.id
+		LIMIT 1 FOR UPDATE OF g`
+	return scanGrant(tx.QueryRow(ctx, query, request.ResourceID, request.AgentID, request.AgentVersionID, string(request.Scope)))
+}
+
+func resourceTenantCount(ctx context.Context, tx pgx.Tx, kind domain.ResourceKind, resourceID string) (int, error) {
+	query := `SELECT count(DISTINCT g.resource_tenant_id) FROM task_participation_grants g`
+	switch kind {
+	case domain.ResourceTask:
+		query += ` WHERE g.task_id=$1`
+	case domain.ResourceExecution:
+		query += ` WHERE g.execution_id=$1`
+	case domain.ResourceSubmission:
+		query += `
+			JOIN submissions s
+			  ON s.tenant_id=g.resource_tenant_id
+			 AND s.task_id=g.task_id AND s.execution_id=g.execution_id
+			WHERE s.id=$1`
+	case domain.ResourceReview:
+		query += `
+			JOIN submissions s
+			  ON s.tenant_id=g.resource_tenant_id
+			 AND s.task_id=g.task_id AND s.execution_id=g.execution_id
+			JOIN reviews r
+			  ON r.tenant_id=s.tenant_id AND r.submission_id=s.id
+			WHERE r.id=$1`
+	default:
+		return 0, domain.ErrInvalidArgument
+	}
+	var count int
+	err := tx.QueryRow(ctx, query, resourceID).Scan(&count)
+	return count, err
 }
 
 func (r *Repository) Renew(ctx context.Context, id, actorID string, newExpiry time.Time) (*domain.Grant, error) {
@@ -248,6 +418,13 @@ const selectGrant = `
 	       revoked_at, COALESCE(revocation_actor, ''), COALESCE(revocation_reason, '')
 	FROM task_participation_grants`
 
+const selectGrantAliased = `
+	SELECT g.id, g.resource_tenant_id, g.task_id, g.execution_id, g.agent_id,
+	       g.agent_version_id, g.scopes, g.status, g.expires_at, g.created_at,
+	       g.updated_at, g.revoked_at, COALESCE(g.revocation_actor, ''),
+	       COALESCE(g.revocation_reason, '')
+	FROM task_participation_grants g`
+
 type scanner interface{ Scan(...any) error }
 
 func scanGrant(row scanner) (*domain.Grant, error) {
@@ -322,6 +499,20 @@ func auditForRequestWithGrant(request domain.AccessRequest, grantID string, even
 	event := auditForRequest(request, eventType, reason, now)
 	event.GrantID = grantID
 	return event
+}
+
+func auditForUnresolvedResource(request domain.ResourceAccessRequest, reason string, now time.Time) domain.AuditEvent {
+	digest := sha256.Sum256([]byte(request.ResourceID))
+	metadata, _ := json.Marshal(map[string]string{
+		"resource_kind":      string(request.Kind),
+		"resource_id_sha256": hex.EncodeToString(digest[:]),
+	})
+	return domain.AuditEvent{
+		Type: domain.EventDenied, ActorType: request.ActorType,
+		ActorID: request.ActorID, AgentID: request.AgentID,
+		AgentVersionID: request.AgentVersionID, Scope: request.Scope,
+		ReasonCode: reason, Metadata: metadata, CreatedAt: now,
+	}
 }
 
 func databaseNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {

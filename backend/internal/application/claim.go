@@ -9,6 +9,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 )
 
 func (s *Service) ClaimTask(ctx context.Context, principal auth.Principal, command ClaimTask) (Envelope[ExecutionView], error) {
@@ -89,9 +90,6 @@ func (s *Service) StartExecution(ctx context.Context, principal auth.Principal, 
 		var result Envelope[ExecutionView]
 		return result, err
 	}
-	if _, err := s.resources.Tenant(principal); err != nil {
-		return Envelope[ExecutionView]{}, err
-	}
 	return s.mutateExecution(ctx, principal, "execution_start", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "start", func(execution *domain.Execution, now time.Time, generation int64) error {
 		return execution.Start(now, generation, command.Stage, command.Progress)
 	})
@@ -101,9 +99,6 @@ func (s *Service) HeartbeatExecution(ctx context.Context, principal auth.Princip
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
 		var result Envelope[ExecutionView]
 		return result, err
-	}
-	if _, err := s.resources.Tenant(principal); err != nil {
-		return Envelope[ExecutionView]{}, err
 	}
 	return s.mutateExecution(ctx, principal, "execution_heartbeat", command.RequestID, command.ExecutionID, command.LeaseGeneration, command, "heartbeat", func(execution *domain.Execution, now time.Time, generation int64) error {
 		_, err := execution.Heartbeat(now, generation, command.Stage, command.Progress)
@@ -118,11 +113,12 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 	if err := s.policy.Require(principal, "tasks:execute"); err != nil {
 		return result, err
 	}
-	if _, err := s.resources.Tenant(principal); err != nil {
+	resourceTenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceExecution, executionID, participationdomain.ScopeExecutionWrite)
+	if err != nil {
 		return result, err
 	}
 	var rejection *rejectionAudit
-	err := s.store.WithTx(ctx, func(tx Tx) error {
+	err = s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
 		}
@@ -133,7 +129,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		if err != nil {
 			return err
 		}
-		key, idem, err := acquire(ctx, tx, principal, operation, requestID, request, now)
+		key, idem, err := acquireForTenant(ctx, tx, principal, resourceTenantID, operation, requestID, request, now)
 		if err != nil {
 			return err
 		}
@@ -143,7 +139,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 		if !idem.Acquired {
 			return conflict("idempotency request is already in progress")
 		}
-		execution, version, err := tx.GetExecutionForUpdate(ctx, principal.TenantID, executionID)
+		execution, version, err := tx.GetExecutionForUpdate(ctx, resourceTenantID, executionID)
 		if err != nil {
 			if domain.CodeOf(err) == "not_found" {
 				return notFound()
@@ -155,7 +151,7 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 			rejection = &rejectionAudit{taskID: execution.TaskID, executionID: execution.ID, actorType: domain.ActorAgent, actorID: principal.AgentVersionID, intent: intent, fromState: string(execution.Status), reason: "not_found"}
 			return notFound()
 		}
-		taskRecord, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		taskRecord, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
 		if err != nil {
 			return err
 		}
@@ -196,23 +192,27 @@ func (s *Service) mutateExecution(ctx context.Context, principal auth.Principal,
 				return conflict("task changed concurrently")
 			}
 		}
-		result = executionEnvelope(execution, now, version+1, nil, TaskEventSummary{}, taskRecord.Constraints)
+		constraints := taskRecord.Constraints
+		if external {
+			constraints = nil
+		}
+		result = executionEnvelope(execution, now, version+1, nil, TaskEventSummary{}, constraints)
+		if external {
+			result.Data.TenantID = ""
+		}
 		if err := appendExecutionEvents(ctx, tx, principal, execution, intent, string(from), string(execution.Status), now); err != nil {
 			return err
 		}
 		return complete(ctx, tx, key, idem.OwnerToken, result)
 	})
 	if err != nil && rejection != nil {
-		auditRejection(ctx, s.store, principal.TenantID, *rejection)
+		auditRejection(ctx, s.store, resourceTenantID, *rejection)
 	}
 	return result, err
 }
 
 func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, query GetExecution) (Envelope[ExecutionView], error) {
 	var result Envelope[ExecutionView]
-	if _, err := s.resources.Tenant(principal); err != nil {
-		return result, err
-	}
 	var requireOwner bool
 	if s.policy.Require(principal, "tasks:read") == nil {
 		requireOwner = false
@@ -221,7 +221,11 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 	} else {
 		return result, domain.ErrForbidden
 	}
-	err := s.store.WithTx(ctx, func(tx Tx) error {
+	resourceTenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceExecution, query.ExecutionID, participationdomain.ScopeExecutionRead)
+	if err != nil {
+		return result, err
+	}
+	err = s.store.WithTx(ctx, func(tx Tx) error {
 		if err := s.requireLiveAgent(ctx, tx, principal); err != nil {
 			return err
 		}
@@ -232,7 +236,7 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 		if err != nil {
 			return err
 		}
-		execution, version, err := tx.GetExecution(ctx, principal.TenantID, query.ExecutionID)
+		execution, version, err := tx.GetExecution(ctx, resourceTenantID, query.ExecutionID)
 		if err != nil {
 			if domain.CodeOf(err) == "not_found" {
 				return notFound()
@@ -242,7 +246,7 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 		if requireOwner && execution.AgentID != principal.AgentVersionID {
 			return notFound()
 		}
-		taskRecord, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		taskRecord, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
 		var constraints []byte
 		if err != nil {
 			if domain.CodeOf(err) != "not_found" {
@@ -251,15 +255,24 @@ func (s *Service) GetExecution(ctx context.Context, principal auth.Principal, qu
 		} else {
 			constraints = taskRecord.Constraints
 		}
-		usage, err := tx.GetExecutionUsage(ctx, principal.TenantID, query.ExecutionID)
-		if err != nil {
-			return err
-		}
-		latestEvent, err := tx.GetLatestExecutionEvent(ctx, principal.TenantID, query.ExecutionID)
-		if err != nil {
-			return err
+		var usage *UsageView
+		var latestEvent TaskEventSummary
+		if !external {
+			usage, err = tx.GetExecutionUsage(ctx, resourceTenantID, query.ExecutionID)
+			if err != nil {
+				return err
+			}
+			latestEvent, err = tx.GetLatestExecutionEvent(ctx, resourceTenantID, query.ExecutionID)
+			if err != nil {
+				return err
+			}
+		} else {
+			constraints = nil
 		}
 		result = executionEnvelope(execution, now, version, usage, latestEvent, constraints)
+		if external {
+			result.Data.TenantID = ""
+		}
 		return nil
 	})
 	return result, err

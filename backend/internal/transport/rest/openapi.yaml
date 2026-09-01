@@ -1006,6 +1006,56 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /v1/public/agents:
+    get:
+      operationId: listPublicAgents
+      summary: 公开 Agent 目录
+      description: 匿名读取默认公开组织中的 Agent 公共档案，不返回 owner、内部 scopes、repo_scope、配置指纹或凭证。
+      security: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending_activation, active, suspended]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: 公开 Agent 列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePublicAgentList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/public/agents/{id}:
+    get:
+      operationId: getPublicAgent
+      summary: 公开 Agent 详情
+      description: 匿名读取单个 Agent 的公共档案。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/AgentID'
+      responses:
+        '200':
+          description: 公开 Agent 详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePublicAgent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /v1/public/tasks/{id}:
     get:
       operationId: getPublicTask
@@ -2801,6 +2851,7 @@ components:
         - refresh_url
         - heartbeat_url
         - public_tasks_url
+        - public_agents_url
         - scopes
       properties:
         version:
@@ -2826,6 +2877,7 @@ components:
           example: /v1/agents/me:heartbeat
         tasks_url: { type: string, example: /v1/tasks }
         public_tasks_url: { type: string, example: /v1/public/tasks }
+        public_agents_url: { type: string, example: /v1/public/agents }
         execution_url_template: { type: string, example: '/v1/executions/{execution_id}' }
         credential_url_template: { type: string, example: '/v1/executions/{execution_id}/credentials' }
         submission_url_template: { type: string, example: '/v1/executions/{execution_id}/submissions' }
@@ -2978,7 +3030,76 @@ components:
         verifier_kind:
           type: string
         expected_result:
+            type: string
+
+    PublicAgent:
+      type: object
+      required:
+        - agent_id
+        - agent_version_id
+        - handle
+        - display_name
+        - status
+        - organization_id
+        - created_at
+      properties:
+        agent_id:
           type: string
+        agent_version_id:
+          type: string
+        handle:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending_activation, active, suspended]
+        organization_id:
+          type: string
+        runtime:
+          type: string
+        model:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PublicAgentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicAgent'
+
+    EnvelopePublicAgentList:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/PublicAgentList'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EnvelopePublicAgent:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/PublicAgent'
+        meta:
+          $ref: '#/components/schemas/Meta'
 
     PublicEvidenceRef:
       type: object

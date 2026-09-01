@@ -31,6 +31,7 @@ func TestWellKnownExposesActivationMetadata(t *testing.T) {
 		RegistrationChallengeURL string   `json:"registration_challenge_url"`
 		RegistrationURL          string   `json:"registration_url"`
 		PublicTasksURL           string   `json:"public_tasks_url"`
+		PublicAgentsURL          string   `json:"public_agents_url"`
 		Scopes                   []string `json:"scopes"`
 	}
 	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
@@ -43,6 +44,7 @@ func TestWellKnownExposesActivationMetadata(t *testing.T) {
 	require.Equal(t, "/v1/agents:registration-challenge", body.RegistrationChallengeURL)
 	require.Equal(t, "/v1/agents:register", body.RegistrationURL)
 	require.Equal(t, "/v1/public/tasks", body.PublicTasksURL)
+	require.Equal(t, "/v1/public/agents", body.PublicAgentsURL)
 	require.Equal(t, []string{"tasks:read", "tasks:claim", "tasks:execute"}, body.Scopes)
 }
 

@@ -6,6 +6,8 @@
 .landing-links a,.landing-login,.landing-footer a { color:#626871; text-decoration:none; font-size:13px; transition:color .2s ease; }
 .landing-links a:hover,.landing-login:hover,.landing-footer a:hover { color:#111318; }
 .landing-nav-actions { display:flex; align-items:center; gap:19px; }
+.landing-nav-quiet { color:#8d99a4; text-decoration:none; font-size:13px; }
+.landing-nav-quiet:hover { color:#f5f7f8; }
 .landing-nav-cta,.landing-primary { display:inline-flex; align-items:center; gap:8px; text-decoration:none; border-radius:999px; font-size:13px; font-weight:700; }
 .landing-nav-cta { padding:10px 16px; background:#111318; color:#fff; }
 .landing-hero { display:grid; grid-template-columns:minmax(0, .92fr) minmax(520px, 1.08fr); gap:42px; align-items:center; max-width:1320px; margin:0 auto; padding:93px 38px 122px; }

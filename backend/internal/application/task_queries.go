@@ -13,6 +13,7 @@ import (
 
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 )
 
 const cursorSortVersion = 1
@@ -33,7 +34,7 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 	if err := s.policy.Require(principal, "tasks:read"); err != nil {
 		return result, err
 	}
-	tenantID, err := s.resources.Tenant(principal)
+	tenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceTask, query.TaskID, participationdomain.ScopeTaskRead)
 	if err != nil {
 		return result, err
 	}
@@ -61,6 +62,11 @@ func (s *Service) GetTask(ctx context.Context, principal auth.Principal, query G
 			return err
 		}
 		view = views[0]
+		if external {
+			view.TenantID = ""
+			view.PublisherAgentVersionID = ""
+			view.ClaimedBy = ""
+		}
 		result = Envelope[TaskView]{Data: view, Meta: Meta{ServerTime: now, ResourceVersion: record.StateVersion, PollAfterSeconds: defaultPollAfterSeconds}}
 		return nil
 	})

@@ -43,6 +43,8 @@ import (
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	identitypostgres "agentguild.dev/agentguild/backend/internal/identity/postgres"
+	participationapp "agentguild.dev/agentguild/backend/internal/participation/application"
+	participationpostgres "agentguild.dev/agentguild/backend/internal/participation/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	publictaskapp "agentguild.dev/agentguild/backend/internal/publictask/application"
 	publictaskpostgres "agentguild.dev/agentguild/backend/internal/publictask/postgres"
@@ -82,9 +84,11 @@ func run() error {
 	}
 	mapRepo := syncpostgres.NewMapRepository(pool)
 	store := postgres.NewStore(pool)
+	participationAuthorizer := participationapp.NewAuthorizer(participationpostgres.NewRepository(pool))
 	service, err := application.NewService(store, application.Options{
 		CursorSecret:      []byte(cfg.CursorSecret),
 		IssueSourceLookup: mapRepo,
+		Participation:     participationAuthorizer,
 	})
 	if err != nil {
 		return err
@@ -99,7 +103,7 @@ func run() error {
 		return err
 	}
 
-	gitRuntime, gitAppManager, repositoryOnboarding, err := buildGitRuntime(cfg, pool, service)
+	gitRuntime, gitAppManager, repositoryOnboarding, err := buildGitRuntime(cfg, pool, service, participationAuthorizer)
 	if err != nil {
 		return err
 	}
@@ -138,6 +142,11 @@ func run() error {
 	}
 	if openRegistrationService != nil {
 		restOptions = append(restOptions, resttransport.WithOpenRegistrationService(openRegistrationService))
+		publicAgentService, publicAgentErr := identityapp.NewPublicAgentService(identitypostgres.NewPublicAgentRepository(pool), cfg.OpenAgentOrganizationID)
+		if publicAgentErr != nil {
+			return publicAgentErr
+		}
+		restOptions = append(restOptions, resttransport.WithPublicAgentService(publicAgentService))
 	}
 	if oidcProvider != nil {
 		restOptions = append(restOptions, resttransport.WithOIDCProvider(oidcProvider))
@@ -183,7 +192,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build review integrity checker: %w", err)
 	}
-	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), submissionRepository, diffProvider, validationProvider, reviewapp.Options{Integrity: integrityChecker})
+	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), submissionRepository, diffProvider, validationProvider, reviewapp.Options{
+		Integrity: integrityChecker, Participation: participationAuthorizer,
+	})
 	if err != nil {
 		return err
 	}
@@ -669,7 +680,7 @@ type gitRuntime struct {
 	gitProxy           http.Handler
 }
 
-func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service) (*gitRuntime, gitapp.GitHubAppManager, *gitapp.RepositoryOnboardingService, error) {
+func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service, participationAuthorizer gitapp.ParticipationAuthorizer) (*gitRuntime, gitapp.GitHubAppManager, *gitapp.RepositoryOnboardingService, error) {
 	gitStore := gitpostgres.NewStore(pool)
 	gitAppRepo := gitpostgres.NewGitHubAppRepository(pool)
 	gitAppManager, err := gitapp.NewGitHubAppManagerWithOptions(gitAppRepo, gitapp.GitHubAppManagerOptions{AllowedHosts: cfg.GitHubAllowedHosts})
@@ -729,6 +740,7 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("build submission service: %w", err)
 	}
+	submissionService.SetParticipationAuthorizer(participationAuthorizer)
 	// Enforce the task deadline directly on the submission path, aligned with
 	// the heartbeat guard, instead of relying on the reaper alone.
 	submissionService.SetTaskDeadlineResolver(gitapp.TaskDeadlineResolverFunc(func(ctx context.Context, tenantID, taskID string) (time.Time, error) {

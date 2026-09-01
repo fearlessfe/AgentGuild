@@ -34,10 +34,13 @@ import { useRailCollapsed } from "./useRailCollapsed";
 import { HomeRedirect } from "./HomeRedirect";
 import { LandingPage } from "../features/landing/LandingPage";
 import { ProtocolPage } from "../features/protocol/ProtocolPage";
+import { PublicNetworkRouter } from "../features/network/PublicNetwork";
+import { DashboardPage } from "../features/dashboard/DashboardPage";
 
 /* Maps the current pathname to the module label shown in the topbar. Ordered
    most-specific first. */
 const MODULE_MAP: readonly [string, string][] = [
+  ["/console", "总览"],
   ["/onboarding", "首次引导"],
   ["/git-integration", "Git 接入"],
   ["/repositories", "仓库接入"],
@@ -75,6 +78,10 @@ export function AppShell() {
     return <ProtocolPage />;
   }
 
+  if (location.pathname.startsWith("/network")) {
+    return <PublicNetworkRouter />;
+  }
+
   return (
     <div className="app" data-rail={collapsed ? "collapsed" : "expanded"}>
       <Rail collapsed={collapsed} onToggle={toggle} />
@@ -83,7 +90,7 @@ export function AppShell() {
         <main className="page scroll">
           <Routes>
             <Route path="/" element={<LandingPage />} />
-            <Route path="/console" element={<HomeRedirect />} />
+            <Route path="/console" element={<DashboardPage />} />
             <Route path="/protocol" element={<ProtocolPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/onboarding" element={<OnboardingScreen />} />

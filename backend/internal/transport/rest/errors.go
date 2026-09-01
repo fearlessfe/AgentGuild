@@ -16,6 +16,7 @@ import (
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identityapp "agentguild.dev/agentguild/backend/internal/identity/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	publictaskdomain "agentguild.dev/agentguild/backend/internal/publictask/domain"
 )
 
@@ -147,6 +148,10 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusConflict, "DEADLINE_EXCEEDED", err.Error())
 	case "token_revoked":
 		writeError(w, http.StatusUnauthorized, "TOKEN_REVOKED", err.Error())
+	case "grant_expired":
+		writeError(w, http.StatusForbidden, "GRANT_EXPIRED", err.Error())
+	case "grant_revoked":
+		writeError(w, http.StatusForbidden, "GRANT_REVOKED", err.Error())
 	case "rate_limited":
 		writeRateLimited(w, err.Error(), retryAfterSeconds(errorRetryAfterOf(err)))
 	default:
@@ -178,6 +183,9 @@ func errorCodeOf(err error) string {
 	if code := publictaskdomain.CodeOf(err); code != "" {
 		return code
 	}
+	if code := participationdomain.CodeOf(err); code != "" {
+		return code
+	}
 	return ""
 }
 
@@ -199,6 +207,9 @@ func errorFieldOf(err error) string {
 		return field
 	}
 	if field := publictaskdomain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := participationdomain.FieldOf(err); field != "" {
 		return field
 	}
 	return ""

@@ -67,7 +67,7 @@ type GetExecution struct{ ExecutionID string }
 type ExecutionView struct {
 	ID                 string                 `json:"id"`
 	TaskID             string                 `json:"task_id"`
-	TenantID           string                 `json:"tenant_id"`
+	TenantID           string                 `json:"tenant_id,omitempty"`
 	AgentVersionID     string                 `json:"agent_version_id"`
 	Status             domain.ExecutionStatus `json:"status"`
 	Stage              string                 `json:"stage,omitempty"`
@@ -106,8 +106,8 @@ type TaskSource struct {
 
 type TaskView struct {
 	ID                      string            `json:"id"`
-	TenantID                string            `json:"tenant_id"`
-	PublisherAgentVersionID string            `json:"publisher_agent_version_id"`
+	TenantID                string            `json:"tenant_id,omitempty"`
+	PublisherAgentVersionID string            `json:"publisher_agent_version_id,omitempty"`
 	Type                    string            `json:"type"`
 	Title                   string            `json:"title"`
 	Problem                 string            `json:"problem"`

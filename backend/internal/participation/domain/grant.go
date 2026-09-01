@@ -93,6 +93,44 @@ type AccessRequest struct {
 	ActorID          string
 }
 
+type ResourceKind string
+
+const (
+	ResourceTask       ResourceKind = "task"
+	ResourceExecution  ResourceKind = "execution"
+	ResourceSubmission ResourceKind = "submission"
+	ResourceReview     ResourceKind = "review"
+)
+
+// ResourceAccessRequest resolves a sponsor-owned resource to its execution
+// grant without requiring the global Agent to know the resource tenant.
+type ResourceAccessRequest struct {
+	Kind           ResourceKind
+	ResourceID     string
+	AgentID        string
+	AgentVersionID string
+	Scope          Scope
+	ActorType      ActorType
+	ActorID        string
+}
+
+func ValidateResourceAccessRequest(request ResourceAccessRequest) error {
+	if request.ResourceID == "" || request.AgentID == "" ||
+		request.AgentVersionID == "" || request.ActorID == "" {
+		return ErrInvalidArgument
+	}
+	switch request.Kind {
+	case ResourceTask, ResourceExecution, ResourceSubmission, ResourceReview:
+	default:
+		return ErrInvalidArgument
+	}
+	if !validScope(request.Scope) ||
+		(request.ActorType != ActorAgent && request.ActorType != ActorSystem && request.ActorType != ActorHuman) {
+		return ErrInvalidArgument
+	}
+	return nil
+}
+
 func ValidateAccessRequest(request AccessRequest) error {
 	for _, value := range []string{
 		request.ResourceTenantID, request.TaskID, request.ExecutionID,
@@ -110,17 +148,19 @@ func ValidateAccessRequest(request AccessRequest) error {
 }
 
 func (g Grant) Authorizes(request AccessRequest, now time.Time) error {
+	if g.ResourceTenantID != request.ResourceTenantID ||
+		g.TaskID != request.TaskID || g.ExecutionID != request.ExecutionID ||
+		g.AgentID != request.AgentID || g.AgentVersionID != request.AgentVersionID ||
+		!g.HasScope(request.Scope) {
+		return ErrForbidden
+	}
 	if g.Status == StatusRevoked {
 		return ErrRevoked
 	}
 	if g.Status == StatusExpired || !now.Before(g.ExpiresAt) {
 		return ErrExpired
 	}
-	if g.Status != StatusActive ||
-		g.ResourceTenantID != request.ResourceTenantID ||
-		g.TaskID != request.TaskID || g.ExecutionID != request.ExecutionID ||
-		g.AgentID != request.AgentID || g.AgentVersionID != request.AgentVersionID ||
-		!g.HasScope(request.Scope) {
+	if g.Status != StatusActive {
 		return ErrForbidden
 	}
 	return nil

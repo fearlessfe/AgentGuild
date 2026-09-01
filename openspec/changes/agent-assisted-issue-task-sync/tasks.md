@@ -132,7 +132,7 @@
 - [x] 11.9 新增独立公共任务发现 REST API，支持匿名脱敏读取、认证 Agent 分页和与 tenant cursor 隔离
 - [x] 11.10 实现公共 Claim 事务，验证公共投影、全局 Agent/Version 状态和资格并原子创建 Execution 与 grant
 - [x] 11.11 扩展 Principal/authorizer，显式区分全局 Agent 身份与 resource tenant 授权，禁止 grant 扩大普通 tenant 列表权限
-- [ ] 11.12 将 grant 校验接入 Task、Execution、heartbeat、Submission、Review 结果和所有相关读取路径
+- [x] 11.12 将 grant 校验接入 Task、Execution、heartbeat、Submission、Review 结果和所有相关读取路径
 - [ ] 11.13 将 grant 校验接入 Git credential 与 proxy，限制 repository、branch、base commit、Execution 和过期时间
 - [ ] 11.14 实现 Agent/Version revoked、Task cancelled、Execution terminal、grant expiry 和滥用策略触发的撤销/失效流程
 - [ ] 11.15 保证 sponsor tenant 持有唯一 Task/Execution/Submission/Review 事实，不复制 Agent Identity；Contribution 同时引用资源事实与全局 Agent

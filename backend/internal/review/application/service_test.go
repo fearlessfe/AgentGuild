@@ -13,6 +13,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
@@ -383,6 +384,73 @@ func TestGetReviewAllowsExecutingAgent(t *testing.T) {
 	// Execution.AgentID in the fixture is "agent-v1".
 	_, err := fixture.svc.GetReview(context.Background(), auth.Principal{TenantID: "tenant-1", Type: auth.PrincipalTypeAgent, AgentID: "exec-agent", AgentVersionID: "agent-v1", Scopes: []string{"reviews:read"}}, reviewapp.GetReview{ReviewID: review.ID})
 	require.NoError(t, err)
+}
+
+func TestGlobalAgentGrantReadsReviewDiffAndValidationWithRedaction(t *testing.T) {
+	fixture := newReviewFixture(t)
+	review := seedPendingReview(t, fixture, "tenant-1", "submission-1", "reviewer-1")
+	authorizer := &reviewParticipationAuthorizer{grant: &participationdomain.Grant{
+		ResourceTenantID: "tenant-1", TaskID: "task-submission-1", ExecutionID: "submission-1",
+	}}
+	svc, err := reviewapp.NewService(
+		fixture.store, fixture.submissions, &fakeDiffProvider{data: []reviewapp.FileDiff{{Path: "main.go"}}},
+		fixture.validation, reviewapp.Options{Participation: authorizer},
+	)
+	require.NoError(t, err)
+	fixture.svc = svc
+	fixture.validation.jobView = &gitapp.ValidationJobView{
+		ID: "job-1", TenantID: "tenant-1", SubmissionID: review.SubmissionID,
+		Status: "failed", ConfigVersion: "private-config", ClaimedBy: stringPointer("worker-private"),
+		Steps: []gitapp.StepView{{Step: "test", Status: "failed", LogSummary: "test failed", ResourceUsage: []byte(`{"cpu":1}`)}},
+	}
+	principal := globalReviewPrincipal("reviews:read")
+
+	gotReview, err := fixture.svc.GetReview(context.Background(), principal, reviewapp.GetReview{ReviewID: review.ID})
+	require.NoError(t, err)
+	require.Empty(t, gotReview.Data.TenantID)
+	require.Empty(t, gotReview.Data.ReviewerID)
+	require.Empty(t, gotReview.Data.RubricVersionID)
+	diff, err := fixture.svc.GetSubmissionDiff(context.Background(), principal, reviewapp.GetSubmissionDiff{SubmissionID: review.SubmissionID})
+	require.NoError(t, err)
+	require.Equal(t, "main.go", diff.Data[0].Path)
+	validation, err := fixture.svc.GetSubmissionValidation(context.Background(), principal, reviewapp.GetSubmissionValidation{SubmissionID: review.SubmissionID})
+	require.NoError(t, err)
+	require.Empty(t, validation.Data.TenantID)
+	require.Empty(t, validation.Data.ConfigVersion)
+	require.Nil(t, validation.Data.ClaimedBy)
+	require.Nil(t, validation.Data.Steps[0].ResourceUsage)
+	require.Equal(t, "test failed", validation.Data.Steps[0].LogSummary)
+	require.Equal(t, []participationdomain.Scope{
+		participationdomain.ScopeReviewRead, participationdomain.ScopeReviewRead, participationdomain.ScopeReviewRead,
+	}, authorizer.scopes)
+
+	_, err = fixture.svc.ListReviews(context.Background(), principal, reviewapp.ListReviews{})
+	require.ErrorIs(t, err, domain.ErrForbidden)
+	authorizer.err = participationdomain.ErrForbidden
+	_, err = fixture.svc.GetReview(context.Background(), principal, reviewapp.GetReview{ReviewID: "another-review"})
+	require.ErrorIs(t, err, participationdomain.ErrForbidden)
+}
+
+func TestGlobalAgentSubmitForReviewRequiresExecutionWriteGrant(t *testing.T) {
+	fixture := newReviewFixture(t)
+	seedExecution(t, fixture, "tenant-1", "execution-write", domain.ExecutionRunning)
+	authorizer := &reviewParticipationAuthorizer{grant: &participationdomain.Grant{
+		ResourceTenantID: "tenant-1", TaskID: "task-execution-write", ExecutionID: "execution-write",
+	}}
+	svc, err := reviewapp.NewService(
+		fixture.store, fixture.submissions, &fakeDiffProvider{}, fixture.validation,
+		reviewapp.Options{Participation: authorizer},
+	)
+	require.NoError(t, err)
+
+	got, err := svc.SubmitForReview(context.Background(), globalReviewPrincipal("tasks:execute"), reviewapp.SubmitForReview{
+		RequestID: "submit-review-1", ExecutionID: "execution-write",
+	})
+	require.NoError(t, err)
+	require.Empty(t, got.Data.TenantID)
+	require.Equal(t, domain.ExecutionReviewing, got.Data.Status)
+	require.Equal(t, participationdomain.ScopeExecutionWrite, authorizer.scopes[0])
+	require.Equal(t, domain.ExecutionReviewing, fixture.store.executions[execKey("tenant-1", "execution-write")].Status)
 }
 
 func TestCreateReviewRequiresExecutionReviewing(t *testing.T) {
@@ -772,6 +840,30 @@ func publisherPrincipal(tenantID, versionID string) auth.Principal {
 func reviewerPrincipal(tenantID, reviewerID string) auth.Principal {
 	return auth.Principal{TenantID: tenantID, Type: auth.PrincipalTypeHuman, OwnerID: "user-" + reviewerID}
 }
+
+func globalReviewPrincipal(scopes ...string) auth.Principal {
+	return auth.Principal{
+		SubjectID: auth.AgentSubject("global-agent"), IdentityScope: auth.IdentityScopeGlobal,
+		Type: auth.PrincipalTypeAgent, AgentID: "global-agent", AgentVersionID: "agent-v1",
+		Scopes: scopes,
+	}
+}
+
+type reviewParticipationAuthorizer struct {
+	grant  *participationdomain.Grant
+	err    error
+	scopes []participationdomain.Scope
+}
+
+func (a *reviewParticipationAuthorizer) Authorize(_ context.Context, _ auth.Principal, _ participationdomain.ResourceKind, _ string, scope participationdomain.Scope) (*participationdomain.Grant, error) {
+	a.scopes = append(a.scopes, scope)
+	if a.err != nil {
+		return nil, a.err
+	}
+	return a.grant, nil
+}
+
+func stringPointer(value string) *string { return &value }
 
 // --- memory store ---
 

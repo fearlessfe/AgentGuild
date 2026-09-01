@@ -167,6 +167,10 @@ func (s *Service) CancelTask(ctx context.Context, principal auth.Principal, comm
 }
 
 func acquire(ctx context.Context, tx Tx, principal auth.Principal, operation, requestID string, request any, now time.Time) (IdempotencyKey, *IdempotencyRecord, error) {
+	return acquireForTenant(ctx, tx, principal, principal.TenantID, operation, requestID, request, now)
+}
+
+func acquireForTenant(ctx context.Context, tx Tx, principal auth.Principal, tenantID, operation, requestID string, request any, now time.Time) (IdempotencyKey, *IdempotencyRecord, error) {
 	if requestID == "" {
 		return IdempotencyKey{}, nil, invalid("request_id")
 	}
@@ -174,7 +178,7 @@ func acquire(ctx context.Context, tx Tx, principal auth.Principal, operation, re
 	if err != nil {
 		return IdempotencyKey{}, nil, err
 	}
-	key := IdempotencyKey{TenantID: principal.TenantID, ActorID: principal.AgentVersionID, Operation: operation, RequestID: requestID}
+	key := IdempotencyKey{TenantID: tenantID, ActorID: principal.AgentVersionID, Operation: operation, RequestID: requestID}
 	record, err := tx.AcquireIdempotency(ctx, key, sha256.Sum256(payload), now.Add(idempotencyTTL))
 	return key, record, err
 }

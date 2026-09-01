@@ -18,6 +18,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	"agentguild.dev/agentguild/backend/internal/transport/rest"
@@ -528,6 +529,27 @@ func TestTaskRoutesMapRevokedIdentityToken(t *testing.T) {
 
 	require.Equal(t, http.StatusUnauthorized, res.Code)
 	require.JSONEq(t, `{"error":{"code":"TOKEN_REVOKED","message":"token has been revoked"}}`, res.Body.String())
+}
+
+func TestTaskRoutesMapParticipationGrantTerminalErrors(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		err     error
+		code    string
+		message string
+	}{
+		{name: "expired", err: participationdomain.ErrExpired, code: "GRANT_EXPIRED", message: "task participation grant expired"},
+		{name: "revoked", err: participationdomain.ErrRevoked, code: "GRANT_REVOKED", message: "task participation grant revoked"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			app := &fakeApplication{claimErr: test.err}
+			server := newTestServer(app)
+			res := postJSON(t, server, "/v1/tasks/task-1:claim", `{"request_id":"req-2"}`, "token-agent-2", "Idempotency-Key", "req-2")
+			require.Equal(t, http.StatusForbidden, res.Code)
+			require.Contains(t, res.Body.String(), test.code)
+			require.Contains(t, res.Body.String(), test.message)
+		})
+	}
 }
 
 func TestForbiddenAndNotFoundReturnSameSecureResponseForNonAdmin(t *testing.T) {

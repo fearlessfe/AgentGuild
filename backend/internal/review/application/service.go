@@ -12,19 +12,21 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
 )
 
 // Service orchestrates the code-review lifecycle.
 type Service struct {
-	store       application.Store
-	submissions gitapp.SubmissionRepository
-	policy      Policy
-	allocator   Allocator
-	diff        DiffProvider
-	validation  ValidationProvider
-	integrity   SubmissionIntegrityChecker
-	newID       func() string
+	store         application.Store
+	submissions   gitapp.SubmissionRepository
+	policy        Policy
+	allocator     Allocator
+	diff          DiffProvider
+	validation    ValidationProvider
+	integrity     SubmissionIntegrityChecker
+	participation application.ParticipationAuthorizer
+	newID         func() string
 }
 
 // Options configures a new Service.
@@ -33,6 +35,9 @@ type Options struct {
 	// Integrity optionally verifies the submission commit is still reachable
 	// before review creation and accept decisions. Nil disables the guard.
 	Integrity SubmissionIntegrityChecker
+	// Participation authorizes only a specifically addressed sponsor-owned
+	// resource; it must never be used to implement tenant list operations.
+	Participation application.ParticipationAuthorizer
 }
 
 // NewService creates a review application service.
@@ -53,14 +58,15 @@ func NewService(store application.Store, submissions gitapp.SubmissionRepository
 		options.NewID = randomID
 	}
 	return &Service{
-		store:       store,
-		submissions: submissions,
-		policy:      Policy{},
-		allocator:   Allocator{},
-		diff:        diff,
-		validation:  validation,
-		integrity:   options.Integrity,
-		newID:       options.NewID,
+		store:         store,
+		submissions:   submissions,
+		policy:        Policy{},
+		allocator:     Allocator{},
+		diff:          diff,
+		validation:    validation,
+		integrity:     options.Integrity,
+		participation: options.Participation,
+		newID:         options.NewID,
 	}, nil
 }
 
@@ -117,10 +123,10 @@ type SubmitForReview struct {
 // ReviewView is the serialized representation of a review.
 type ReviewView struct {
 	ID              string                     `json:"id"`
-	TenantID        string                     `json:"tenant_id"`
+	TenantID        string                     `json:"tenant_id,omitempty"`
 	SubmissionID    string                     `json:"submission_id"`
-	ReviewerID      string                     `json:"reviewer_id"`
-	RubricVersionID string                     `json:"rubric_version_id"`
+	ReviewerID      string                     `json:"reviewer_id,omitempty"`
+	RubricVersionID string                     `json:"rubric_version_id,omitempty"`
 	Capability      string                     `json:"capability"`
 	RubricScores    []reviewdomain.RubricScore `json:"rubric_scores"`
 	Summary         string                     `json:"summary,omitempty"`
@@ -199,7 +205,7 @@ type RubricView struct {
 // CommentView is the serialized representation of a line comment.
 type CommentView struct {
 	ID              string    `json:"id"`
-	TenantID        string    `json:"tenant_id"`
+	TenantID        string    `json:"tenant_id,omitempty"`
 	ReviewID        string    `json:"review_id"`
 	SubmissionID    string    `json:"submission_id"`
 	FilePath        string    `json:"file_path"`
@@ -480,51 +486,56 @@ func (s *Service) GetActiveRubric(ctx context.Context, principal auth.Principal)
 // GetReview returns a review by ID.
 func (s *Service) GetReview(ctx context.Context, principal auth.Principal, query GetReview) (application.Envelope[ReviewView], error) {
 	var result application.Envelope[ReviewView]
-	if err := requireTenant(principal); err != nil {
+	resourceTenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceReview, query.ReviewID, participationdomain.ScopeReviewRead, "reviews:read")
+	if err != nil {
 		return result, err
 	}
 
-	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+	err = s.store.WithTx(ctx, func(tx application.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
 		}
 
-		review, err := tx.Reviews().GetByID(ctx, principal.TenantID, query.ReviewID)
+		review, err := tx.Reviews().GetByID(ctx, resourceTenantID, query.ReviewID)
 		if err != nil {
 			return err
 		}
 
-		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, review.SubmissionID)
+		execution, err := s.executionForSubmission(ctx, tx, resourceTenantID, review.SubmissionID)
 		if err != nil {
 			return err
 		}
 
-		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
-		if err != nil {
-			return err
+		if external {
+			if execution.AgentID != principal.AgentVersionID {
+				return domain.ErrForbidden
+			}
+		} else {
+			task, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
+			if err != nil {
+				return err
+			}
+			reviewer, err := tx.Reviewers().GetByID(ctx, resourceTenantID, review.ReviewerID)
+			if err != nil {
+				return err
+			}
+			if err := s.policy.CanViewReview(ctx, principal, reviewRecord(review, reviewer), taskSummary(task, execution)); err != nil {
+				return err
+			}
 		}
 
-		reviewer, err := tx.Reviewers().GetByID(ctx, principal.TenantID, review.ReviewerID)
-		if err != nil {
-			return err
-		}
-
-		if err := s.policy.CanViewReview(ctx, principal, reviewRecord(review, reviewer), taskSummary(task, execution)); err != nil {
-			return err
-		}
-
-		comments, err := tx.LineComments().ListByReview(ctx, principal.TenantID, review.ID)
+		comments, err := tx.LineComments().ListByReview(ctx, resourceTenantID, review.ID)
 		if err != nil {
 			return err
 		}
 		commentViews := make([]CommentView, len(comments))
 		for i := range comments {
-			commentViews[i] = commentView(&comments[i])
+			commentViews[i] = commentViewForAccess(&comments[i], external)
 		}
 
 		result = application.Envelope[ReviewView]{
-			Data: reviewView(review, commentViews),
+			Data: reviewViewForAccess(review, commentViews, external),
 			Meta: application.Meta{ServerTime: now},
 		}
 		return nil
@@ -620,31 +631,37 @@ func taskSummary(task *application.TaskRecord, execution *domain.Execution) appl
 // The caller must be allowed to view the associated review.
 func (s *Service) GetSubmissionDiff(ctx context.Context, principal auth.Principal, query GetSubmissionDiff) (application.Envelope[[]FileDiff], error) {
 	var result application.Envelope[[]FileDiff]
-	if err := requireTenant(principal); err != nil {
+	resourceTenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceSubmission, query.SubmissionID, participationdomain.ScopeReviewRead, "reviews:read")
+	if err != nil {
 		return result, err
 	}
 
-	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+	err = s.store.WithTx(ctx, func(tx application.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
 		}
 
-		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, query.SubmissionID)
+		execution, err := s.executionForSubmission(ctx, tx, resourceTenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
 
-		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
-		if err != nil {
-			return err
+		if external {
+			if execution.AgentID != principal.AgentVersionID {
+				return domain.ErrForbidden
+			}
+		} else {
+			task, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
+			if err != nil {
+				return err
+			}
+			if err := s.canViewSubmissionDiff(ctx, tx, principal, query.SubmissionID, task, execution); err != nil {
+				return err
+			}
 		}
 
-		if err := s.canViewSubmissionDiff(ctx, tx, principal, query.SubmissionID, task, execution); err != nil {
-			return err
-		}
-
-		diff, err := s.diff.GetDiff(ctx, principal.TenantID, query.SubmissionID)
+		diff, err := s.diff.GetDiff(ctx, resourceTenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
@@ -683,37 +700,43 @@ func (s *Service) canViewSubmissionDiff(ctx context.Context, tx application.Tx, 
 // submission diff viewer.
 func (s *Service) GetSubmissionValidation(ctx context.Context, principal auth.Principal, query GetSubmissionValidation) (application.Envelope[gitapp.ValidationJobView], error) {
 	var result application.Envelope[gitapp.ValidationJobView]
-	if err := requireTenant(principal); err != nil {
+	resourceTenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceSubmission, query.SubmissionID, participationdomain.ScopeReviewRead, "reviews:read")
+	if err != nil {
 		return result, err
 	}
 
-	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+	err = s.store.WithTx(ctx, func(tx application.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
 		}
 
-		execution, err := s.executionForSubmission(ctx, tx, principal.TenantID, query.SubmissionID)
+		execution, err := s.executionForSubmission(ctx, tx, resourceTenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
 
-		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
-		if err != nil {
-			return err
+		if external {
+			if execution.AgentID != principal.AgentVersionID {
+				return domain.ErrForbidden
+			}
+		} else {
+			task, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
+			if err != nil {
+				return err
+			}
+			if err := s.canViewSubmissionDiff(ctx, tx, principal, query.SubmissionID, task, execution); err != nil {
+				return err
+			}
 		}
 
-		if err := s.canViewSubmissionDiff(ctx, tx, principal, query.SubmissionID, task, execution); err != nil {
-			return err
-		}
-
-		view, err := s.validation.GetValidationJobView(ctx, principal.TenantID, query.SubmissionID)
+		view, err := s.validation.GetValidationJobView(ctx, resourceTenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
 
 		result = application.Envelope[gitapp.ValidationJobView]{
-			Data: *view,
+			Data: validationViewForAccess(*view, external),
 			Meta: application.Meta{ServerTime: now},
 		}
 		return nil
@@ -725,17 +748,18 @@ func (s *Service) GetSubmissionValidation(ctx context.Context, principal auth.Pr
 // TODO: replace with git-delivery-and-validation integration
 func (s *Service) SubmitForReview(ctx context.Context, principal auth.Principal, cmd SubmitForReview) (application.Envelope[application.ExecutionView], error) {
 	var result application.Envelope[application.ExecutionView]
-	if err := requireTenant(principal); err != nil {
+	resourceTenantID, external, err := s.authorizeResource(ctx, principal, participationdomain.ResourceExecution, cmd.ExecutionID, participationdomain.ScopeExecutionWrite, "tasks:execute")
+	if err != nil {
 		return result, err
 	}
 
-	err := s.store.WithTx(ctx, func(tx application.Tx) error {
+	err = s.store.WithTx(ctx, func(tx application.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
 		}
 
-		key, record, err := acquireReview(ctx, tx, principal, "execution_submit_for_review", cmd.RequestID, cmd, now)
+		key, record, err := acquireReviewForTenant(ctx, tx, principal, resourceTenantID, "execution_submit_for_review", cmd.RequestID, cmd, now)
 		if err != nil {
 			return err
 		}
@@ -746,17 +770,24 @@ func (s *Service) SubmitForReview(ctx context.Context, principal auth.Principal,
 			return &domain.Error{Code: "state_conflict", Message: "idempotency request is already in progress"}
 		}
 
-		execution, version, err := tx.GetExecutionForUpdate(ctx, principal.TenantID, cmd.ExecutionID)
+		execution, version, err := tx.GetExecutionForUpdate(ctx, resourceTenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
 		}
 
-		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		task, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
 		if err != nil {
 			return err
 		}
 
-		if err := s.policy.CanSubmitForReview(principal, taskSummary(task, execution), execution); err != nil {
+		if external {
+			if execution.AgentID != principal.AgentVersionID {
+				return domain.ErrForbidden
+			}
+			if execution.Lease.HardExpiry.IsZero() || !now.Before(execution.Lease.HardExpiry) {
+				return domain.ErrLeaseExpired
+			}
+		} else if err := s.policy.CanSubmitForReview(principal, taskSummary(task, execution), execution); err != nil {
 			return err
 		}
 
@@ -788,6 +819,9 @@ func (s *Service) SubmitForReview(ctx context.Context, principal auth.Principal,
 			},
 			Meta: application.Meta{ServerTime: now},
 		}
+		if external {
+			result.Data.TenantID = ""
+		}
 		return completeReview(ctx, tx, key, record.OwnerToken, result)
 	})
 	return result, err
@@ -796,6 +830,10 @@ func (s *Service) SubmitForReview(ctx context.Context, principal auth.Principal,
 const reviewIdempotencyTTL = 24 * time.Hour
 
 func acquireReview(ctx context.Context, tx application.Tx, principal auth.Principal, operation, requestID string, request any, now time.Time) (application.IdempotencyKey, *application.IdempotencyRecord, error) {
+	return acquireReviewForTenant(ctx, tx, principal, principal.TenantID, operation, requestID, request, now)
+}
+
+func acquireReviewForTenant(ctx context.Context, tx application.Tx, principal auth.Principal, tenantID, operation, requestID string, request any, now time.Time) (application.IdempotencyKey, *application.IdempotencyRecord, error) {
 	if requestID == "" {
 		return application.IdempotencyKey{}, nil, invalid("request_id")
 	}
@@ -803,7 +841,7 @@ func acquireReview(ctx context.Context, tx application.Tx, principal auth.Princi
 	if err != nil {
 		return application.IdempotencyKey{}, nil, err
 	}
-	key := application.IdempotencyKey{TenantID: principal.TenantID, ActorID: actorID(principal), Operation: operation, RequestID: requestID}
+	key := application.IdempotencyKey{TenantID: tenantID, ActorID: actorID(principal), Operation: operation, RequestID: requestID}
 	record, err := tx.AcquireIdempotency(ctx, key, sha256.Sum256(payload), now.Add(reviewIdempotencyTTL))
 	return key, record, err
 }
@@ -858,6 +896,57 @@ func commentView(comment *reviewdomain.LineComment) CommentView {
 		Text:            comment.Text,
 		CreatedAt:       comment.CreatedAt,
 	}
+}
+
+func reviewViewForAccess(review *reviewdomain.Review, comments []CommentView, external bool) ReviewView {
+	view := reviewView(review, comments)
+	if external {
+		view.TenantID = ""
+		view.ReviewerID = ""
+		view.RubricVersionID = ""
+	}
+	return view
+}
+
+func commentViewForAccess(comment *reviewdomain.LineComment, external bool) CommentView {
+	view := commentView(comment)
+	if external {
+		view.TenantID = ""
+	}
+	return view
+}
+
+func validationViewForAccess(view gitapp.ValidationJobView, external bool) gitapp.ValidationJobView {
+	if !external {
+		return view
+	}
+	view.TenantID = ""
+	view.ClaimedBy = nil
+	view.ConfigVersion = ""
+	for index := range view.Steps {
+		view.Steps[index].ResourceUsage = nil
+	}
+	return view
+}
+
+func (s *Service) authorizeResource(ctx context.Context, principal auth.Principal, kind participationdomain.ResourceKind, resourceID string, grantScope participationdomain.Scope, oauthScope string) (string, bool, error) {
+	if !principal.IsGlobalAgent() {
+		if err := requireTenant(principal); err != nil {
+			return "", false, err
+		}
+		return principal.TenantID, false, nil
+	}
+	if err := requireScope(principal, oauthScope); err != nil {
+		return "", true, err
+	}
+	if s.participation == nil {
+		return "", true, domain.ErrForbidden
+	}
+	grant, err := s.participation.Authorize(ctx, principal, kind, resourceID, grantScope)
+	if err != nil {
+		return "", true, err
+	}
+	return grant.ResourceTenantID, true, nil
 }
 
 func rubricView(rubric *reviewdomain.RubricVersion) RubricView {

@@ -13,6 +13,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 )
 
@@ -299,6 +300,95 @@ func TestTenantTaskListRejectsGlobalAgentEvenWithReadScope(t *testing.T) {
 	assertDomainError(t, err, "forbidden", "")
 }
 
+func TestGlobalAgentGrantReadsTargetTaskAndExecutionWithoutTenantMetadata(t *testing.T) {
+	tx := newFakeTx()
+	tx.seed(application.TaskRecord{
+		ID: "task", TenantID: "sponsor", PublisherAgentVersionID: "publisher-version",
+		Status: domain.TaskInProgress, ClaimedBy: "global-version", ActiveExecutionID: "execution",
+		Constraints: []byte(`["repo:owner/repo"]`), Requirements: []byte(`["tests"]`),
+		Deadline: fixtureNow.Add(time.Hour),
+	})
+	tx.executions["execution"] = &domain.Execution{
+		ID: "execution", TaskID: "task", TenantID: "sponsor", AgentID: "global-version",
+		Status: domain.ExecutionRunning, Stage: "testing", Progress: 0.5,
+		Lease: domain.Lease{Generation: 2, SoftExpiry: fixtureNow.Add(time.Minute), HardExpiry: fixtureNow.Add(time.Hour)},
+	}
+	tx.seedLiveAgent("", "global-agent", identitydomain.AgentActive, "global-version")
+	authorizer := &recordingParticipationAuthorizer{grant: &participationdomain.Grant{
+		ResourceTenantID: "sponsor", TaskID: "task", ExecutionID: "execution",
+		AgentID: "global-agent", AgentVersionID: "global-version",
+	}}
+	svc, err := application.NewService(&fakeStore{tx: tx}, application.Options{
+		CursorSecret: []byte("01234567890123456789012345678901"), Participation: authorizer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := globalPrincipal("tasks:read")
+
+	task, err := svc.GetTask(context.Background(), principal, application.GetTask{TaskID: "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Data.TenantID != "" || task.Data.PublisherAgentVersionID != "" || task.Data.ClaimedBy != "" {
+		t.Fatalf("global task leaked sponsor metadata: %#v", task.Data)
+	}
+	execution, err := svc.GetExecution(context.Background(), principal, application.GetExecution{ExecutionID: "execution"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Data.TenantID != "" || execution.Data.Cost != nil || execution.Data.AuditSummary != "" || len(execution.Data.TaskConstraints) != 0 {
+		t.Fatalf("global execution leaked sponsor metadata: %#v", execution.Data)
+	}
+	if len(authorizer.calls) != 2 || authorizer.calls[0].scope != participationdomain.ScopeTaskRead || authorizer.calls[1].scope != participationdomain.ScopeExecutionRead {
+		t.Fatalf("authorization calls=%#v", authorizer.calls)
+	}
+	_, err = svc.ListTasks(context.Background(), principal, application.ListTasks{})
+	assertDomainError(t, err, "forbidden", "")
+}
+
+func TestGlobalAgentHeartbeatRequiresExecutionWriteGrant(t *testing.T) {
+	tx := newFakeTx()
+	tx.seed(application.TaskRecord{ID: "task", TenantID: "sponsor", Status: domain.TaskInProgress, Deadline: fixtureNow.Add(time.Hour)})
+	tx.executions["execution"] = &domain.Execution{
+		ID: "execution", TaskID: "task", TenantID: "sponsor", AgentID: "global-version",
+		Status: domain.ExecutionRunning,
+		Lease:  domain.Lease{Generation: 1, SoftExpiry: fixtureNow.Add(time.Minute), HardExpiry: fixtureNow.Add(time.Hour)},
+	}
+	tx.seedLiveAgent("", "global-agent", identitydomain.AgentActive, "global-version")
+	authorizer := &recordingParticipationAuthorizer{grant: &participationdomain.Grant{ResourceTenantID: "sponsor", TaskID: "task", ExecutionID: "execution"}}
+	svc, err := application.NewService(&fakeStore{tx: tx}, application.Options{
+		CursorSecret: []byte("01234567890123456789012345678901"), Participation: authorizer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage := "running tests"
+	got, err := svc.HeartbeatExecution(context.Background(), globalPrincipal("tasks:execute"), application.HeartbeatExecution{
+		RequestID: "heartbeat-1", ExecutionID: "execution", LeaseGeneration: 1, Stage: &stage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Data.TenantID != "" || got.Data.Stage != stage || authorizer.calls[0].scope != participationdomain.ScopeExecutionWrite {
+		t.Fatalf("heartbeat=%#v calls=%#v", got.Data, authorizer.calls)
+	}
+
+	denied := &recordingParticipationAuthorizer{err: participationdomain.ErrForbidden}
+	deniedSvc, err := application.NewService(&fakeStore{tx: tx}, application.Options{
+		CursorSecret: []byte("01234567890123456789012345678901"), Participation: denied,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = deniedSvc.HeartbeatExecution(context.Background(), globalPrincipal("tasks:execute"), application.HeartbeatExecution{
+		RequestID: "heartbeat-2", ExecutionID: "execution", LeaseGeneration: got.Data.LeaseGeneration,
+	})
+	if !errors.Is(err, participationdomain.ErrForbidden) {
+		t.Fatalf("heartbeat error=%v, want participation forbidden", err)
+	}
+}
+
 func TestGetExecutionIncludesUsageAndAuditSummary(t *testing.T) {
 	svc, tx := newServiceFixture()
 	tx.seed(application.TaskRecord{ID: "task", TenantID: "tenant", PublisherAgentVersionID: "publisher", Status: domain.TaskInProgress, ActiveExecutionID: "execution", Deadline: fixtureNow.Add(time.Hour)})
@@ -436,6 +526,34 @@ func TestCorruptTaskJSONIsReturnedAsDataIntegrityError(t *testing.T) {
 
 func principal(tenant, agentVersion string, scopes ...string) auth.Principal {
 	return auth.Principal{TenantID: tenant, AgentID: "agent", AgentVersionID: agentVersion, Scopes: scopes}
+}
+
+func globalPrincipal(scopes ...string) auth.Principal {
+	return auth.Principal{
+		SubjectID: auth.AgentSubject("global-agent"), IdentityScope: auth.IdentityScopeGlobal,
+		Type: auth.PrincipalTypeAgent, AgentID: "global-agent", AgentVersionID: "global-version",
+		Scopes: scopes,
+	}
+}
+
+type participationCall struct {
+	kind       participationdomain.ResourceKind
+	resourceID string
+	scope      participationdomain.Scope
+}
+
+type recordingParticipationAuthorizer struct {
+	grant *participationdomain.Grant
+	err   error
+	calls []participationCall
+}
+
+func (a *recordingParticipationAuthorizer) Authorize(_ context.Context, _ auth.Principal, kind participationdomain.ResourceKind, resourceID string, scope participationdomain.Scope) (*participationdomain.Grant, error) {
+	a.calls = append(a.calls, participationCall{kind: kind, resourceID: resourceID, scope: scope})
+	if a.err != nil {
+		return nil, a.err
+	}
+	return a.grant, nil
 }
 
 func newServiceFixture() (*application.Service, *fakeTx) {

@@ -9,6 +9,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	"agentguild.dev/agentguild/backend/internal/ratelimit"
 )
 
@@ -18,6 +19,11 @@ type Options struct {
 	NewID             func() string
 	RateLimiter       ratelimit.RateLimiter
 	IssueSourceLookup IssueSourceLookup
+	Participation     ParticipationAuthorizer
+}
+
+type ParticipationAuthorizer interface {
+	Authorize(context.Context, auth.Principal, participationdomain.ResourceKind, string, participationdomain.Scope) (*participationdomain.Grant, error)
 }
 
 type Service struct {
@@ -29,6 +35,7 @@ type Service struct {
 	newID             func() string
 	rateLimiter       ratelimit.RateLimiter
 	issueSourceLookup IssueSourceLookup
+	participation     ParticipationAuthorizer
 }
 
 func NewService(store Store, options Options) (*Service, error) {
@@ -51,7 +58,23 @@ func NewService(store Store, options Options) (*Service, error) {
 		newID:             options.NewID,
 		rateLimiter:       options.RateLimiter,
 		issueSourceLookup: options.IssueSourceLookup,
+		participation:     options.Participation,
 	}, nil
+}
+
+func (s *Service) authorizeResource(ctx context.Context, principal auth.Principal, kind participationdomain.ResourceKind, resourceID string, scope participationdomain.Scope) (string, bool, error) {
+	if principal.IsGlobalAgent() {
+		if s.participation == nil {
+			return "", true, domain.ErrForbidden
+		}
+		grant, err := s.participation.Authorize(ctx, principal, kind, resourceID, scope)
+		if err != nil {
+			return "", true, err
+		}
+		return grant.ResourceTenantID, true, nil
+	}
+	tenantID, err := s.resources.Tenant(principal)
+	return tenantID, false, err
 }
 
 func randomID() string {

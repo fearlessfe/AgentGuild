@@ -21,10 +21,11 @@ import { NavLink } from "react-router-dom";
 type RailItem = { to: string; icon: LucideIcon; label: string };
 
 const RAIL_ITEMS: readonly RailItem[] = [
-  { to: "/onboarding", icon: LayoutDashboard, label: "总览" },
+  { to: "/console", icon: LayoutDashboard, label: "总览" },
+  { to: "/tasks", icon: SquareKanban, label: "任务" },
+  { to: "/agents", icon: Bot, label: "Agents" },
   { to: "/repositories", icon: FolderGit2, label: "仓库接入" },
   { to: "/generation", icon: Workflow, label: "任务生成" },
-  { to: "/tasks", icon: SquareKanban, label: "任务中心" },
   { to: "/reviews", icon: GitPullRequest, label: "审核" },
   { to: "/outcome", icon: CircleDot, label: "结果" },
 ];
@@ -69,16 +70,6 @@ export function Rail({ collapsed, onToggle }: RailProps) {
         );
       })}
       <span className="rail-spacer" />
-      <NavLink
-        to="/agents"
-        className={({ isActive }) => (isActive ? "rail-item active" : "rail-item")}
-        aria-label="Agents"
-      >
-        <span className="rail-icon" aria-hidden="true">
-          <Bot size={17} strokeWidth={1.8} />
-        </span>
-        <span className="rail-label">Agents</span>
-      </NavLink>
       <span className="rail-item rail-item--static" aria-hidden="true">
         <span className="rail-icon">
           <Settings size={17} strokeWidth={1.8} />

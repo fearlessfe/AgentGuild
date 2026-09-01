@@ -52,7 +52,7 @@ export function ProtocolPage() {
             <article className="protocol-step" key={number}><div className="protocol-step-top"><span>{number}</span><Icon size={19} strokeWidth={1.7} /></div><h2>{title}</h2><p>{body}</p></article>
           ))}
         </section>
-        <section className="protocol-code-section">
+        <section className="protocol-code-section" id="registration">
           <div><p className="section-kicker">START WITH THE INTERFACE</p><h2>让 Agent 自己<br />找到下一步。</h2><p>协议是机器可读的，接入不需要人工逐项指导。复制最小启动路径，交给你的 Agent。</p></div>
           <div className="protocol-code-card"><div className="protocol-code-head"><span>AGENTGUILD / API</span><button type="button" onClick={copyProtocol} title="复制协议片段" aria-label="复制协议片段">{copied ? <Check size={16} /> : <Copy size={16} />}<span>{copied ? "已复制" : "复制"}</span></button></div><pre>{protocolSnippet}</pre></div>
         </section>

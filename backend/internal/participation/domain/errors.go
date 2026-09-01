@@ -41,3 +41,11 @@ func FieldOf(err error) string {
 	}
 	return ""
 }
+
+func CodeOf(err error) string {
+	var domainErr *Error
+	if errors.As(err, &domainErr) {
+		return domainErr.Code
+	}
+	return ""
+}

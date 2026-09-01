@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 )
 
 // AuthorizeCredential binds a Git credential request to the persisted task
@@ -69,16 +71,37 @@ func (s *Service) AuthorizeCredential(ctx context.Context, principal gitapp.Prin
 // AuthorizeSubmission binds a submission to the current Agent Version's live
 // running execution and derives task/repository/path constraints server-side.
 func (s *Service) AuthorizeSubmission(ctx context.Context, principal gitapp.Principal, cmd gitapp.CreateSubmission, now time.Time) (gitapp.SubmissionGrant, error) {
+	resourceTenantID := principal.TenantID
+	external := principal.IsGlobalAgent()
+	resourcePrincipal := authPrincipalFromGit(principal)
+	if external {
+		if s.participation == nil {
+			return gitapp.SubmissionGrant{}, domain.ErrForbidden
+		}
+		grant, err := s.participation.Authorize(ctx, resourcePrincipal, participationdomain.ResourceExecution, cmd.ExecutionID, participationdomain.ScopeSubmissionCreate)
+		if err != nil {
+			return gitapp.SubmissionGrant{}, err
+		}
+		resourceTenantID = grant.ResourceTenantID
+	}
+	if resourceTenantID == "" {
+		return gitapp.SubmissionGrant{}, domain.ErrForbidden
+	}
 	var taskID, executionTenant, executionAgentVersion string
 	var status domain.ExecutionStatus
 	var hardExpiry time.Time
 	var rawConstraints []byte
 	err := s.store.WithTx(ctx, func(tx Tx) error {
-		execution, _, err := tx.GetExecution(ctx, principal.TenantID, cmd.ExecutionID)
+		if external {
+			if err := tx.RequireLiveAgent(ctx, resourcePrincipal); err != nil {
+				return err
+			}
+		}
+		execution, _, err := tx.GetExecution(ctx, resourceTenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
 		}
-		task, err := tx.GetTask(ctx, principal.TenantID, execution.TaskID)
+		task, err := tx.GetTask(ctx, resourceTenantID, execution.TaskID)
 		if err != nil {
 			return err
 		}
@@ -93,7 +116,7 @@ func (s *Service) AuthorizeSubmission(ctx context.Context, principal gitapp.Prin
 	if err != nil {
 		return gitapp.SubmissionGrant{}, err
 	}
-	if executionTenant != principal.TenantID || executionAgentVersion != principal.AgentVersionID {
+	if executionTenant != resourceTenantID || executionAgentVersion != principal.AgentVersionID {
 		return gitapp.SubmissionGrant{}, notFound()
 	}
 	switch status {
@@ -112,7 +135,7 @@ func (s *Service) AuthorizeSubmission(ctx context.Context, principal gitapp.Prin
 		return gitapp.SubmissionGrant{}, domain.ErrForbidden
 	}
 	allowed, forbidden := pathConstraints(rawConstraints)
-	repo, constrainedBase, err := s.credentialTaskBinding(ctx, principal.TenantID, taskID, rawConstraints)
+	repo, constrainedBase, err := s.credentialTaskBinding(ctx, resourceTenantID, taskID, rawConstraints)
 	if err != nil {
 		return gitapp.SubmissionGrant{}, err
 	}
@@ -123,9 +146,27 @@ func (s *Service) AuthorizeSubmission(ctx context.Context, principal gitapp.Prin
 		return gitapp.SubmissionGrant{}, domain.ErrForbidden
 	}
 	return gitapp.SubmissionGrant{
+		ResourceTenantID: resourceTenantID, External: external,
 		TaskID: taskID, Repo: repo, BaseCommit: constrainedBase,
 		AllowedPaths: allowed, ForbiddenPaths: forbidden,
 	}, nil
+}
+
+func authPrincipalFromGit(principal gitapp.Principal) auth.Principal {
+	principalType := ""
+	if principal.AgentID != "" {
+		principalType = auth.PrincipalTypeAgent
+	} else if principal.OwnerID != "" {
+		principalType = auth.PrincipalTypeHuman
+	}
+	return auth.Principal{
+		SubjectID: principal.SubjectID, IdentityScope: principal.IdentityScope,
+		TenantID: principal.TenantID, Type: principalType,
+		OwnerID: principal.OwnerID, OwnerEmail: principal.OwnerEmail,
+		AgentID: principal.AgentID, AgentVersionID: principal.AgentVersionID,
+		Scopes:    append([]string(nil), principal.Scopes...),
+		RepoScope: append([]string(nil), principal.RepoScope...), IsAdmin: principal.IsAdmin,
+	}
 }
 
 func (s *Service) credentialTaskBinding(ctx context.Context, tenantID, taskID string, rawConstraints []byte) (string, string, error) {

@@ -43,6 +43,9 @@ func TestGrantExpiryRenewalAndRevocation(t *testing.T) {
 	require.NoError(t, grant.Authorizes(accessRequest(), now.Add(90*time.Minute)))
 	require.NoError(t, grant.Revoke("governor", "abuse", now.Add(100*time.Minute)))
 	require.ErrorIs(t, grant.Authorizes(accessRequest(), now.Add(101*time.Minute)), domain.ErrRevoked)
+	wrongAgent := accessRequest()
+	wrongAgent.AgentID = "other-agent"
+	require.ErrorIs(t, grant.Authorizes(wrongAgent, now.Add(101*time.Minute)), domain.ErrForbidden)
 }
 
 func TestGrantNormalizesAndRejectsScopes(t *testing.T) {

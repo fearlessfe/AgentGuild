@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 )
 
 // GitHubAppService resolves per-tenant GitHub App configuration into drivers.
@@ -229,22 +231,36 @@ type IssueCredentialResponse struct {
 
 // SubmissionService creates and queries code submissions.
 type SubmissionService struct {
-	store      Store
-	verifier   *CommitVerifier
-	notifier   ExecutionNotifier
-	authorizer SubmissionAuthorizer
-	deadlines  TaskDeadlineResolver
-	newID      func() string
+	store         Store
+	verifier      *CommitVerifier
+	notifier      ExecutionNotifier
+	authorizer    SubmissionAuthorizer
+	participation ParticipationAuthorizer
+	deadlines     TaskDeadlineResolver
+	newID         func() string
+}
+
+// ParticipationAuthorizer resolves a single sponsor-owned resource through a
+// server-side task participation grant. It never grants tenant list access.
+type ParticipationAuthorizer interface {
+	Authorize(context.Context, auth.Principal, participationdomain.ResourceKind, string, participationdomain.Scope) (*participationdomain.Grant, error)
+}
+
+// SetParticipationAuthorizer wires cross-tenant reads after service construction.
+func (s *SubmissionService) SetParticipationAuthorizer(authorizer ParticipationAuthorizer) {
+	s.participation = authorizer
 }
 
 // SubmissionGrant contains the immutable execution/task binding used to
 // validate a submission. Request fields can only assert these values.
 type SubmissionGrant struct {
-	TaskID         string
-	Repo           string
-	BaseCommit     string
-	AllowedPaths   []string
-	ForbiddenPaths []string
+	ResourceTenantID string
+	External         bool
+	TaskID           string
+	Repo             string
+	BaseCommit       string
+	AllowedPaths     []string
+	ForbiddenPaths   []string
 }
 
 // SubmissionAuthorizer validates ownership, execution state, lease and task
@@ -324,13 +340,13 @@ type StepView struct {
 // ValidationJobView is the public shape of a validation job.
 type ValidationJobView struct {
 	ID            string     `json:"id"`
-	TenantID      string     `json:"tenant_id"`
+	TenantID      string     `json:"tenant_id,omitempty"`
 	SubmissionID  string     `json:"submission_id"`
 	Status        string     `json:"status"`
 	Attempt       int        `json:"attempt"`
 	ClaimedUntil  *time.Time `json:"claimed_until,omitempty"`
 	ClaimedBy     *string    `json:"claimed_by,omitempty"`
-	ConfigVersion string     `json:"config_version"`
+	ConfigVersion string     `json:"config_version,omitempty"`
 	Steps         []StepView `json:"steps"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -368,7 +384,7 @@ func ValidationJobViewFromDomain(job *gitdomain.ValidationJob) ValidationJobView
 // SubmissionView is the public shape of a submission.
 type SubmissionView struct {
 	ID              string                     `json:"id"`
-	TenantID        string                     `json:"tenant_id"`
+	TenantID        string                     `json:"tenant_id,omitempty"`
 	TaskID          string                     `json:"task_id"`
 	ExecutionID     string                     `json:"execution_id"`
 	Repo            string                     `json:"repo"`

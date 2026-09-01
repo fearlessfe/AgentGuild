@@ -16,6 +16,7 @@ import (
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewdomain "agentguild.dev/agentguild/backend/internal/review/domain"
@@ -260,6 +261,8 @@ func TestDomainErrorsMapToStableMCPCodes(t *testing.T) {
 		{"idempotency_mismatch", &domain.Error{Code: "idempotency_mismatch", Message: "idempotency mismatch"}, false, "IDEMPOTENCY_MISMATCH", "idempotency mismatch"},
 		{"deadline_exceeded", &domain.Error{Code: "deadline_exceeded", Message: "deadline exceeded"}, false, "DEADLINE_EXCEEDED", "deadline exceeded"},
 		{"token_revoked", identitydomain.ErrTokenRevoked, false, "TOKEN_REVOKED", "token has been revoked"},
+		{"grant_expired", participationdomain.ErrExpired, false, "GRANT_EXPIRED", "task participation grant expired"},
+		{"grant_revoked", participationdomain.ErrRevoked, false, "GRANT_REVOKED", "task participation grant revoked"},
 		{"forbidden_non_admin", &domain.Error{Code: "forbidden", Message: "not allowed"}, false, "NOT_FOUND", "resource not found"},
 		{"forbidden_admin", &domain.Error{Code: "forbidden", Message: "not allowed"}, true, "FORBIDDEN", "not allowed"},
 		{"not_found_non_admin", &domain.Error{Code: "not_found", Message: "hidden"}, false, "NOT_FOUND", "resource not found"},

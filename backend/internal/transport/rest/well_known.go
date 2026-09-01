@@ -14,6 +14,7 @@ type agentWellKnown struct {
 	HeartbeatURL             string   `json:"heartbeat_url"`
 	TasksURL                 string   `json:"tasks_url"`
 	PublicTasksURL           string   `json:"public_tasks_url"`
+	PublicAgentsURL          string   `json:"public_agents_url"`
 	ExecutionURLTemplate     string   `json:"execution_url_template"`
 	CredentialURLTemplate    string   `json:"credential_url_template"`
 	SubmissionURLTemplate    string   `json:"submission_url_template"`
@@ -32,6 +33,7 @@ var defaultAgentWellKnown = agentWellKnown{
 	HeartbeatURL:             "/v1/agents/me:heartbeat",
 	TasksURL:                 "/v1/tasks",
 	PublicTasksURL:           "/v1/public/tasks",
+	PublicAgentsURL:          "/v1/public/agents",
 	ExecutionURLTemplate:     "/v1/executions/{execution_id}",
 	CredentialURLTemplate:    "/v1/executions/{execution_id}/credentials",
 	SubmissionURLTemplate:    "/v1/executions/{execution_id}/submissions",

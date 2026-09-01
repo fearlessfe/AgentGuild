@@ -4,9 +4,11 @@ import (
 	"context"
 	"time"
 
+	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	"agentguild.dev/agentguild/backend/internal/git"
 	gitdomain "agentguild.dev/agentguild/backend/internal/git/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 )
 
 // TaskDeadlineResolver resolves the persisted deadline for a task. It is
@@ -51,6 +53,8 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		return result, invalid("summary")
 	}
 
+	var resourceTenantID string
+	var external bool
 	err := s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
@@ -66,12 +70,20 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if grant.TaskID == "" || grant.Repo == "" {
 			return domain.ErrForbidden
 		}
-		if !hasRepoScope(principal.RepoScope, grant.Repo) {
+		resourceTenantID = grant.ResourceTenantID
+		if resourceTenantID == "" {
+			resourceTenantID = principal.TenantID
+		}
+		external = grant.External
+		if resourceTenantID == "" || external != principal.IsGlobalAgent() {
+			return domain.ErrForbidden
+		}
+		if !external && !hasRepoScope(principal.RepoScope, grant.Repo) {
 			return domain.ErrForbidden
 		}
 		expectedBranch := restrictedBranchPrefix + cmd.ExecutionID
 		// Idempotency remains available after the proxy credential is revoked.
-		existing, err := tx.Submissions().GetByExecutionID(ctx, principal.TenantID, cmd.ExecutionID)
+		existing, err := tx.Submissions().GetByExecutionID(ctx, resourceTenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
 		}
@@ -80,7 +92,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 				if cmd.Repo != sub.Repo || cmd.Branch != sub.Branch || cmd.BaseCommitSHA != sub.BaseCommitSHA {
 					return domain.ErrForbidden
 				}
-				result = Envelope[SubmissionView]{Data: submissionView(sub, now), Meta: Meta{ServerTime: now}}
+				result = Envelope[SubmissionView]{Data: submissionViewForAccess(sub, now, external), Meta: Meta{ServerTime: now}}
 				return nil
 			}
 		}
@@ -88,7 +100,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		// with the heartbeat guard: a live lease must not extend the window
 		// past the deadline.
 		if s.deadlines != nil {
-			deadline, err := s.deadlines.TaskDeadline(ctx, principal.TenantID, grant.TaskID)
+			deadline, err := s.deadlines.TaskDeadline(ctx, resourceTenantID, grant.TaskID)
 			if err != nil {
 				return err
 			}
@@ -96,7 +108,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 				return &domain.Error{Code: "deadline_exceeded", Message: "task deadline has passed"}
 			}
 		}
-		credential, err := tx.Credentials().GetByExecutionID(ctx, principal.TenantID, cmd.ExecutionID)
+		credential, err := tx.Credentials().GetByExecutionID(ctx, resourceTenantID, cmd.ExecutionID)
 		if err != nil {
 			return err
 		}
@@ -121,7 +133,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		cmd.ForbiddenPaths = append([]string(nil), grant.ForbiddenPaths...)
 
 		if err := s.verifier.Verify(ctx, VerifyCommit{
-			TenantID:       principal.TenantID,
+			TenantID:       resourceTenantID,
 			ExecutionID:    cmd.ExecutionID,
 			Repo:           cmd.Repo,
 			Branch:         cmd.Branch,
@@ -133,7 +145,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 			return err
 		}
 
-		files, err := s.verifier.ChangedFiles(ctx, principal.TenantID, cmd.Repo, cmd.BaseCommitSHA, cmd.CommitSHA)
+		files, err := s.verifier.ChangedFiles(ctx, resourceTenantID, cmd.Repo, cmd.BaseCommitSHA, cmd.CommitSHA)
 		if err != nil {
 			return err
 		}
@@ -143,7 +155,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		}
 
 		sub, err := gitdomain.NewSubmission(
-			principal.TenantID,
+			resourceTenantID,
 			cmd.TaskID,
 			cmd.ExecutionID,
 			cmd.Repo,
@@ -163,7 +175,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if err := tx.Submissions().Save(ctx, sub); err != nil {
 			return err
 		}
-		if err := tx.Credentials().Revoke(ctx, principal.TenantID, cmd.ExecutionID); err != nil {
+		if err := tx.Credentials().Revoke(ctx, resourceTenantID, cmd.ExecutionID); err != nil {
 			return err
 		}
 
@@ -171,7 +183,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		if configVersion == "" {
 			configVersion = "default"
 		}
-		job, err := gitdomain.NewValidationJob(principal.TenantID, sub.ID, cmd.ExecutionID, cmd.Repo, cmd.Branch, cmd.CommitSHA, configVersion, now, s.newID)
+		job, err := gitdomain.NewValidationJob(resourceTenantID, sub.ID, cmd.ExecutionID, cmd.Repo, cmd.Branch, cmd.CommitSHA, configVersion, now, s.newID)
 		if err != nil {
 			return err
 		}
@@ -184,7 +196,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 		}
 
 		result = Envelope[SubmissionView]{
-			Data: submissionView(sub, now),
+			Data: submissionViewForAccess(sub, now, external),
 			Meta: Meta{ServerTime: now},
 		}
 		return nil
@@ -196,7 +208,7 @@ func (s *SubmissionService) CreateSubmission(ctx context.Context, principal Prin
 	// A failed state transition remains retryable: the idempotent submission
 	// lookup above returns the same record, then retries this notification.
 	if err := s.notifier.Notify(ctx, ExecutionStateCommand{
-		TenantID:    principal.TenantID,
+		TenantID:    resourceTenantID,
 		ExecutionID: cmd.ExecutionID,
 		Intent:      domain.IntentSubmit,
 		Actor:       domain.Actor{Type: domain.ActorAgent, ID: principal.AgentID},
@@ -216,18 +228,22 @@ func (s *SubmissionService) GetSubmission(ctx context.Context, principal Princip
 	if query.SubmissionID == "" {
 		return result, invalid("submission_id")
 	}
+	resourceTenantID, external, err := s.authorizeRead(ctx, principal, participationdomain.ResourceSubmission, query.SubmissionID)
+	if err != nil {
+		return result, err
+	}
 
-	err := s.store.WithTx(ctx, func(tx Tx) error {
+	err = s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
 		}
-		sub, err := tx.Submissions().GetByID(ctx, principal.TenantID, query.SubmissionID)
+		sub, err := tx.Submissions().GetByID(ctx, resourceTenantID, query.SubmissionID)
 		if err != nil {
 			return err
 		}
 		result = Envelope[SubmissionView]{
-			Data: submissionView(sub, now),
+			Data: submissionViewForAccess(sub, now, external),
 			Meta: Meta{ServerTime: now},
 		}
 		return nil
@@ -245,18 +261,22 @@ func (s *SubmissionService) ListSubmissions(ctx context.Context, principal Princ
 	if query.ExecutionID == "" {
 		return result, invalid("execution_id")
 	}
-	err := s.store.WithTx(ctx, func(tx Tx) error {
+	resourceTenantID, external, err := s.authorizeRead(ctx, principal, participationdomain.ResourceExecution, query.ExecutionID)
+	if err != nil {
+		return result, err
+	}
+	err = s.store.WithTx(ctx, func(tx Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
 		}
-		submissions, err := tx.Submissions().GetByExecutionID(ctx, principal.TenantID, query.ExecutionID)
+		submissions, err := tx.Submissions().GetByExecutionID(ctx, resourceTenantID, query.ExecutionID)
 		if err != nil {
 			return err
 		}
 		views := make([]SubmissionView, len(submissions))
 		for i := range submissions {
-			views[i] = submissionView(submissions[i], now)
+			views[i] = submissionViewForAccess(submissions[i], now, external)
 		}
 		result = Envelope[[]SubmissionView]{Data: views, Meta: Meta{ServerTime: now}}
 		return nil
@@ -270,6 +290,9 @@ func (s *SubmissionService) ListSubmissions(ctx context.Context, principal Princ
 func (s *SubmissionService) CheckSubmissionIntegrity(ctx context.Context, principal Principal, query CheckSubmissionIntegrity) error {
 	if err := requireCaller(principal); err != nil {
 		return err
+	}
+	if principal.IsGlobalAgent() {
+		return domain.ErrForbidden
 	}
 	if query.SubmissionID == "" {
 		return invalid("submission_id")
@@ -299,10 +322,7 @@ func (s *SubmissionService) CheckSubmissionIntegrity(ctx context.Context, princi
 }
 
 func (s *SubmissionService) requireAgent(principal Principal) error {
-	if principal.TenantID == "" {
-		return domain.ErrForbidden
-	}
-	if principal.AgentID == "" {
+	if principal.AgentID == "" || principal.AgentVersionID == "" || (principal.TenantID == "" && !principal.IsGlobalAgent()) {
 		return domain.ErrForbidden
 	}
 	for _, scope := range principal.Scopes {
@@ -331,5 +351,39 @@ func submissionView(sub *gitdomain.Submission, now time.Time) SubmissionView {
 		ValidationJobID: sub.ValidationJobID,
 		CreatedAt:       sub.CreatedAt,
 		UpdatedAt:       sub.UpdatedAt,
+	}
+}
+
+func submissionViewForAccess(sub *gitdomain.Submission, now time.Time, external bool) SubmissionView {
+	view := submissionView(sub, now)
+	if external {
+		view.TenantID = ""
+	}
+	return view
+}
+
+func (s *SubmissionService) authorizeRead(ctx context.Context, principal Principal, kind participationdomain.ResourceKind, resourceID string) (string, bool, error) {
+	if !principal.IsGlobalAgent() {
+		if principal.TenantID == "" {
+			return "", false, domain.ErrForbidden
+		}
+		return principal.TenantID, false, nil
+	}
+	if s.participation == nil {
+		return "", true, domain.ErrForbidden
+	}
+	grant, err := s.participation.Authorize(ctx, participationPrincipal(principal), kind, resourceID, participationdomain.ScopeExecutionRead)
+	if err != nil {
+		return "", true, err
+	}
+	return grant.ResourceTenantID, true, nil
+}
+
+func participationPrincipal(principal Principal) auth.Principal {
+	return auth.Principal{
+		SubjectID: principal.SubjectID, IdentityScope: principal.IdentityScope,
+		TenantID: principal.TenantID, Type: auth.PrincipalTypeAgent,
+		AgentID: principal.AgentID, AgentVersionID: principal.AgentVersionID,
+		Scopes: append([]string(nil), principal.Scopes...),
 	}
 }

@@ -16,7 +16,7 @@ describe("LandingPage", () => {
 
     expect(screen.getByRole("heading", { name: /让 Agent/ })).toBeInTheDocument();
     expect(screen.getByText("开放的任务网络")).toBeInTheDocument();
-    expect(screen.getByText(/阅读接入协议/)).toBeInTheDocument();
+    expect(screen.getByText(/生成密钥.*注册 Agent/)).toBeInTheDocument();
   });
 
   it("confirms when the onboarding prompt is copied", async () => {

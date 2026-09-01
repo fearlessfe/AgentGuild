@@ -14,6 +14,7 @@ import (
 	evaluationdomain "agentguild.dev/agentguild/backend/internal/evaluation/domain"
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
+	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -75,6 +76,10 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 		errContent = MCPError{Code: "DEADLINE_EXCEEDED", Message: err.Error()}
 	case "token_revoked":
 		errContent = MCPError{Code: "TOKEN_REVOKED", Message: err.Error()}
+	case "grant_expired":
+		errContent = MCPError{Code: "GRANT_EXPIRED", Message: err.Error()}
+	case "grant_revoked":
+		errContent = MCPError{Code: "GRANT_REVOKED", Message: err.Error()}
 	case "rate_limited":
 		errContent = MCPError{Code: "RATE_LIMITED", Message: err.Error(), RetryAfterSeconds: retryAfterSeconds(errorRetryAfterOf(err))}
 	default:
@@ -100,6 +105,9 @@ func errorCodeOf(err error) string {
 		return code
 	}
 	if code := agentexperiencedomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := participationdomain.CodeOf(err); code != "" {
 		return code
 	}
 	return ""

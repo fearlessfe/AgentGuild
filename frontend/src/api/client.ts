@@ -52,6 +52,49 @@ export type ExecutionView = {
 
 export type TaskPage = { items: TaskView[] };
 
+export type PublicTaskSummary = {
+  id: string;
+  task_specification_version_id: string;
+  canonical_repository: string;
+  source_issue_url: string;
+  title: string;
+  summary: string;
+  quality_level: string;
+  published_at: string;
+  can_claim: boolean;
+};
+
+export type PublicTaskDetail = PublicTaskSummary & {
+  issue_revision: string;
+  base_commit: string;
+  problem_diagnosis: string;
+  impact: string;
+  proposed_solution: string;
+  implementation_steps: string[];
+  constraints: string[];
+  non_goals: string[];
+  risks: string[];
+  acceptance_criteria: Array<{ id: string; statement: string; critical: boolean; verifier_kind: string; expected_result: string }>;
+  evidence_refs: Array<{ commit_sha: string; path: string; start_line: number; end_line: number; content_hash: string }>;
+};
+
+export type PublicAgentView = {
+  agent_id: string;
+  agent_version_id: string;
+  handle: string;
+  display_name: string;
+  description?: string;
+  status: "pending_activation" | "active" | "suspended";
+  organization_id: string;
+  runtime?: string;
+  model?: string;
+  capabilities?: string[];
+  last_seen_at?: string;
+  created_at: string;
+};
+
+export type PublicAgentPage = { items: PublicAgentView[] };
+
 export type TaskView = {
   id: string;
   tenant_id: string;
@@ -304,6 +347,22 @@ export async function listTasks(filters: {
   const query = params.toString();
   return apiRequest<TaskPage>(`/v1/tasks${query ? `?${query}` : ""}`);
 }
+
+export async function listPublicTasks(filters: { cursor?: string; limit?: number } = {}): Promise<Envelope<{ items: PublicTaskSummary[] }>> {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 20));
+  if (filters.cursor) params.set("cursor", filters.cursor);
+  return apiRequest<{ items: PublicTaskSummary[] }>(`/v1/public/tasks?${params.toString()}`);
+}
+
+export const getPublicTask = (id: string) => apiRequest<PublicTaskDetail>(`/v1/public/tasks/${encodeURIComponent(id)}`);
+export async function listPublicAgents(filters: { status?: string; limit?: number } = {}): Promise<Envelope<PublicAgentPage>> {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 24));
+  if (filters.status) params.set("status", filters.status);
+  return apiRequest<PublicAgentPage>(`/v1/public/agents?${params.toString()}`);
+}
+export const getPublicAgent = (id: string) => apiRequest<PublicAgentView>(`/v1/public/agents/${encodeURIComponent(id)}`);
 
 export const getTask = (id: string) => apiRequest<TaskView>(`/v1/tasks/${encodeURIComponent(id)}`);
 export const getExecution = (id: string) => apiRequest<ExecutionView>(`/v1/executions/${encodeURIComponent(id)}`);
@@ -1042,6 +1101,97 @@ function demoRoute(path: string, init: ApiRequestInit = {}): Envelope<unknown> {
       demoSyncRules = demoSyncRules.filter((rule) => rule.id !== id);
       return clone({ data: { deleted: true }, meta: demoMeta });
     }
+  }
+
+  if (url.pathname === "/v1/public/tasks" && method === "GET") {
+    const cursor = url.searchParams.get("cursor");
+    const publicItems = demoTasks
+      .filter((task) => ["open", "in_progress", "completed"].includes(task.status))
+      .slice(cursor ? 6 : 0, cursor ? 12 : 6)
+      .map((task) => ({
+        id: task.id,
+        task_specification_version_id: `spec-${task.id}`,
+        canonical_repository: task.publisher_agent_version_id,
+        source_issue_url: task.source?.issue_url ?? "",
+        title: task.title,
+        summary: task.problem,
+        quality_level: "standard",
+        published_at: task.created_at,
+        can_claim: true,
+      }));
+    return clone({ data: { items: publicItems }, meta: { ...demoMeta, next_cursor: cursor ? undefined : "demo-public-page-2" } });
+  }
+
+  const publicTaskMatch = url.pathname.match(/^\/v1\/public\/tasks\/([^/]+)$/);
+  if (publicTaskMatch && method === "GET") {
+    const id = decodeURIComponent(publicTaskMatch[1]);
+    const task = demoTasks.find((item) => item.id === id) ?? demoTasks[0];
+    return clone({
+      data: {
+        id: task.id,
+        task_specification_version_id: `spec-${task.id}`,
+        canonical_repository: task.publisher_agent_version_id,
+        source_issue_url: task.source?.issue_url ?? "",
+        title: task.title,
+        summary: task.problem,
+        quality_level: "standard",
+        published_at: task.created_at,
+        can_claim: true,
+        issue_revision: "main",
+        base_commit: "a1b2c3d",
+        problem_diagnosis: task.problem,
+        impact: "保持生产任务稳定，并让后续 Agent 可以复用修复结果。",
+        proposed_solution: "按任务说明完成最小改动，补齐测试并提交 commit。",
+        implementation_steps: ["复现问题", "实现修复", "运行测试", "提交 commit"],
+        constraints: task.constraints ?? [],
+        non_goals: ["不修改无关模块"],
+        risks: ["需要关注兼容性和回归测试"],
+        acceptance_criteria: [{ id: "ac-1", statement: "相关测试全部通过", critical: true, verifier_kind: "ci", expected_result: "passed" }],
+        evidence_refs: [],
+      },
+      meta: demoMeta,
+    });
+  }
+
+  if (url.pathname === "/v1/public/agents" && method === "GET") {
+    const status = url.searchParams.get("status");
+    const publicItems = demoAgents
+      .filter((agent) => agent.status !== "revoked" && (!status || agent.status === status))
+      .map((agent) => ({
+        agent_id: agent.id,
+        agent_version_id: `${agent.id}.v1`,
+        handle: agent.name.toLowerCase().replace(/\s+/g, "-"),
+        display_name: agent.name,
+        description: agent.description,
+        status: agent.status,
+        organization_id: "public",
+        runtime: "codex",
+        model: "gpt-5",
+        capabilities: agent.scopes.includes("tasks:execute") ? ["code", "git", "testing"] : ["task-observer"],
+        last_seen_at: agent.last_seen_at,
+        created_at: agent.created_at,
+      }));
+    return clone({ data: { items: publicItems }, meta: demoMeta });
+  }
+
+  const publicAgentMatch = url.pathname.match(/^\/v1\/public\/agents\/([^/]+)$/);
+  if (publicAgentMatch && method === "GET") {
+    const id = decodeURIComponent(publicAgentMatch[1]);
+    const agent = demoAgents.find((item) => item.id === id && item.status !== "revoked") ?? demoAgents[0];
+    return clone({ data: {
+      agent_id: agent.id,
+      agent_version_id: `${agent.id}.v1`,
+      handle: agent.name.toLowerCase().replace(/\s+/g, "-"),
+      display_name: agent.name,
+      description: agent.description,
+      status: agent.status,
+      organization_id: "public",
+      runtime: "codex",
+      model: "gpt-5",
+      capabilities: agent.scopes.includes("tasks:execute") ? ["code", "git", "testing"] : ["task-observer"],
+      last_seen_at: agent.last_seen_at,
+      created_at: agent.created_at,
+    }, meta: demoMeta });
   }
 
   if (url.pathname === "/v1/tasks" && method === "GET") {

@@ -21,6 +21,8 @@ func TestGlobalAgentIdentityMigrationBackfillsDeterministicallyAndRollsBack(t *t
 	// up/down boundary in isolation.
 	_, err := db.Exec(ctx, readIdentityMigration(t, "000027_open_agent_registration.down.sql"))
 	require.NoError(t, err)
+	_, err = db.Exec(ctx, readIdentityMigration(t, "000026_participation_resource_lookup.down.sql"))
+	require.NoError(t, err)
 	_, err = db.Exec(ctx, readIdentityMigration(t, "000025_public_task_claim_contract.down.sql"))
 	require.NoError(t, err)
 	_, err = db.Exec(ctx, readIdentityMigration(t, "000024_task_participation_grants.down.sql"))

@@ -324,7 +324,7 @@ func (s *CredentialService) authorizeCredentialRecord(ctx context.Context, princ
 }
 
 func requireCaller(principal Principal) error {
-	if principal.TenantID == "" {
+	if principal.TenantID == "" && !principal.IsGlobalAgent() {
 		return domain.ErrForbidden
 	}
 	if principal.IsAdmin || principal.OwnerID != "" {
