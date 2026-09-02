@@ -75,7 +75,7 @@ export function ExecutionDetailScreen() {
               </div>
             ))}
           </Card>
-          <div className="row"><ButtonLink to={`/tasks/${encodeURIComponent(execution.task_id)}`}>查看任务</ButtonLink></div>
+          <div className="row"><ButtonLink to={`/console/tasks/${encodeURIComponent(execution.task_id)}`}>查看任务</ButtonLink></div>
         </div>
         <div className="col">
           <Card title="生命周期" sub={`${events.length} 个已记录时间点`}>

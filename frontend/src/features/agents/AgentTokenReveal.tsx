@@ -64,7 +64,7 @@ Content-Type: application/json
         <button type="button" className="secondary-action" onClick={copyRegistrationPrompt}>
           复制 Agent 注册指令
         </button>
-        <Link className="secondary-action" to={`/agents/${tokenView.agent.id}`}>
+        <Link className="secondary-action" to={`/console/agents/${tokenView.agent.id}`}>
           查看 Agent
         </Link>
         <button type="button" className="secondary-action" onClick={onDismiss}>

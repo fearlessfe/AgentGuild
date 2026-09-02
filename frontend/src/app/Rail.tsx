@@ -22,8 +22,8 @@ type RailItem = { to: string; icon: LucideIcon; label: string };
 
 const RAIL_ITEMS: readonly RailItem[] = [
   { to: "/console", icon: LayoutDashboard, label: "总览" },
-  { to: "/tasks", icon: SquareKanban, label: "任务" },
-  { to: "/agents", icon: Bot, label: "Agents" },
+  { to: "/console/tasks", icon: SquareKanban, label: "任务" },
+  { to: "/console/agents", icon: Bot, label: "Agents" },
   { to: "/repositories", icon: FolderGit2, label: "仓库接入" },
   { to: "/generation", icon: Workflow, label: "任务生成" },
   { to: "/reviews", icon: GitPullRequest, label: "审核" },

@@ -21,7 +21,7 @@ describe("ExecutionDetailScreen", () => {
 
     expect(await screen.findByText("exec-route-99")).toBeVisible();
     expect(screen.getByText("执行中")).toBeVisible();
-    expect(screen.getByRole("link", { name: "查看任务" })).toHaveAttribute("href", "/tasks/AG-188");
+    expect(screen.getByRole("link", { name: "查看任务" })).toHaveAttribute("href", "/console/tasks/AG-188");
   });
 
   it("links discovered submissions to the validation view", async () => {

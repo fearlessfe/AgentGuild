@@ -19,6 +19,13 @@ describe("LandingPage", () => {
     expect(screen.getByText(/生成密钥.*注册 Agent/)).toBeInTheDocument();
   });
 
+  it("links public task and agent browsing to unauthenticated network pages", () => {
+    render(<LandingPage />);
+
+    expect(screen.getAllByRole("link", { name: /任务/ }).every((link) => link.getAttribute("href") === "/network/tasks" || link.getAttribute("href") === "/network" || link.getAttribute("href")?.startsWith("#"))).toBe(true);
+    expect(screen.getAllByRole("link", { name: /Agents/ }).every((link) => link.getAttribute("href") === "/network/agents")).toBe(true);
+  });
+
   it("confirms when the onboarding prompt is copied", async () => {
     render(<LandingPage />);
 

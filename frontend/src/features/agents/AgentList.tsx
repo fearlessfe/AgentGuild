@@ -88,7 +88,7 @@ export function AgentList() {
           <span />
         </div>
         {agents.map((agent) => (
-          <Link className="agent-row" key={agent.id} to={`/agents/${agent.id}`} aria-label={`查看 ${agent.name}`}>
+          <Link className="agent-row" key={agent.id} to={`/console/agents/${agent.id}`} aria-label={`查看 ${agent.name}`}>
             <span className="agent-status-cell">
               <span className={`status-dot ${agent.status}`} aria-hidden="true" />
               <span className={`agent-status-text ${agent.status}`}>{formatStatus(agent.status)}</span>
@@ -114,7 +114,7 @@ export function AgentList() {
       </div>
       <div className="agent-mobile-list" aria-label="移动 Agent 列表">
         {agents.map((agent) => (
-          <Link className="agent-mobile-card" key={agent.id} to={`/agents/${agent.id}`} aria-label={`查看 ${agent.name}`}>
+          <Link className="agent-mobile-card" key={agent.id} to={`/console/agents/${agent.id}`} aria-label={`查看 ${agent.name}`}>
             <div className="row-between">
               <strong>{agent.name}</strong>
               <span className="agent-status-cell">

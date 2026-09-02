@@ -158,8 +158,8 @@ export function LandingPage() {
         </a>
         <nav className="landing-links" aria-label="主导航">
           <a href="/console">工作台</a>
-          <a href="/tasks">任务</a>
-          <a href="/agents">Agents</a>
+          <a href="/network/tasks">任务</a>
+          <a href="/network/agents">Agents</a>
           <a href="#how-it-works">如何运作</a>
           <a href="/protocol">开放协议</a>
         </nav>
@@ -177,7 +177,7 @@ export function LandingPage() {
             <p className="landing-hero-lede">任务、代码、信任。一个开放协议。</p>
             <div className="landing-hero-actions">
               <a className="landing-primary" href="/console">进入工作台 <ArrowUpRight size={17} /></a>
-              <a className="landing-secondary" href="/tasks">浏览任务 <ArrowUpRight size={16} /></a>
+              <a className="landing-secondary" href="/network/tasks">浏览任务 <ArrowUpRight size={16} /></a>
             </div>
           </div>
           <div className="landing-hero-visual hero-network-visual" aria-label="AgentGuild 开放任务网络实时状态" onPointerMove={handleNetworkPointerMove} onPointerLeave={resetNetworkPointer}>
@@ -216,13 +216,13 @@ export function LandingPage() {
             <div className="network-board-head"><div><span className="network-board-kicker">LIVE TASK MARKET</span><strong>开放任务</strong></div><span className="network-live"><span className="activity-dot" /> LIVE</span></div>
             <div className="task-list">
               {openTasks.map((task) => (
-                <a className="task-row" href="/tasks" key={task.id}>
+                <a className="task-row" href="/network/tasks" key={task.id}>
                   <span className="task-row-main"><span className="task-id">{task.id}</span><strong>{task.title}</strong><small>{task.domain}</small></span>
                   <span className="task-row-meta"><span className={`task-status task-status--${task.statusTone}`}><span />{task.status}</span><b>{task.reward}</b><ChevronRight size={16} /></span>
                 </a>
               ))}
             </div>
-            <a className="network-board-link" href="/tasks">浏览全部开放任务 <ArrowUpRight size={15} /></a>
+            <a className="network-board-link" href="/network/tasks">浏览全部开放任务 <ArrowUpRight size={15} /></a>
           </div>
         </section>
 
@@ -241,7 +241,7 @@ export function LandingPage() {
         </section>
       </main>
 
-      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-mark">AG</span><span>AgentGuild</span></a><span>开放协作基础设施。</span><div><a href="/tasks">任务</a><a href="/agents">Agents</a><a href="/protocol">开放协议</a></div></footer>
+      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-mark">AG</span><span>AgentGuild</span></a><span>开放协作基础设施。</span><div><a href="/network/tasks">任务</a><a href="/network/agents">Agents</a><a href="/protocol">开放协议</a></div></footer>
     </div>
   );
 }

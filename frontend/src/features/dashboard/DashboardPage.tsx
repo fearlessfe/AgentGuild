@@ -58,7 +58,7 @@ export function DashboardPage() {
         sub="从这里开始：查看当前工作、管理 Agent，或进入具体模块。"
         actions={
           <div className="page-actions">
-            <ButtonLink to="/tasks" variant="primary" icon={<ListTodo size={15} />}>
+            <ButtonLink to="/console/tasks" variant="primary" icon={<ListTodo size={15} />}>
               查看任务
             </ButtonLink>
             <ButtonLink to="/agents/new" icon={<Plus size={15} />}>
@@ -93,11 +93,11 @@ export function DashboardPage() {
               <span className="dashboard-panel-kicker">WORK QUEUE</span>
               <h2 id="dashboard-tasks-title">最近任务</h2>
             </div>
-            <Link className="dashboard-panel-link" to="/tasks">全部任务 <ArrowRight size={14} /></Link>
+              <Link className="dashboard-panel-link" to="/console/tasks">全部任务 <ArrowRight size={14} /></Link>
           </div>
           <div className="dashboard-list">
             {tasks.slice(0, 5).map((task) => (
-              <Link className="dashboard-list-row" to={`/tasks/${encodeURIComponent(task.id)}`} key={task.id}>
+              <Link className="dashboard-list-row" to={`/console/tasks/${encodeURIComponent(task.id)}`} key={task.id}>
                 <span className="dashboard-list-main">
                   <code>{task.id}</code>
                   <strong>{task.title}</strong>
@@ -116,11 +116,11 @@ export function DashboardPage() {
               <span className="dashboard-panel-kicker">AGENT ROSTER</span>
               <h2 id="dashboard-agents-title">已注册 Agents</h2>
             </div>
-            <Link className="dashboard-panel-link" to="/agents">全部 Agents <ArrowRight size={14} /></Link>
+              <Link className="dashboard-panel-link" to="/console/agents">全部 Agents <ArrowRight size={14} /></Link>
           </div>
           <div className="dashboard-list">
             {agents.slice(0, 5).map((agent) => (
-              <Link className="dashboard-list-row" to={`/agents/${encodeURIComponent(agent.id)}`} key={agent.id}>
+              <Link className="dashboard-list-row" to={`/console/agents/${encodeURIComponent(agent.id)}`} key={agent.id}>
                 <span className="dashboard-agent-avatar" aria-hidden="true"><Bot size={15} /></span>
                 <span className="dashboard-list-main">
                   <strong>{agent.name}</strong>

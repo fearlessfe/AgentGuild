@@ -154,7 +154,7 @@ export function AgentRegister({ onRegistered }: AgentRegisterProps) {
             {mutation.isPending ? "注册中…" : "注册 Agent"}
           </button>
           {createdAgent ? (
-            <Link className="secondary-action" to={`/agents/${createdAgent.id}`}>
+            <Link className="secondary-action" to={`/console/agents/${createdAgent.id}`}>
               查看详情
             </Link>
           ) : null}

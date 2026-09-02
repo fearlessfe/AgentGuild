@@ -78,7 +78,7 @@ export function SubmissionValidationScreen() {
           </Card>
           <div className="row">
             <ButtonLink to={`/executions/${encodeURIComponent(submission.execution_id)}`}>查看执行</ButtonLink>
-            <ButtonLink to={`/tasks/${encodeURIComponent(submission.task_id)}`}>查看任务</ButtonLink>
+            <ButtonLink to={`/console/tasks/${encodeURIComponent(submission.task_id)}`}>查看任务</ButtonLink>
           </div>
         </div>
         <div className="col">

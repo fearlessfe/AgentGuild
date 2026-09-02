@@ -20,7 +20,7 @@ export function OutcomeScreen() {
         <PageHeader title="结果闭环" sub="查看任务与执行的最终治理状态" />
         <Card title="选择任务">
           <p className="text-sm muted">从任务详情进入结果页，平台将展示真实 Task 与 Execution 状态。</p>
-          <ButtonLink to="/tasks">查看任务</ButtonLink>
+          <ButtonLink to="/console/tasks">查看任务</ButtonLink>
         </Card>
       </div>
     );
@@ -34,7 +34,7 @@ export function OutcomeScreen() {
   const accepted = taskView.status === "completed" && executionView?.status === "accepted";
   return (
     <div className="stack">
-      <PageHeader title="结果闭环" sub={taskView.id} actions={<ButtonLink to={`/tasks/${encodeURIComponent(taskView.id)}`}>返回任务</ButtonLink>} />
+      <PageHeader title="结果闭环" sub={taskView.id} actions={<ButtonLink to={`/console/tasks/${encodeURIComponent(taskView.id)}`}>返回任务</ButtonLink>} />
       <Card
         title={accepted ? "已接受" : "处理中"}
         head={<StatusChip tone={accepted ? "success" : "warning"}>{taskView.status}</StatusChip>}

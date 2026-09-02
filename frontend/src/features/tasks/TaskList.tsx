@@ -185,7 +185,7 @@ export function TaskList() {
       <div className="task-mobile-list" aria-label="移动任务列表">
         {groups.flatMap((group) =>
           group.items.map((task) => (
-            <Link className="task-mobile-card" key={task.id} to={`/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
+            <Link className="task-mobile-card" key={task.id} to={`/console/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
               <div className="row-between">
                 <code>{task.id}</code>
                 <StatusChip tone={statusTone[task.status]}>{statusLabel[task.status]}</StatusChip>
@@ -230,7 +230,7 @@ function TaskRow({ task }: { task: TaskView }) {
   return (
     <tr>
       <td>
-        <Link to={`/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
+        <Link to={`/console/tasks/${task.id}`} aria-label={`查看 ${task.id}`}>
           <code>{task.id}</code>
         </Link>
       </td>

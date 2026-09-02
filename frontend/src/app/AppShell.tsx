@@ -40,6 +40,8 @@ import { DashboardPage } from "../features/dashboard/DashboardPage";
 /* Maps the current pathname to the module label shown in the topbar. Ordered
    most-specific first. */
 const MODULE_MAP: readonly [string, string][] = [
+  ["/console/tasks", "任务中心"],
+  ["/console/agents", "Agents"],
   ["/console", "总览"],
   ["/onboarding", "首次引导"],
   ["/git-integration", "Git 接入"],
@@ -82,6 +84,22 @@ export function AppShell() {
     return <PublicNetworkRouter />;
   }
 
+  // Keep the historical URLs as public browsing aliases. Authenticated
+  // governance views live under /console/* and retain their private fields.
+  if (location.pathname === "/tasks") {
+    return <Navigate to="/network/tasks" replace />;
+  }
+  if (location.pathname.startsWith("/tasks/")) {
+    return <Navigate to={`/network/tasks/${encodeURIComponent(location.pathname.slice("/tasks/".length))}`} replace />;
+  }
+  if (location.pathname === "/agents") {
+    return <Navigate to="/network/agents" replace />;
+  }
+  const agentAlias = location.pathname.match(/^\/agents\/([^/]+)$/);
+  if (agentAlias && agentAlias[1] !== "new") {
+    return <Navigate to={`/network/agents/${encodeURIComponent(agentAlias[1])}`} replace />;
+  }
+
   return (
     <div className="app" data-rail={collapsed ? "collapsed" : "expanded"}>
       <Rail collapsed={collapsed} onToggle={toggle} />
@@ -98,17 +116,17 @@ export function AppShell() {
             <Route path="/repositories" element={<RepositoryOnboardingScreen />} />
             <Route path="/generation" element={<SyncRuleScreen />} />
             <Route path="/sync" element={<Navigate to="/generation" replace />} />
-            <Route path="/tasks" element={<Workbench />} />
-            <Route path="/tasks/:taskId" element={<Workbench />} />
+            <Route path="/console/tasks" element={<Workbench />} />
+            <Route path="/console/tasks/:taskId" element={<Workbench />} />
             <Route path="/executions/:executionId" element={<ExecutionDetailScreen />} />
             <Route path="/submissions/:submissionId" element={<SubmissionValidationScreen />} />
             <Route path="/reviews" element={<ReviewWorkspace />} />
             <Route path="/reviews/:reviewId" element={<ReviewWorkspace />} />
             <Route path="/outcome" element={<OutcomeScreen />} />
             <Route path="/reputation" element={<ReputationWorkspace />} />
-            <Route path="/agents" element={<AgentsWorkspace />} />
+            <Route path="/console/agents" element={<AgentsWorkspace />} />
             <Route path="/agents/new" element={<AgentRegistrationWorkspace />} />
-            <Route path="/agents/:agentId" element={<AgentDetailWorkspace />} />
+            <Route path="/console/agents/:agentId" element={<AgentDetailWorkspace />} />
             <Route path="*" element={<HomeRedirect />} />
           </Routes>
         </main>
@@ -129,7 +147,7 @@ function Workbench() {
         </div>
         <div className="col">
           {taskId ? (
-            <TaskDetail key={taskId} taskId={taskId} onClose={() => navigate("/tasks")} />
+            <TaskDetail key={taskId} taskId={taskId} onClose={() => navigate("/console/tasks")} />
           ) : (
             <TaskDetail.Empty />
           )}
@@ -164,7 +182,7 @@ function AgentRegistrationWorkspace() {
       <PageHeader
         title="注册 Agent"
         sub="创建新 Agent，并在注册完成后一次性领取 activation token"
-        actions={<ButtonLink to="/agents">返回列表</ButtonLink>}
+        actions={<ButtonLink to="/console/agents">返回列表</ButtonLink>}
       />
       <div className="split-2">
         <div className="col">
@@ -183,7 +201,7 @@ function AgentDetailWorkspace() {
   const [selectedVersion, setSelectedVersion] = useState<VersionView | null>(null);
 
   if (!agentId) {
-    return <Navigate to="/agents" replace />;
+    return <Navigate to="/console/agents" replace />;
   }
 
   return (
@@ -191,7 +209,7 @@ function AgentDetailWorkspace() {
       <PageHeader
         title="Agent 详情"
         sub="查看单个 Agent 的状态、版本谱系、经验候选与评测"
-        actions={<ButtonLink to="/agents">返回列表</ButtonLink>}
+        actions={<ButtonLink to="/console/agents">返回列表</ButtonLink>}
       />
       <AgentDetail agentId={agentId} />
       <div className="split-2">
@@ -221,7 +239,7 @@ function PendingReviewList() {
         <div className="empty-state">
           <span className="es-icon" aria-hidden="true"><GitPullRequest size={18} strokeWidth={1.8} /></span>
           <div className="es-title">暂无待审核提交</div>
-          <ButtonLink to="/tasks">查看任务与执行</ButtonLink>
+        <ButtonLink to="/console/tasks">查看任务与执行</ButtonLink>
         </div>
       </div>
     );
