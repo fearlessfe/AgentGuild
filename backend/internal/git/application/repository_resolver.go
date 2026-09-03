@@ -66,6 +66,15 @@ func (r *repositoryGitResolver) ResolveBaseCommit(ctx context.Context, tenantID,
 	if err != nil {
 		return "", err
 	}
+	if record.SourceType == RepositorySourcePublicGitHub {
+		resolver, ok := r.public.(interface {
+			ResolveBaseCommit(context.Context, string) (string, error)
+		})
+		if !ok {
+			return "", repositoryAccessConflict()
+		}
+		return resolver.ResolveBaseCommit(ctx, canonical)
+	}
 	if record.SourceType != RepositorySourceGitHubApp || record.GitHubAppID == "" || record.DefaultBranch == "" {
 		return "", repositoryAccessConflict()
 	}

@@ -48,3 +48,26 @@ func TestPublicIssueSourceListsPublicIssuesWithoutAuthorization(t *testing.T) {
 		HTMLURL:   "https://github.com/owner/repo/issues/1",
 	}, issues[0])
 }
+
+func TestPublicIssueSourceResolvesDefaultBranchCommitWithoutAuthorization(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		require.Empty(t, r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/repos/owner/repo":
+			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/owner/repo/commits/main":
+			fmt.Fprint(w, `{"sha":"0123456789abcdef0123456789abcdef01234567"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	source := gh.NewPublicIssueSource(srv.URL, srv.Client())
+	commit, err := source.ResolveBaseCommit(context.Background(), "owner/repo")
+	require.NoError(t, err)
+	require.Equal(t, "0123456789abcdef0123456789abcdef01234567", commit)
+	require.Equal(t, []string{"/repos/owner/repo", "/repos/owner/repo/commits/main"}, paths)
+}

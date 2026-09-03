@@ -48,6 +48,7 @@ import (
 	"agentguild.dev/agentguild/backend/internal/postgres"
 	publictaskapp "agentguild.dev/agentguild/backend/internal/publictask/application"
 	publictaskpostgres "agentguild.dev/agentguild/backend/internal/publictask/postgres"
+	publictaskworker "agentguild.dev/agentguild/backend/internal/publictask/worker"
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
@@ -268,6 +269,17 @@ func run() error {
 			return err
 		})
 	}
+	baseCommitResolver, ok := gitRuntime.repositoryResolver.(interface {
+		ResolveBaseCommit(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		return fmt.Errorf("build public task projection worker: repository resolver lacks base commit support")
+	}
+	publicProjectionWorker, err := publictaskworker.NewWorker(pool, baseCommitResolver)
+	if err != nil {
+		return fmt.Errorf("build public task projection worker: %w", err)
+	}
+	runWorker(workerCtx, &wg, cfg.SyncWorkerInterval, "public-task-projection", publicProjectionWorker.RunOnce)
 
 	errCh := make(chan error, 1)
 	go func() {

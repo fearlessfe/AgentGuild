@@ -42,6 +42,37 @@ func (r *Repository) Insert(ctx context.Context, p *domain.Projection) error {
 	return writeError(err)
 }
 
+// InsertIfAbsent publishes a projection once and treats a concurrent or
+// repeated publication of the same tenant/task as an idempotent no-op.
+func (r *Repository) InsertIfAbsent(ctx context.Context, p *domain.Projection) (bool, error) {
+	if p == nil || p.Status != domain.StatusPublished {
+		return false, domain.ErrInvalidArgument
+	}
+	steps, constraints, nonGoals, risks, criteria, evidence, err := encodeFields(p)
+	if err != nil {
+		return false, err
+	}
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO public_task_projections (
+			id, resource_tenant_id, task_id, task_specification_version_id,
+			canonical_repository, source_issue_url, issue_revision, base_commit,
+			title, summary, problem_diagnosis, impact, proposed_solution,
+			implementation_steps, constraints, non_goals, risks,
+			acceptance_criteria, evidence_refs, quality_level, status, published_at
+		) VALUES (
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+		) ON CONFLICT (resource_tenant_id, task_id) DO NOTHING`,
+		p.ID, p.ResourceTenantID, p.TaskID, p.TaskSpecificationVersionID,
+		p.CanonicalRepository, p.SourceIssueURL, p.IssueRevision, p.BaseCommit,
+		p.Title, p.Summary, p.ProblemDiagnosis, p.Impact, p.ProposedSolution,
+		steps, constraints, nonGoals, risks, criteria, evidence,
+		p.QualityLevel, p.Status, p.PublishedAt)
+	if err != nil {
+		return false, writeError(err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (r *Repository) GetByID(ctx context.Context, id string) (*domain.Projection, error) {
 	p, err := scanProjection(r.pool.QueryRow(ctx, selectProjection+` WHERE id=$1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -199,6 +230,11 @@ func encodeFields(p *domain.Projection) ([]byte, []byte, []byte, []byte, []byte,
 		body, err := json.Marshal(value)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, err
+		}
+		// PostgreSQL enforces array JSONB values for these projection fields.
+		// A nil Go slice marshals as null, so normalize it to an empty array.
+		if string(body) == "null" {
+			body = []byte("[]")
 		}
 		encoded[index] = body
 	}

@@ -83,6 +83,49 @@ func (s *PublicIssueSource) ListIssues(ctx context.Context, repo string, filter 
 	return issues, nil
 }
 
+// ResolveBaseCommit returns the current default-branch commit for a public
+// repository. The value is frozen into a public task projection so later
+// execution and review can refer to a concrete repository state.
+func (s *PublicIssueSource) ResolveBaseCommit(ctx context.Context, repo string) (string, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return "", err
+	}
+	repoBody, status, retryAfter, err := s.get(ctx, s.apiURL("/repos/%s/%s", owner, name))
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", mapError(status, repoBody, retryAfter)
+	}
+	var repository struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.Unmarshal(repoBody, &repository); err != nil {
+		return "", fmt.Errorf("decode github repository: %w", err)
+	}
+	if repository.DefaultBranch == "" {
+		return "", fmt.Errorf("github repository has no default branch")
+	}
+	commitBody, status, retryAfter, err := s.get(ctx, s.apiURL("/repos/%s/%s/commits/%s", owner, name, url.PathEscape(repository.DefaultBranch)))
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", mapError(status, commitBody, retryAfter)
+	}
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.Unmarshal(commitBody, &commit); err != nil {
+		return "", fmt.Errorf("decode github commit: %w", err)
+	}
+	if commit.SHA == "" {
+		return "", fmt.Errorf("github commit has no sha")
+	}
+	return commit.SHA, nil
+}
+
 func (s *PublicIssueSource) get(ctx context.Context, url string) ([]byte, int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
