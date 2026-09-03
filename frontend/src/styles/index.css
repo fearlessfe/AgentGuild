@@ -4,6 +4,7 @@
 @import "./tokens.css";
 @import "./base.css";
 @import "./landing.css";
+@import "./design-gallery.css";
 @import "./dashboard.css";
 @import "./protocol.css";
 @import "./network.css";
@@ -13,3 +14,5 @@
 @import "./legacy.css";
 @import "./layout.css";
 @import "./responsive.css";
+@import "./editorial.css";
+@import "./cohesive.css";

@@ -37,6 +37,13 @@
   .rail-brand { margin: 0 var(--sp-2) 0 0; }
   .rail-spacer { display: none; }
 
+  .rail-head,
+  .rail[data-collapsed="true"] .rail-head {
+    flex-direction: row;
+    width: auto;
+    margin-bottom: 0;
+  }
+
   .app-body {
     display: block;
   }
@@ -100,6 +107,17 @@
 
   .page {
     padding: var(--sp-4);
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  .page-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .dense-table,

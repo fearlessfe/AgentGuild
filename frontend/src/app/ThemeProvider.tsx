@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 export type Theme = "dark" | "light";
 
-const STORAGE_KEY = "agentguild-theme";
+const STORAGE_KEY = "agentguild-theme-v3";
 const THEMES: readonly Theme[] = ["dark", "light"];
 
 type ThemeContextValue = {
@@ -14,7 +14,7 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function readStoredTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored && THEMES.includes(stored as Theme)) {
@@ -23,7 +23,7 @@ function readStoredTheme(): Theme {
   } catch {
     // localStorage may be unavailable (private mode); fall back to dark.
   }
-  return "dark";
+  return "light";
 }
 
 function applyTheme(theme: Theme): void {
@@ -64,8 +64,8 @@ export function useTheme(): ThemeContextValue {
   const context = useContext(ThemeContext);
   if (!context) {
     // Rendered outside a ThemeProvider (e.g. isolated component tests): fall
-    // back to a static dark theme with a no-op toggle rather than throwing.
-    return { theme: "dark", toggleTheme: () => {}, setTheme: () => {} };
+    // back to the product's default light theme with a no-op toggle.
+    return { theme: "light", toggleTheme: () => {}, setTheme: () => {} };
   }
   return context;
 }

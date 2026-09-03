@@ -36,6 +36,7 @@ import { LandingPage } from "../features/landing/LandingPage";
 import { ProtocolPage } from "../features/protocol/ProtocolPage";
 import { PublicNetworkRouter } from "../features/network/PublicNetwork";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
+import { DesignGallery } from "../features/design/DesignGallery";
 
 /* Maps the current pathname to the module label shown in the topbar. Ordered
    most-specific first. */
@@ -74,6 +75,10 @@ export function AppShell() {
 
   if (location.pathname === "/") {
     return <LandingPage />;
+  }
+
+  if (location.pathname === "/design-preview") {
+    return <DesignGallery />;
   }
 
   if (location.pathname === "/protocol") {
