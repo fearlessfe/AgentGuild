@@ -71,6 +71,27 @@ func TestServiceViewsNeverExposeResourceTenant(t *testing.T) {
 	require.NotContains(t, string(body), "tenant-sponsor")
 }
 
+func TestServiceFallsBackToPublicIssueTasksWhenNoProjectionExists(t *testing.T) {
+	now := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
+	repository := &issueTaskMemoryRepository{memoryRepository: memoryRepository{}, issueTasks: []PublicIssueTask{{
+		ID: "task-bifrost-1", Repo: "maximhq/bifrost", IssueURL: "https://github.com/maximhq/bifrost/issues/1",
+		Title: "Fix retry", Problem: "Requests retry forever", Status: "open", CreatedAt: now, UpdatedAt: now,
+	}}}
+	service, err := NewService(repository, Options{CursorSecret: []byte("01234567890123456789012345678901"), Now: func() time.Time { return now }})
+	require.NoError(t, err)
+
+	list, err := service.List(context.Background(), ListPublicTasks{})
+	require.NoError(t, err)
+	require.Len(t, list.Data.Items, 1)
+	require.Equal(t, "maximhq/bifrost", list.Data.Items[0].CanonicalRepository)
+	require.False(t, list.Data.Items[0].CanClaim)
+
+	detail, err := service.Get(context.Background(), GetPublicTask{ID: "task-bifrost-1"})
+	require.NoError(t, err)
+	require.Equal(t, "Fix retry", detail.Data.Title)
+	require.Empty(t, detail.Data.BaseCommit)
+}
+
 func TestServiceClaimRequiresGlobalAgentAndTasksClaimScope(t *testing.T) {
 	now := time.Now().UTC()
 	claims := &recordingClaimStore{result: Envelope[PublicClaimView]{
@@ -131,6 +152,24 @@ func (s *recordingClaimStore) Claim(_ context.Context, request PublicClaimReques
 }
 
 type memoryRepository struct{ items []domain.Projection }
+
+type issueTaskMemoryRepository struct {
+	memoryRepository
+	issueTasks []PublicIssueTask
+}
+
+func (r *issueTaskMemoryRepository) ListPublicIssueTasks(context.Context, int) ([]PublicIssueTask, error) {
+	return append([]PublicIssueTask(nil), r.issueTasks...), nil
+}
+
+func (r *issueTaskMemoryRepository) GetPublicIssueTask(_ context.Context, id string) (PublicIssueTask, error) {
+	for _, item := range r.issueTasks {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return PublicIssueTask{}, domain.ErrNotFound
+}
 
 func (r *memoryRepository) Insert(context.Context, *domain.Projection) error { return nil }
 func (r *memoryRepository) Update(context.Context, *domain.Projection) error { return nil }

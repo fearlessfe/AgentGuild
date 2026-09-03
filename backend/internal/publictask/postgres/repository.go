@@ -103,6 +103,55 @@ func (r *Repository) Update(ctx context.Context, p *domain.Projection) error {
 	return nil
 }
 
+// ListPublicIssueTasks exposes only active tasks whose source repository was
+// explicitly onboarded as public_github. This is the MVP bridge until Issue
+// analysis produces a full public_task_projections row.
+func (r *Repository) ListPublicIssueTasks(ctx context.Context, limit int) ([]application.PublicIssueTask, error) {
+	if limit < 1 || limit > 100 {
+		return nil, domain.ErrInvalidArgument
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT t.id, m.repo, COALESCE(m.issue_url, ''), t.title, t.problem,
+		       t.status, t.created_at, t.updated_at
+		FROM issue_task_map m
+		JOIN tasks t ON t.tenant_id=m.tenant_id AND t.id=m.task_id
+		JOIN onboarded_repositories r
+		  ON r.tenant_id=m.tenant_id AND r.full_name=m.repo
+		WHERE r.source_type='public_github' AND t.status IN ('draft','open')
+		ORDER BY t.created_at DESC, t.id ASC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]application.PublicIssueTask, 0)
+	for rows.Next() {
+		var item application.PublicIssueTask
+		if err := rows.Scan(&item.ID, &item.Repo, &item.IssueURL, &item.Title, &item.Problem, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) GetPublicIssueTask(ctx context.Context, id string) (application.PublicIssueTask, error) {
+	var item application.PublicIssueTask
+	err := r.pool.QueryRow(ctx, `
+		SELECT t.id, m.repo, COALESCE(m.issue_url, ''), t.title, t.problem,
+		       t.status, t.created_at, t.updated_at
+		FROM issue_task_map m
+		JOIN tasks t ON t.tenant_id=m.tenant_id AND t.id=m.task_id
+		JOIN onboarded_repositories r
+		  ON r.tenant_id=m.tenant_id AND r.full_name=m.repo
+		WHERE t.id=$1 AND r.source_type='public_github' AND t.status IN ('draft','open')`, id).
+		Scan(&item.ID, &item.Repo, &item.IssueURL, &item.Title, &item.Problem, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.PublicIssueTask{}, domain.ErrNotFound
+	}
+	return item, err
+}
+
 const selectProjection = `
 	SELECT id, resource_tenant_id, task_id, task_specification_version_id,
 	       canonical_repository, source_issue_url, issue_revision, base_commit,

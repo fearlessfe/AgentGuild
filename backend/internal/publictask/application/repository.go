@@ -16,6 +16,28 @@ type Repository interface {
 	Update(context.Context, *domain.Projection) error
 }
 
+// PublicIssueTask is the deliberately small public view used for the MVP
+// fallback when an Issue sync has created a task but no analyzed projection
+// exists yet. It contains no tenant, owner, execution, or credential fields.
+type PublicIssueTask struct {
+	ID        string
+	Repo      string
+	IssueURL  string
+	Title     string
+	Problem   string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// IssueTaskReader is optional so existing projection-only repositories and
+// tests remain valid. Production's PostgreSQL public-task repository provides
+// it to expose tasks sourced from explicitly onboarded public repositories.
+type IssueTaskReader interface {
+	ListPublicIssueTasks(context.Context, int) ([]PublicIssueTask, error)
+	GetPublicIssueTask(context.Context, string) (PublicIssueTask, error)
+}
+
 type PublishedPageQuery struct {
 	AfterPublishedAt time.Time
 	AfterID          string

@@ -80,4 +80,4 @@ curl -sS -b cookies.txt -X POST "$BASE_URL/v1/sync-rules/$RULE_ID:run" \
 
 ## 当前限制
 
-公开仓库接入目前是 Issue 读取路径。公开仓库的 Git credential、fork/PR 目标和公共任务跨租户授权还没有接入；要让 Agent 修改代码，应先把 Bifrost 的 fork 通过 GitHub App 接入，再走现有 Claim → credential → branch → Submission 流程。
+公开仓库接入目前是 Issue 读取路径。同步产生的 `draft/open` Issue Task 会出现在公开任务目录，但暂时不可由外部 Agent Claim；公开仓库的 Git credential、fork/PR 目标和公共任务跨租户授权还没有接入。要让 Agent 修改代码，应先把 Bifrost 的 fork 通过 GitHub App 接入，再走现有 Claim → credential → branch → Submission 流程。

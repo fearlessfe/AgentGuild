@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -216,6 +217,22 @@ func (s *Service) List(ctx context.Context, query ListPublicTasks) (Envelope[Tas
 	if err != nil {
 		return Envelope[TaskPage]{}, err
 	}
+	// Issue sync predates the analyzed public projection pipeline. Until a
+	// specification projection exists, expose only open/draft tasks sourced
+	// from explicitly onboarded public repositories as a read-only fallback.
+	if len(projections) == 0 && query.Cursor == "" {
+		if reader, ok := s.repository.(IssueTaskReader); ok {
+			issues, err := reader.ListPublicIssueTasks(ctx, limit)
+			if err != nil {
+				return Envelope[TaskPage]{}, err
+			}
+			items := make([]TaskSummary, len(issues))
+			for i := range issues {
+				items[i] = issueTaskSummary(issues[i])
+			}
+			return Envelope[TaskPage]{Data: TaskPage{Items: items}, Meta: Meta{ServerTime: now}}, nil
+		}
+	}
 	hasMore := len(projections) > limit
 	if hasMore {
 		projections = projections[:limit]
@@ -242,6 +259,14 @@ func (s *Service) Get(ctx context.Context, query GetPublicTask) (Envelope[TaskDe
 	}
 	projection, err := s.repository.GetByID(ctx, query.ID)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			if reader, ok := s.repository.(IssueTaskReader); ok {
+				issue, issueErr := reader.GetPublicIssueTask(ctx, query.ID)
+				if issueErr == nil {
+					return Envelope[TaskDetail]{Data: issueTaskDetail(issue), Meta: Meta{ServerTime: s.now()}}, nil
+				}
+			}
+		}
 		return Envelope[TaskDetail]{}, err
 	}
 	if projection.Status != domain.StatusPublished {
@@ -259,6 +284,46 @@ func (s *Service) Get(ctx context.Context, query GetPublicTask) (Envelope[TaskDe
 		EvidenceRefs:       append([]domain.EvidenceRef(nil), projection.EvidenceRefs...),
 	}
 	return Envelope[TaskDetail]{Data: view, Meta: Meta{ServerTime: s.now()}}, nil
+}
+
+func issueTaskSummary(task PublicIssueTask) TaskSummary {
+	return TaskSummary{
+		ID: task.ID, TaskSpecificationVersionID: "issue-task:" + task.ID,
+		CanonicalRepository: task.Repo, SourceIssueURL: task.IssueURL,
+		Title: task.Title, Summary: publicIssueSummary(task.Problem),
+		QualityLevel: domain.QualityStandard, PublishedAt: task.CreatedAt,
+		CanClaim: false,
+	}
+}
+
+func issueTaskDetail(task PublicIssueTask) TaskDetail {
+	return TaskDetail{
+		TaskSummary:      issueTaskSummary(task),
+		IssueRevision:    task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ProblemDiagnosis: task.Problem,
+		Impact:           "待 Agent 分析",
+		ProposedSolution: "请根据原始 GitHub Issue 和仓库上下文评估修复方案。",
+		ImplementationSteps: []string{
+			"阅读原始 GitHub Issue",
+			"在仓库中定位相关代码",
+			"实现修复并提交验证结果",
+		},
+		AcceptanceCriteria: []domain.AcceptanceCriterion{{
+			ID: "issue-resolution", Statement: "原始 GitHub Issue 描述的问题得到修复并提供验证证据",
+			Critical: true, VerifierKind: "manual", ExpectedResult: "由维护者确认修复有效",
+		}},
+	}
+}
+
+func publicIssueSummary(problem string) string {
+	problem = strings.TrimSpace(problem)
+	if len(problem) > 240 {
+		return problem[:240] + "..."
+	}
+	if problem == "" {
+		return "来自公开 GitHub Issue 的待处理任务。"
+	}
+	return problem
 }
 
 func summary(projection domain.Projection, authenticated bool) TaskSummary {
