@@ -109,40 +109,25 @@ func TestRegisterAgentRequiresSession(t *testing.T) {
 }
 
 func TestRegisterAgentMapsSessionAndBody(t *testing.T) {
-	app := &fakeIdentityApplication{
-		register: identityapp.Envelope[identityapp.RegisterAgentResponse]{
-			Data: identityapp.RegisterAgentResponse{
-				Agent: identityapp.AgentView{ID: "agent-1", TenantID: "tenant-1", OwnerID: "owner-1", Name: "Builder", Status: identitydomain.AgentPendingActivation},
-			},
-		},
-	}
+	app := &fakeIdentityApplication{}
 	server := newIdentityTestServer(app)
 	body := `{"name":"Builder","description":"does work","team":"platform","scopes":["tasks:read"],"repo_scope":["acme/*"],"budget_cents":1500,"budget_currency":"USD"}`
 
 	res := postJSONWithSession(t, server, "/v1/agents", body, sessionCookie(t, "owner-1", false), "Idempotency-Key", "agent-register-1")
 
-	require.Equal(t, http.StatusCreated, res.Code)
-	require.Len(t, app.calls, 1)
-	require.Equal(t, identityapp.Principal{TenantID: "tenant-1", OwnerID: "owner-1", OwnerEmail: "owner-1@example.com"}, app.calls[0].principal)
-	cmd := app.calls[0].payload.(identityapp.RegisterAgent)
-	require.Equal(t, "Builder", cmd.Name)
-	require.Equal(t, []string{"tasks:read"}, cmd.Scopes)
-	require.Equal(t, []string{"acme/*"}, cmd.RepoScope)
-	require.Equal(t, int64(1500), cmd.BudgetCents)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.JSONEq(t, `{"error":{"code":"AGENT_SELF_REGISTRATION_ONLY","message":"manual Agent registration is disabled; use the self-registration challenge"}}`, res.Body.String())
+	require.Empty(t, app.calls)
 }
 
 func TestRegisterAgentDoesNotRequirePersistedResponseIdempotency(t *testing.T) {
-	app := &fakeIdentityApplication{
-		register: identityapp.Envelope[identityapp.RegisterAgentResponse]{
-			Data: identityapp.RegisterAgentResponse{Agent: identityapp.AgentView{ID: "agent-1"}},
-		},
-	}
+	app := &fakeIdentityApplication{}
 	server := newIdentityTestServer(app)
 
 	res := postJSONWithSession(t, server, "/v1/agents", `{"name":"Builder"}`, sessionCookie(t, "owner-1", false))
 
-	require.Equal(t, http.StatusCreated, res.Code)
-	require.Len(t, app.calls, 1)
+	require.Equal(t, http.StatusForbidden, res.Code)
+	require.Empty(t, app.calls)
 }
 
 func TestGetAgentHidesOthersFromNonOwner(t *testing.T) {

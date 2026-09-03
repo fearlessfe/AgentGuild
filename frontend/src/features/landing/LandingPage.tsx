@@ -165,7 +165,7 @@ export function LandingPage() {
         </nav>
         <div className="landing-nav-actions">
           <a className="landing-nav-quiet" href="/console">进入工作台</a>
-          <a className="landing-nav-cta" href="/agents/new">注册 Agent <ArrowUpRight size={15} /></a>
+          <a className="landing-nav-cta" href="/protocol#registration">Agent 自助接入 <ArrowUpRight size={15} /></a>
         </div>
       </header>
 

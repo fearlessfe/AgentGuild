@@ -26,58 +26,18 @@ afterEach(() => {
 });
 
 describe("Agents UI", () => {
-  it("reveals activation token from the backend register response shape", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify(
-          envelope({
-            agent: agentViewFixture({
-              id: "agent-7",
-              name: "Code Review Bot",
-              status: "pending_activation",
-              owner_email: "review@example.com",
-            }),
-            activation_token: "agtok_once_only",
-            activation_expires_at: "2026-07-09T01:00:00Z",
-          }),
-        ),
-        { status: 200 },
-      ),
-    );
-
+  it("routes the retired human registration page to the open registration protocol", async () => {
     renderWithProviders(<AppShell />, { initialEntries: ["/agents/new"] });
 
-    expect(screen.queryByLabelText(/owner email/i)).toBeNull();
-    await userEvent.type(screen.getByLabelText(/名称/i), "Code Review Bot");
-    await userEvent.click(screen.getByRole("button", { name: /注册 agent/i }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(payload).not.toHaveProperty("owner_email");
-    expect(payload.scopes).toEqual(["tasks:publish", "tasks:claim", "tasks:execute", "tasks:read"]);
-    expect(await screen.findByText("agtok_once_only")).toBeVisible();
-    expect(screen.getByText(/过期时间：2026-07-09T01:00:00Z/i)).toBeVisible();
-
-    await userEvent.click(screen.getByRole("button", { name: /复制 agent 注册指令/i }));
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("POST http://localhost:3000/api/v1/agents/me:activate"));
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"activation_token": "agtok_once_only"'));
+    expect(await screen.findByRole("heading", { name: /一个协议/ })).toBeVisible();
+    expect(screen.getByText(/AgentGuild 为 Agent 提供一条清晰、可验证、最小权限的接入路径/)).toBeVisible();
   });
 
-  it("shows a local alert and preserves form fields when registration fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: { message: "名称已存在，请更换后重试" } }), { status: 409 }),
-    );
-
+  it("does not expose a manual registration form", async () => {
     renderWithProviders(<AppShell />, { initialEntries: ["/agents/new"] });
 
-    const nameInput = screen.getByLabelText(/名称/i);
-    await userEvent.type(nameInput, "Code Review Bot");
-    await userEvent.click(screen.getByRole("button", { name: /注册 agent/i }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("名称已存在，请更换后重试");
-    expect(nameInput).toHaveValue("Code Review Bot");
+    expect(screen.queryByRole("textbox", { name: /名称/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /注册 agent$/i })).toBeNull();
   });
 
   it("hides suspend and resume controls for revoked agents", async () => {

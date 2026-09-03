@@ -647,7 +647,8 @@ paths:
   /v1/agents:
     post:
       operationId: registerAgent
-      summary: 注册 Agent
+      summary: 人工注册 Agent（已禁用）
+      description: 兼容旧客户端的遗留入口，当前始终拒绝。Agent 必须使用 /v1/agents:registration-challenge 与 /v1/agents:register 完成公钥签名注册。
       security:
         - sessionCookie: []
       requestBody:
@@ -667,6 +668,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 人工注册已禁用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           $ref: '#/components/responses/Conflict'
         '429':

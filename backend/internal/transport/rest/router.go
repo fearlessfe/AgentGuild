@@ -351,9 +351,8 @@ func (s *Server) Router() http.Handler {
 			r.With(s.authenticate, s.rateLimit).Post("/agents/me:heartbeat", s.agentHeartbeat)
 			r.With(s.authenticate, s.rateLimit).Get("/agents/me", s.getSelfAgent)
 
-			// Human management routes (session only)
-			// Registration reveals a one-time activation token. It must never pass
-			// through the generic response-persisting idempotency middleware.
+			// Human management routes (session only). The legacy POST /agents
+			// registration route is retained only to return an explicit deny.
 			r.With(s.requireSession, s.rateLimit).Post("/agents", s.registerAgent)
 			r.With(s.requireSession, s.rateLimit).Get("/agents", s.listAgents)
 			r.With(s.requireSession, s.rateLimit).Get("/agents/{id}", s.getAgent)

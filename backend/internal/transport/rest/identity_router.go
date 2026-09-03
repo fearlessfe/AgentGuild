@@ -72,35 +72,10 @@ func (s *Server) validateOIDCState(r *http.Request) error {
 }
 
 func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
-	principal := identityPrincipalFromAuth(mustPrincipal(r))
-	var body struct {
-		Name           string   `json:"name"`
-		Description    string   `json:"description"`
-		Team           string   `json:"team"`
-		Scopes         []string `json:"scopes"`
-		RepoScope      []string `json:"repo_scope"`
-		BudgetCents    int64    `json:"budget_cents"`
-		BudgetCurrency string   `json:"budget_currency"`
-		RequestID      string   `json:"request_id"`
-	}
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	result, err := s.identity.RegisterAgent(r.Context(), principal, identityapp.RegisterAgent{
-		RequestID:      body.RequestID,
-		Name:           body.Name,
-		Description:    body.Description,
-		Team:           body.Team,
-		Scopes:         body.Scopes,
-		RepoScope:      body.RepoScope,
-		BudgetCents:    body.BudgetCents,
-		BudgetCurrency: body.BudgetCurrency,
-	})
-	if err != nil {
-		mapIdentityError(w, err, principal)
-		return
-	}
-	writeJSON(w, http.StatusCreated, result)
+	// Agent identities are created exclusively through the public
+	// challenge/signature flow. Keep this legacy route as an explicit deny so
+	// old clients fail closed instead of creating human-provisioned agents.
+	writeError(w, http.StatusForbidden, "AGENT_SELF_REGISTRATION_ONLY", "manual Agent registration is disabled; use the self-registration challenge")
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {

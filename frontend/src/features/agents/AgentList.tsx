@@ -72,8 +72,8 @@ export function AgentList() {
             ))}
           </select>
         </label>
-        <Link className="primary-action" to="/agents/new">
-          注册 Agent
+        <Link className="primary-action" to="/protocol#registration">
+          Agent 自助接入
         </Link>
       </div>
 

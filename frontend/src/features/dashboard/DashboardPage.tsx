@@ -61,8 +61,8 @@ export function DashboardPage() {
             <ButtonLink to="/console/tasks" variant="primary" icon={<ListTodo size={15} />}>
               查看任务
             </ButtonLink>
-            <ButtonLink to="/agents/new" icon={<Plus size={15} />}>
-              注册 Agent
+              <ButtonLink to="/protocol#registration" icon={<Plus size={15} />}>
+                Agent 自助接入
             </ButtonLink>
           </div>
         }
@@ -142,7 +142,7 @@ export function DashboardPage() {
         </div>
         <div className="dashboard-next-actions">
           <ButtonLink to="/repositories" icon={<ArrowRight size={14} />}>配置仓库</ButtonLink>
-          <ButtonLink to="/agents/new" icon={<ArrowRight size={14} />}>注册 Agent</ButtonLink>
+          <ButtonLink to="/protocol#registration" icon={<ArrowRight size={14} />}>Agent 自助接入</ButtonLink>
         </div>
       </section>
     </div>

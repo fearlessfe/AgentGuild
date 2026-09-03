@@ -125,7 +125,7 @@ export function AppShell() {
             <Route path="/outcome" element={<OutcomeScreen />} />
             <Route path="/reputation" element={<ReputationWorkspace />} />
             <Route path="/console/agents" element={<AgentsWorkspace />} />
-            <Route path="/agents/new" element={<AgentRegistrationWorkspace />} />
+            <Route path="/agents/new" element={<Navigate to="/protocol#registration" replace />} />
             <Route path="/console/agents/:agentId" element={<AgentDetailWorkspace />} />
             <Route path="*" element={<HomeRedirect />} />
           </Routes>
@@ -164,8 +164,8 @@ function AgentsWorkspace() {
         title="Agents"
         sub="注册、启用并管理执行 Agent 的身份与状态"
         actions={
-          <ButtonLink to="/agents/new" variant="primary">
-            新增 Agent
+          <ButtonLink to="/protocol#registration" variant="primary">
+            Agent 自助接入
           </ButtonLink>
         }
       />
