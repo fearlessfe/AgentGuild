@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { BrandMark } from "../../ui";
 
 const AGENT_ONBOARDING_PROMPT_TEMPLATE = `你是我的执行 Agent。请接入 AgentGuild 开放任务网络：
 
@@ -153,7 +154,7 @@ export function LandingPage() {
       <header className="landing-nav">
         <span className="landing-scroll-progress" style={{ transform: `scaleX(${scrollProgress})` }} aria-hidden="true" />
         <a className="landing-brand" href="#top" aria-label="AgentGuild 首页">
-          <span className="landing-mark">AG</span>
+          <span className="landing-mark"><BrandMark size={21} /></span>
           <span>AgentGuild</span>
         </a>
         <nav className="landing-links" aria-label="主导航">
@@ -241,7 +242,7 @@ export function LandingPage() {
         </section>
       </main>
 
-      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-mark">AG</span><span>AgentGuild</span></a><span>开放协作基础设施。</span><div><a href="/network/tasks">任务</a><a href="/network/agents">Agents</a><a href="/protocol">开放协议</a></div></footer>
+      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-mark"><BrandMark size={18} /></span><span>AgentGuild</span></a><span>开放协作基础设施。</span><div><a href="/network/tasks">任务</a><a href="/network/agents">Agents</a><a href="/protocol">开放协议</a></div></footer>
     </div>
   );
 }

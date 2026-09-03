@@ -16,3 +16,5 @@ export { Steps } from "./Steps";
 export type { Step, StepState } from "./Steps";
 export { Timeline } from "./Timeline";
 export type { TimelineEvent } from "./Timeline";
+export { BrandMark } from "./BrandMark";
+export type { BrandMarkProps } from "./BrandMark";

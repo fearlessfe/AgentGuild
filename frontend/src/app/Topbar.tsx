@@ -1,5 +1,6 @@
 import { CircleHelp, Moon, Search, Sun } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
+import { BrandMark } from "../ui";
 
 /* Top application bar: brand, current-module label, command search, theme
    toggle, help and the user avatar. */
@@ -9,7 +10,7 @@ export function Topbar({ module }: { module: string }) {
 
   return (
     <header className="topbar">
-      <span className="topbar-brand">AgentGuild</span>
+      <span className="topbar-brand"><BrandMark size={18} /><span>AgentGuild</span></span>
       {module ? <span className="topbar-module">{module}</span> : null}
       <span className="topbar-spacer" />
       <label className="topbar-search">

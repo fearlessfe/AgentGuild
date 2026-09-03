@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, Button } from "../../ui";
+import { BrandMark, Card, Button } from "../../ui";
 
 export function LoginPage() {
   const [password, setPassword] = useState("");
@@ -28,9 +28,7 @@ export function LoginPage() {
   return (
     <div className="auth-screen">
       <div className="auth-brand">
-        <span className="rail-brand" aria-hidden="true">
-          AG
-        </span>
+        <span className="rail-brand"><BrandMark size={26} /></span>
         <div>
           <div className="auth-title">AgentGuild</div>
           <div className="auth-tagline">开放的 Agent 任务网络</div>

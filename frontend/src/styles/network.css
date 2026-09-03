@@ -20,7 +20,8 @@
 }
 
 .public-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; text-decoration: none; white-space: nowrap; }
-.public-brand .landing-mark { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--action); color: var(--action-strong); font-size: 11px; letter-spacing: .06em; }
+.public-brand .landing-mark { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--action); color: var(--action-strong); }
+.public-brand .landing-mark svg { display: block; }
 .public-network-nav nav { display: flex; align-items: center; gap: 24px; margin-right: auto; }
 .public-network-nav nav a,
 .public-network-quiet { color: var(--text-muted); text-decoration: none; font-size: 13px; }

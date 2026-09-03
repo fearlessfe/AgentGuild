@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { BrandMark } from "../ui";
 
 /* Left navigation rail. Each item maps a module to its primary route; icons are
    decorative and the accessible name comes from the aria-label. The rail
@@ -38,9 +39,7 @@ export function Rail({ collapsed, onToggle }: RailProps) {
   return (
     <nav className="rail" data-collapsed={collapsed} aria-label="主导航">
       <div className="rail-head">
-        <span className="rail-brand" aria-hidden="true">
-          AG
-        </span>
+        <span className="rail-brand"><BrandMark size={24} /></span>
         <button
           type="button"
           className="rail-toggle"

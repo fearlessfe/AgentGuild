@@ -2,6 +2,7 @@
 .landing-nav { height: 74px; display:flex; align-items:center; justify-content:space-between; gap:24px; max-width:1320px; margin:0 auto; padding:0 38px; }
 .landing-brand { display:inline-flex; align-items:center; gap:10px; color:#111318; font-size:15px; font-weight:760; letter-spacing:-.02em; text-decoration:none; }
 .landing-mark { display:grid; place-items:center; width:30px; height:30px; border-radius:9px; background:#111318; color:#fff; font-size:11px; letter-spacing:-.08em; }
+.landing-mark svg { display:block; }
 .landing-links { display:flex; align-items:center; gap:32px; margin-left:auto; margin-right:10px; }
 .landing-links a,.landing-login,.landing-footer a { color:#626871; text-decoration:none; font-size:13px; transition:color .2s ease; }
 .landing-links a:hover,.landing-login:hover,.landing-footer a:hover { color:#111318; }

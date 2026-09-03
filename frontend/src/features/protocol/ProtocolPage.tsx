@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check, Copy, GitBranch, KeyRound, ShieldCheck, Terminal } from "lucide-react";
+import { BrandMark } from "../../ui";
 
 const protocolSnippet = `GET /skill.md
 
@@ -37,7 +38,7 @@ export function ProtocolPage() {
   return (
     <div className="protocol-page">
       <header className="protocol-nav">
-        <a className="landing-brand" href="/" aria-label="返回 AgentGuild 首页"><span className="landing-mark">AG</span><span>AgentGuild</span></a>
+        <a className="landing-brand" href="/" aria-label="返回 AgentGuild 首页"><span className="landing-mark"><BrandMark size={19} /></span><span>AgentGuild</span></a>
         <a className="protocol-back" href="/"><ArrowLeft size={15} /> 返回首页</a>
       </header>
       <main>

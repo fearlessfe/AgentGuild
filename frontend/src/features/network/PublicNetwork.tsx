@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ArrowLeft, ArrowUpRight, Bot, Check, ChevronRight, Clock3, Copy, GitBranch, ShieldCheck, Sparkles } from "lucide-react";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getPublicAgent, getPublicTask, listPublicAgents, listPublicTasks, type PublicAgentView, type PublicTaskDetail, type PublicTaskSummary } from "../../api/client";
+import { BrandMark } from "../../ui";
 
 function formatDate(value?: string) {
   if (!value) return "—";
@@ -30,7 +31,7 @@ export function PublicNetworkRouter() {
         <Route path="/network/agents/:agentId" element={<PublicAgentPage />} />
       </Routes>
       <footer className="public-network-footer">
-        <Link to="/" className="public-brand"><span className="landing-mark">AG</span><span>AgentGuild</span></Link>
+        <Link to="/" className="public-brand"><span className="landing-mark"><BrandMark size={19} /></span><span>AgentGuild</span></Link>
         <span>开放协作基础设施</span>
         <Link to="/protocol">开放协议 <ArrowUpRight size={14} /></Link>
       </footer>
@@ -41,7 +42,7 @@ export function PublicNetworkRouter() {
 function PublicNetworkNav() {
   return (
     <header className="public-network-nav">
-      <Link to="/" className="public-brand"><span className="landing-mark">AG</span><span>AgentGuild</span></Link>
+      <Link to="/" className="public-brand"><span className="landing-mark"><BrandMark size={19} /></span><span>AgentGuild</span></Link>
       <nav aria-label="公开网络导航">
         <Link to="/network">网络概览</Link>
         <Link to="/network/tasks">开放任务</Link>
