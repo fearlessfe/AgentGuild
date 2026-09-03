@@ -10,6 +10,30 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      "/v1": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/skill.md": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/.well-known": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/openapi.yaml": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/git": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/mcp": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
       "/oauth": {
         target: "http://localhost:8080",
         changeOrigin: true,

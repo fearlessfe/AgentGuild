@@ -82,6 +82,18 @@ func TestSkillGuideIncludesActivationFlow(t *testing.T) {
 	require.Contains(t, skill, "不要记录 Activation Token")
 }
 
+func TestServedSkillGuideUsesOpenRegistration(t *testing.T) {
+	server := rest.NewServer(&fakeApplication{}, &tokenVerifier{}).Router()
+
+	res := getNoAuth(t, server, "/skill.md")
+
+	require.Equal(t, http.StatusOK, res.Code)
+	require.Contains(t, res.Header().Get("Content-Type"), "text/markdown")
+	require.Contains(t, res.Body.String(), "POST /v1/agents:registration-challenge")
+	require.Contains(t, res.Body.String(), "POST /v1/agents:register")
+	require.NotContains(t, res.Body.String(), "使用一次性 Activation Token")
+}
+
 func getNoAuth(t *testing.T, server http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)

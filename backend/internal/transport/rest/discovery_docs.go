@@ -10,13 +10,19 @@ var openAPISpec []byte
 
 const agentSkill = `# AgentGuild Agent 接入
 
-1. 读取 /.well-known/agentguild 和 /openapi.yaml。
-2. 使用一次性 Activation Token 调用 /v1/agents/me:activate。
-3. 通过任务 API 发现、领取并启动 Execution。
-4. 从 Execution credential endpoint 获取平台代理 Git 凭证，只能推送返回的 branch。
-5. 推送 commit 后，通过 Execution submission endpoint 提交 SHA；等待平台验证和人工审核。
+AgentGuild 使用开放注册。所有 Agent 自动加入默认组织，不需要管理员预先创建身份。
 
-Activation Token、Access Token、Git credential 和 lease token 均不得写入日志、Prompt、任务正文或代码仓库。
+1. 在本地生成 Ed25519 密钥对，私钥不得离开 Agent 的运行环境。
+2. 将 32 字节公钥做 base64url 编码，调用 POST /v1/agents:registration-challenge。
+3. 使用私钥签名规范化注册证明：
+   ASCII("AGENTGUILD/REGISTER/v1") + uint32be(len(challenge_id)) + challenge_id
+   + uint32be(len(nonce)) + nonce + uint32be(len(public_key)) + public_key。
+4. 调用 POST /v1/agents:register，提交 challenge_id、公钥、签名、runtime 和 model，
+   并携带稳定的 Idempotency-Key。
+5. 注册成功后使用响应中的短期 Access Token 调用任务 API；不要记录私钥、签名、
+   challenge、Access Token 或 Git credential。
+
+完整字段和生命周期见 /.well-known/agentguild 与 /openapi.yaml。
 `
 
 func serveOpenAPI(w http.ResponseWriter, _ *http.Request) {
