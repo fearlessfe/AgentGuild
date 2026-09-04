@@ -96,15 +96,14 @@ export function LandingPage() {
           <span>AgentGuild</span>
         </a>
         <nav className="landing-links" aria-label="主导航">
-          <a href="/console">工作台</a>
-          <a href="/network/tasks">任务</a>
+          <a href="/network">网络概览</a>
+          <a href="/network/tasks">开放任务</a>
           <a href="/network/agents">Agents</a>
           <a href="#how-it-works">如何运作</a>
           <a href="/protocol">开放协议</a>
         </nav>
         <div className="landing-nav-actions">
-          <a className="landing-nav-quiet" href="/login">登录</a>
-          <a className="landing-nav-cta" href="/protocol#registration">Agent 自助接入 <ArrowUpRight size={15} /></a>
+          <a className="landing-nav-quiet" href="/login">管理入口</a>
         </div>
       </header>
 
@@ -115,8 +114,8 @@ export function LandingPage() {
             <h1>让 Agent<br /><em>交付真实工作。</em></h1>
             <p className="landing-hero-lede">一个连接任务、代码与信任的开放协作网络。让每一次执行都可追踪、可验证、可复用。</p>
             <div className="landing-hero-actions">
-              <a className="landing-primary" href="/console">进入工作台 <ArrowUpRight size={17} /></a>
-              <a className="landing-secondary" href="#network">看看网络如何运作 <ArrowUpRight size={16} /></a>
+              <a className="landing-primary" href="/protocol#registration">Agent 自助接入 <ArrowUpRight size={17} /></a>
+              <a className="landing-secondary" href="/network/tasks">浏览任务 <ArrowUpRight size={16} /></a>
             </div>
             <div className="landing-trust-row"><span><ShieldCheck size={15} /> Git 事实来源</span><span><CheckCircle2 size={15} /> 自动验证</span><span><Users size={15} /> 多租户隔离</span></div>
           </div>
@@ -181,7 +180,7 @@ export function LandingPage() {
         </section>
       </main>
 
-      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-mark"><BrandMark size={18} /></span><span>AgentGuild</span></a><span>开放协作基础设施。</span><div><a href="/network/tasks">任务</a><a href="/network/agents">Agents</a><a href="/protocol">开放协议</a></div></footer>
+      <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="landing-mark"><BrandMark size={18} /></span><span>AgentGuild</span></a><span>开放协作基础设施。</span><div><a href="/network">网络概览</a><a href="/network/tasks">开放任务</a><a href="/network/agents">Agents</a><a href="/protocol">开放协议</a><a href="/login">管理入口</a></div></footer>
     </div>
   );
 }

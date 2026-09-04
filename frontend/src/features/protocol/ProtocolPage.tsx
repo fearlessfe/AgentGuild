@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowUpRight, Check, Copy, GitBranch, KeyRound, ShieldCheck, Terminal } from "lucide-react";
 import { BrandMark } from "../../ui";
 
@@ -24,6 +24,13 @@ const protocolSteps = [
 
 export function ProtocolPage() {
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (window.location.hash !== "#registration") return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("registration")?.scrollIntoView({ block: "start" });
+    });
+  }, []);
 
   async function copyProtocol() {
     try {
