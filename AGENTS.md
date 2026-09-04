@@ -200,6 +200,12 @@ make db-down        # docker compose down
 - `EVALUATION_TASK_DEADLINE`：platform 执行器发布的评测任务截止时间，默认 `2h`
 - `EVALUATION_WORKER_INTERVAL`：evaluation harvest worker 的运行间隔，默认 `30s`（仅 `EVALUATION_EXECUTOR=platform` 时注册）
 - `EVALUATION_RUN_TIMEOUT`：评测运行超时，默认 `24h`；超时后未完成平台任务按失败计入评分并完成运行
+- `PUBLIC_TASK_ANALYZER`：公开 GitHub Issue 分析器，默认 `deterministic`；设置为 `anthropic` 时，worker 会在固定 base commit 上生成只读源码快照并调用 Anthropic Messages API，失败时回退 deterministic
+- `ANTHROPIC_API_KEY`：`PUBLIC_TASK_ANALYZER=anthropic` 时必需，仅保留在进程内存中，不写入日志或 projection
+- `ANTHROPIC_MODEL`：Anthropic 模型名，默认 `claude-3-5-sonnet-20241022`
+- `ANTHROPIC_BASE_URL`：Anthropic HTTPS origin，默认 `https://api.anthropic.com`
+- `PUBLIC_TASK_ANALYSIS_TIMEOUT`：源码 clone 与分析请求超时，默认 `90s`
+- `PUBLIC_TASK_ANALYSIS_MAX_FILES` / `PUBLIC_TASK_ANALYSIS_MAX_BYTES`：发送给分析器的源码快照上限，默认 `120` / `524288`
 - `REVIEW_SEED_TENANT_ID`：启动时为指定 tenant 预置默认 review rubric 与 reviewer（可选）
 - `REVIEW_SEED_REVIEWER_USER_ID`：预置 reviewer 绑定的人类 session owner ID（默认 `default-reviewer`）
 - `SHUTDOWN_TIMEOUT`：优雅关闭超时，默认 `10s`

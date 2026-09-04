@@ -33,6 +33,11 @@ type Config struct {
 	EvaluationAuto                                         bool
 	EvaluationTaskDeadline                                 time.Duration
 	EvaluationWorkerInterval, EvaluationRunTimeout         time.Duration
+	PublicTaskAnalysisProvider                             string
+	PublicTaskAnalysisAPIKey, PublicTaskAnalysisModel      string
+	PublicTaskAnalysisBaseURL                              string
+	PublicTaskAnalysisTimeout                              time.Duration
+	PublicTaskAnalysisMaxFiles, PublicTaskAnalysisMaxBytes int
 	OpenAgentOrganizationID                                string
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
@@ -82,6 +87,10 @@ func Load(get LookupEnv) (Config, error) {
 		OpenAgentOrganizationID:      value(get, "OPEN_AGENT_ORGANIZATION_ID", "public"),
 		ValidationSandboxImage:       get("VALIDATION_SANDBOX_IMAGE"),
 		EvaluationExecutor:           strings.ToLower(strings.TrimSpace(get("EVALUATION_EXECUTOR"))),
+		PublicTaskAnalysisProvider:   strings.ToLower(strings.TrimSpace(value(get, "PUBLIC_TASK_ANALYZER", "deterministic"))),
+		PublicTaskAnalysisAPIKey:     get("ANTHROPIC_API_KEY"),
+		PublicTaskAnalysisModel:      value(get, "ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+		PublicTaskAnalysisBaseURL:    value(get, "ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
 		GitHubAppPublicBaseURL:       get("GITHUB_APP_PUBLIC_BASE_URL"),
 		GitHubAppManifestStateSecret: get("SESSION_COOKIE_SECRET"),
 		GitHubAllowedHosts:           splitCSV(get("GITHUB_ALLOWED_HOSTS")),
@@ -169,6 +178,14 @@ func Load(get LookupEnv) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("EVALUATION_EXECUTOR must be %q, %q, or unset (evaluation execution disabled)", EvaluationExecutorFixed, EvaluationExecutorPlatform)
 	}
+	switch cfg.PublicTaskAnalysisProvider {
+	case "deterministic", "anthropic":
+	default:
+		return Config{}, fmt.Errorf("PUBLIC_TASK_ANALYZER must be %q or %q", "deterministic", "anthropic")
+	}
+	if cfg.PublicTaskAnalysisProvider == "anthropic" && strings.TrimSpace(cfg.PublicTaskAnalysisAPIKey) == "" {
+		return Config{}, fmt.Errorf("ANTHROPIC_API_KEY is required when PUBLIC_TASK_ANALYZER=anthropic")
+	}
 	if cfg.EvaluationAuto, err = boolean(get, "EVALUATION_AUTO", false); err != nil {
 		return Config{}, err
 	}
@@ -180,6 +197,29 @@ func Load(get LookupEnv) (Config, error) {
 	}
 	if cfg.EvaluationRunTimeout, err = duration(get, "EVALUATION_RUN_TIMEOUT", 24*time.Hour); err != nil {
 		return Config{}, err
+	}
+	if cfg.PublicTaskAnalysisTimeout, err = duration(get, "PUBLIC_TASK_ANALYSIS_TIMEOUT", 90*time.Second); err != nil {
+		return Config{}, err
+	}
+	var analysisMaxFiles, analysisMaxBytes int64
+	if analysisMaxFiles, err = integer(get, "PUBLIC_TASK_ANALYSIS_MAX_FILES"); err != nil {
+		return Config{}, err
+	}
+	if analysisMaxFiles == 0 {
+		cfg.PublicTaskAnalysisMaxFiles = 120
+	} else {
+		cfg.PublicTaskAnalysisMaxFiles = int(analysisMaxFiles)
+	}
+	if analysisMaxBytes, err = integer(get, "PUBLIC_TASK_ANALYSIS_MAX_BYTES"); err != nil {
+		return Config{}, err
+	}
+	if analysisMaxBytes == 0 {
+		cfg.PublicTaskAnalysisMaxBytes = 512 * 1024
+	} else {
+		cfg.PublicTaskAnalysisMaxBytes = int(analysisMaxBytes)
+	}
+	if cfg.PublicTaskAnalysisMaxFiles < 1 || cfg.PublicTaskAnalysisMaxFiles > 1000 || cfg.PublicTaskAnalysisMaxBytes < 1024 || cfg.PublicTaskAnalysisMaxBytes > 10*1024*1024 {
+		return Config{}, fmt.Errorf("public task analysis source limits are out of range")
 	}
 	for _, required := range [][2]string{{"DATABASE_URL", cfg.DatabaseURL}, {"CURSOR_SECRET", cfg.CursorSecret}} {
 		if required[1] == "" {

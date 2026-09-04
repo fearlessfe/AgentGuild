@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/auth"
+	publictaskanalysis "agentguild.dev/agentguild/backend/internal/publictask/analysis"
 	publictaskapp "agentguild.dev/agentguild/backend/internal/publictask/application"
 	publictaskdomain "agentguild.dev/agentguild/backend/internal/publictask/domain"
 	publictaskpostgres "agentguild.dev/agentguild/backend/internal/publictask/postgres"
@@ -35,6 +36,46 @@ func TestBuildProjectionCreatesClaimableTaskSpecification(t *testing.T) {
 	}
 	if projection.BaseCommit != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("base commit = %q", projection.BaseCommit)
+	}
+}
+
+func TestBuildProjectionUsesValidatedAgentAnalysis(t *testing.T) {
+	now := time.Date(2026, 9, 4, 1, 2, 3, 0, time.UTC)
+	result := publictaskanalysis.Result{
+		Title: "Guard retry writes", Summary: "Retries are limited to idempotent methods.",
+		ProblemDiagnosis: "The retry loop repeats non-idempotent writes.",
+		Impact:           "Duplicate records can be created.", ProposedSolution: "Gate retries by request method.",
+		ImplementationSteps: []string{"update retry policy", "add regression test"},
+		Constraints:         []string{"preserve public API"}, NonGoals: []string{"rewrite transport"},
+		Risks: []string{"older clients may rely on retries"}, AcceptanceCriteria: []publictaskdomain.AcceptanceCriterion{{
+			ID: "retry-test", Statement: "non-idempotent requests are not retried", Critical: true,
+			VerifierKind: "command", ExpectedResult: "targeted test exits 0",
+		}},
+	}
+	projection, err := buildProjectionWithAnalysis(issueTask{
+		tenantID: "tenant-1", taskID: "task-1", title: "raw issue title", problem: "raw issue problem",
+		repo: "acme/service", issueURL: "https://github.com/acme/service/issues/1", issueRevision: now,
+	}, "0123456789abcdef0123456789abcdef01234567", now, &result)
+	if err != nil {
+		t.Fatalf("buildProjectionWithAnalysis() error = %v", err)
+	}
+	if projection.Title != result.Title || projection.ProblemDiagnosis != result.ProblemDiagnosis || projection.ProposedSolution != result.ProposedSolution {
+		t.Fatalf("projection did not use analysis result: %#v", projection)
+	}
+	if projection.AcceptanceCriteria[0].ID != "retry-test" {
+		t.Fatalf("acceptance criteria = %#v", projection.AcceptanceCriteria)
+	}
+}
+
+func TestAnalysisResultIsRejectedWhenItContainsCredentialMaterial(t *testing.T) {
+	result := publictaskanalysis.Result{
+		Title: "Fix auth", Summary: "Remove leaked password: super-secret-value",
+		ProblemDiagnosis: "Credential is exposed.", Impact: "Account takeover.",
+		ProposedSolution: "Rotate it.", ImplementationSteps: []string{"rotate"},
+		AcceptanceCriteria: []publictaskdomain.AcceptanceCriterion{{ID: "check", Statement: "secret removed", Critical: true, VerifierKind: "manual", ExpectedResult: "maintainer confirms"}},
+	}
+	if analysisResultIsPublic(result) {
+		t.Fatal("analysis result containing credential material was accepted")
 	}
 }
 
@@ -82,7 +123,14 @@ func TestWorkerRunOncePublishesMappedPublicIssue(t *testing.T) {
 	}
 
 	resolver := &recordingBaseCommitResolver{commit: "0123456789abcdef0123456789abcdef01234567"}
-	worker, err := NewWorker(db, resolver)
+	cloner := &recordingSnapshotter{files: []publictaskanalysis.SourceFile{{Path: "retry.go", Content: "func retry() {}"}}}
+	analyzer := &recordingAnalyzer{result: publictaskanalysis.Result{
+		Title: "Guard retries", Summary: "Only idempotent calls retry.",
+		ProblemDiagnosis: "Writes are retried twice.", Impact: "Duplicate writes.",
+		ProposedSolution: "Gate retry policy by method.", ImplementationSteps: []string{"fix", "test"},
+		AcceptanceCriteria: []publictaskdomain.AcceptanceCriterion{{ID: "test", Statement: "tests pass", Critical: true, VerifierKind: "command", ExpectedResult: "exit 0"}},
+	}}
+	worker, err := NewWorkerWithOptions(db, resolver, Options{Analyzer: analyzer, Cloner: cloner, AnalysisTimeout: time.Minute})
 	if err != nil {
 		t.Fatalf("NewWorker() error = %v", err)
 	}
@@ -96,12 +144,15 @@ func TestWorkerRunOncePublishesMappedPublicIssue(t *testing.T) {
 	if resolver.calls != 1 {
 		t.Fatalf("ResolveBaseCommit calls = %d, want 1", resolver.calls)
 	}
+	if analyzer.calls != 1 || cloner.calls != 1 || len(analyzer.input.Files) != 1 {
+		t.Fatalf("analysis calls = analyzer:%d cloner:%d input:%#v", analyzer.calls, cloner.calls, analyzer.input)
+	}
 
 	projection, err := publictaskpostgres.NewRepository(db).GetByID(ctx, projectionID("tenant-public", "task-public-1"))
 	if err != nil {
 		t.Fatalf("GetByID() error = %v", err)
 	}
-	if projection.Status != publictaskdomain.StatusPublished || projection.BaseCommit != resolver.commit {
+	if projection.Status != publictaskdomain.StatusPublished || projection.BaseCommit != resolver.commit || projection.Title != "Guard retries" {
 		t.Fatalf("projection = %#v, want published projection at %s", projection, resolver.commit)
 	}
 }
@@ -114,6 +165,28 @@ type recordingBaseCommitResolver struct {
 func (r *recordingBaseCommitResolver) ResolveBaseCommit(context.Context, string, string) (string, error) {
 	r.calls++
 	return r.commit, nil
+}
+
+type recordingSnapshotter struct {
+	files []publictaskanalysis.SourceFile
+	calls int
+}
+
+func (r *recordingSnapshotter) Snapshot(context.Context, string, string) ([]publictaskanalysis.SourceFile, error) {
+	r.calls++
+	return r.files, nil
+}
+
+type recordingAnalyzer struct {
+	result publictaskanalysis.Result
+	input  publictaskanalysis.Input
+	calls  int
+}
+
+func (r *recordingAnalyzer) Analyze(_ context.Context, input publictaskanalysis.Input) (publictaskanalysis.Result, error) {
+	r.calls++
+	r.input = input
+	return r.result, nil
 }
 
 func TestWorkerProjectionIsListedAsClaimableAndAcceptedByClaimService(t *testing.T) {

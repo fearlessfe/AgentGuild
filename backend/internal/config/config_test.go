@@ -283,6 +283,29 @@ func TestLoadValidatesEvaluationExecutor(t *testing.T) {
 	require.ErrorContains(t, err, "EVALUATION_EXECUTOR")
 }
 
+func TestLoadConfiguresPublicTaskAnalyzer(t *testing.T) {
+	env := validEnv()
+	cfg, err := config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "deterministic", cfg.PublicTaskAnalysisProvider)
+	require.Equal(t, 120, cfg.PublicTaskAnalysisMaxFiles)
+	require.Equal(t, 512*1024, cfg.PublicTaskAnalysisMaxBytes)
+
+	env["PUBLIC_TASK_ANALYZER"] = "anthropic"
+	env["ANTHROPIC_API_KEY"] = "test-key"
+	env["PUBLIC_TASK_ANALYSIS_MAX_FILES"] = "20"
+	env["PUBLIC_TASK_ANALYSIS_MAX_BYTES"] = "4096"
+	cfg, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "anthropic", cfg.PublicTaskAnalysisProvider)
+	require.Equal(t, 20, cfg.PublicTaskAnalysisMaxFiles)
+	require.Equal(t, 4096, cfg.PublicTaskAnalysisMaxBytes)
+
+	env["ANTHROPIC_API_KEY"] = ""
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "ANTHROPIC_API_KEY")
+}
+
 func TestLoadValidatesEvaluationWorkerTiming(t *testing.T) {
 	// EVALUATION_WORKER_INTERVAL and EVALUATION_RUN_TIMEOUT override the defaults.
 	env := validEnv()

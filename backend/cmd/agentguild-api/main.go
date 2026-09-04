@@ -46,8 +46,11 @@ import (
 	participationapp "agentguild.dev/agentguild/backend/internal/participation/application"
 	participationpostgres "agentguild.dev/agentguild/backend/internal/participation/postgres"
 	"agentguild.dev/agentguild/backend/internal/postgres"
+	publictaskanalysis "agentguild.dev/agentguild/backend/internal/publictask/analysis"
+	publictaskanalyzer "agentguild.dev/agentguild/backend/internal/publictask/analyzer"
 	publictaskapp "agentguild.dev/agentguild/backend/internal/publictask/application"
 	publictaskpostgres "agentguild.dev/agentguild/backend/internal/publictask/postgres"
+	publictasksource "agentguild.dev/agentguild/backend/internal/publictask/source"
 	publictaskworker "agentguild.dev/agentguild/backend/internal/publictask/worker"
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
@@ -275,7 +278,25 @@ func run() error {
 	if !ok {
 		return fmt.Errorf("build public task projection worker: repository resolver lacks base commit support")
 	}
-	publicProjectionWorker, err := publictaskworker.NewWorker(pool, baseCommitResolver)
+	var taskAnalyzer publictaskanalysis.Analyzer
+	var taskCloner interface {
+		Snapshot(context.Context, string, string) ([]publictaskanalysis.SourceFile, error)
+	}
+	if cfg.PublicTaskAnalysisProvider == "anthropic" {
+		taskAnalyzer, err = publictaskanalyzer.NewAnthropic(
+			cfg.PublicTaskAnalysisAPIKey,
+			cfg.PublicTaskAnalysisModel,
+			cfg.PublicTaskAnalysisBaseURL,
+			&http.Client{Timeout: cfg.PublicTaskAnalysisTimeout},
+		)
+		if err != nil {
+			return fmt.Errorf("build public task analysis agent: %w", err)
+		}
+		taskCloner = publictasksource.NewGitCloner(cfg.GitHubAllowedHosts, cfg.PublicTaskAnalysisMaxFiles, cfg.PublicTaskAnalysisMaxBytes)
+	}
+	publicProjectionWorker, err := publictaskworker.NewWorkerWithOptions(pool, baseCommitResolver, publictaskworker.Options{
+		Analyzer: taskAnalyzer, Cloner: taskCloner, AnalysisTimeout: cfg.PublicTaskAnalysisTimeout,
+	})
 	if err != nil {
 		return fmt.Errorf("build public task projection worker: %w", err)
 	}
