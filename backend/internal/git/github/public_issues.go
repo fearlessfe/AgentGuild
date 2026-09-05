@@ -2,11 +2,14 @@ package github
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -96,6 +99,14 @@ func (s *PublicIssueSource) ResolveBaseCommit(ctx context.Context, repo string) 
 		return "", err
 	}
 	if status != http.StatusOK {
+		// GitHub's unauthenticated API quota is frequently exhausted on shared
+		// servers. Git transport does not consume that REST quota, so use the
+		// immutable remote HEAD as a safe fallback for public repositories.
+		if status == http.StatusForbidden || status == http.StatusTooManyRequests {
+			if commit, gitErr := resolveBaseCommitViaGit(ctx, repo); gitErr == nil {
+				return commit, nil
+			}
+		}
 		return "", mapError(status, repoBody, retryAfter)
 	}
 	var repository struct {
@@ -124,6 +135,33 @@ func (s *PublicIssueSource) ResolveBaseCommit(ctx context.Context, repo string) 
 		return "", fmt.Errorf("github commit has no sha")
 	}
 	return commit.SHA, nil
+}
+
+func resolveBaseCommitViaGit(ctx context.Context, repo string) (string, error) {
+	remote := "https://github.com/" + repo + ".git"
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--quiet", remote, "HEAD")
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		pathEnv = "/usr/local/bin:/usr/bin:/bin"
+	}
+	cmd.Env = []string{"PATH=" + pathEnv, "GIT_TERMINAL_PROMPT=0"}
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("resolve public repository HEAD: %w", err)
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) == 0 || !validCommitSHA(fields[0]) {
+		return "", fmt.Errorf("public repository HEAD is invalid")
+	}
+	return strings.ToLower(fields[0]), nil
+}
+
+func validCommitSHA(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func (s *PublicIssueSource) get(ctx context.Context, url string) ([]byte, int, string, error) {

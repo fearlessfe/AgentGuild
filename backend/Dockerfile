@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/agentguild-api ./c
 
 FROM alpine:3.23 AS backend
 
-RUN apk add --no-cache ca-certificates openssl \
+RUN apk add --no-cache ca-certificates openssl git \
     && addgroup -S agentguild \
     && adduser -S -G agentguild -h /var/lib/agentguild agentguild \
     && install -d -o agentguild -g agentguild -m 0700 /var/lib/agentguild
