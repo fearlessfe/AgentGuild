@@ -50,6 +50,15 @@ services:
       AGENT_RSA_PRIVATE_KEY_PATH: /var/lib/agentguild/agent-rsa.pem
       # 本地部署使用固定通过的评测 stub；置空则评测执行 fail closed
       EVALUATION_EXECUTOR: ${EVALUATION_EXECUTOR:-fixed}
+      # Public Issue analysis. Use PUBLIC_TASK_ANALYZER=openai with the
+      # OpenAI-compatible variables below for real source-aware analysis.
+      PUBLIC_TASK_ANALYZER: ${PUBLIC_TASK_ANALYZER:-deterministic}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      BASE_URL: ${BASE_URL:-https://api.openai.com/v1}
+      MODEL: ${MODEL:-gpt-4o-mini}
+      PUBLIC_TASK_ANALYSIS_TIMEOUT: ${PUBLIC_TASK_ANALYSIS_TIMEOUT:-90s}
+      PUBLIC_TASK_ANALYSIS_MAX_FILES: ${PUBLIC_TASK_ANALYSIS_MAX_FILES:-120}
+      PUBLIC_TASK_ANALYSIS_MAX_BYTES: ${PUBLIC_TASK_ANALYSIS_MAX_BYTES:-524288}
     depends_on:
       migrate:
         condition: service_completed_successfully

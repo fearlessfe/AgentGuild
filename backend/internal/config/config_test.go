@@ -304,6 +304,22 @@ func TestLoadConfiguresPublicTaskAnalyzer(t *testing.T) {
 	env["ANTHROPIC_API_KEY"] = ""
 	_, err = config.Load(func(key string) string { return env[key] })
 	require.ErrorContains(t, err, "ANTHROPIC_API_KEY")
+
+	env = validEnv()
+	env["PUBLIC_TASK_ANALYZER"] = "openai"
+	env["OPENAI_API_KEY"] = "test-openai-key"
+	env["BASE_URL"] = "https://llm.example.com/v1"
+	env["MODEL"] = "gpt-5.6-sol"
+	cfg, err = config.Load(func(key string) string { return env[key] })
+	require.NoError(t, err)
+	require.Equal(t, "openai", cfg.PublicTaskAnalysisProvider)
+	require.Equal(t, "test-openai-key", cfg.PublicTaskAnalysisAPIKey)
+	require.Equal(t, "https://llm.example.com/v1", cfg.PublicTaskAnalysisBaseURL)
+	require.Equal(t, "gpt-5.6-sol", cfg.PublicTaskAnalysisModel)
+
+	env["OPENAI_API_KEY"] = ""
+	_, err = config.Load(func(key string) string { return env[key] })
+	require.ErrorContains(t, err, "OPENAI_API_KEY")
 }
 
 func TestLoadValidatesEvaluationWorkerTiming(t *testing.T) {

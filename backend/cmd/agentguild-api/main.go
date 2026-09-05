@@ -293,6 +293,17 @@ func run() error {
 			return fmt.Errorf("build public task analysis agent: %w", err)
 		}
 		taskCloner = publictasksource.NewGitCloner(cfg.GitHubAllowedHosts, cfg.PublicTaskAnalysisMaxFiles, cfg.PublicTaskAnalysisMaxBytes)
+	} else if cfg.PublicTaskAnalysisProvider == "openai" {
+		taskAnalyzer, err = publictaskanalyzer.NewOpenAI(
+			cfg.PublicTaskAnalysisAPIKey,
+			cfg.PublicTaskAnalysisModel,
+			cfg.PublicTaskAnalysisBaseURL,
+			&http.Client{Timeout: cfg.PublicTaskAnalysisTimeout},
+		)
+		if err != nil {
+			return fmt.Errorf("build public task analysis agent: %w", err)
+		}
+		taskCloner = publictasksource.NewGitCloner(cfg.GitHubAllowedHosts, cfg.PublicTaskAnalysisMaxFiles, cfg.PublicTaskAnalysisMaxBytes)
 	}
 	publicProjectionWorker, err := publictaskworker.NewWorkerWithOptions(pool, baseCommitResolver, publictaskworker.Options{
 		Analyzer: taskAnalyzer, Cloner: taskCloner, AnalysisTimeout: cfg.PublicTaskAnalysisTimeout,

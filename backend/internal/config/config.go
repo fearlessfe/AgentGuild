@@ -178,13 +178,21 @@ func Load(get LookupEnv) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("EVALUATION_EXECUTOR must be %q, %q, or unset (evaluation execution disabled)", EvaluationExecutorFixed, EvaluationExecutorPlatform)
 	}
+	if cfg.PublicTaskAnalysisProvider == "openai" {
+		cfg.PublicTaskAnalysisAPIKey = get("OPENAI_API_KEY")
+		cfg.PublicTaskAnalysisModel = value(get, "MODEL", "gpt-4o-mini")
+		cfg.PublicTaskAnalysisBaseURL = value(get, "BASE_URL", "https://api.openai.com/v1")
+	}
 	switch cfg.PublicTaskAnalysisProvider {
-	case "deterministic", "anthropic":
+	case "deterministic", "anthropic", "openai":
 	default:
-		return Config{}, fmt.Errorf("PUBLIC_TASK_ANALYZER must be %q or %q", "deterministic", "anthropic")
+		return Config{}, fmt.Errorf("PUBLIC_TASK_ANALYZER must be %q, %q, or %q", "deterministic", "anthropic", "openai")
 	}
 	if cfg.PublicTaskAnalysisProvider == "anthropic" && strings.TrimSpace(cfg.PublicTaskAnalysisAPIKey) == "" {
 		return Config{}, fmt.Errorf("ANTHROPIC_API_KEY is required when PUBLIC_TASK_ANALYZER=anthropic")
+	}
+	if cfg.PublicTaskAnalysisProvider == "openai" && strings.TrimSpace(cfg.PublicTaskAnalysisAPIKey) == "" {
+		return Config{}, fmt.Errorf("OPENAI_API_KEY is required when PUBLIC_TASK_ANALYZER=openai")
 	}
 	if cfg.EvaluationAuto, err = boolean(get, "EVALUATION_AUTO", false); err != nil {
 		return Config{}, err
