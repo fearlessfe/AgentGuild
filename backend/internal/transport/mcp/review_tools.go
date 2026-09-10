@@ -25,6 +25,15 @@ type ReviewSubmitInput struct {
 	Decision  string             `json:"decision" jsonschema:"final decision: accepted, rejected, or revision_requested"`
 	Scores    []RubricScoreInput `json:"scores,omitempty" jsonschema:"rubric dimension scores"`
 	Summary   string             `json:"summary,omitempty" jsonschema:"human-readable review summary"`
+	// CriterionVerdicts 记录人工验收标准的逐条结论。缺席的标准保持未验证。
+	CriterionVerdicts []CriterionVerdictInput `json:"criterion_verdicts,omitempty" jsonschema:"per-acceptance-criterion verdicts"`
+}
+
+// CriterionVerdictInput 是评审人对单条验收标准的结论。
+type CriterionVerdictInput struct {
+	CriterionID string `json:"criterion_id" jsonschema:"acceptance criterion identifier"`
+	Passed      bool   `json:"passed" jsonschema:"whether the criterion is satisfied"`
+	EvidenceURI string `json:"evidence_uri,omitempty" jsonschema:"evidence supporting the verdict"`
 }
 
 // ReviewGetInput 是 review_get 工具的输入。
@@ -70,12 +79,21 @@ func registerReviewTools(server *mcp.Server, reviewSvc reviewService, reputation
 		for i, s := range input.Scores {
 			scores[i] = reviewdomain.RubricScore{Dimension: s.Dimension, Score: s.Score}
 		}
+		verdicts := make([]reviewapp.CriterionVerdict, len(input.CriterionVerdicts))
+		for i, verdict := range input.CriterionVerdicts {
+			verdicts[i] = reviewapp.CriterionVerdict{
+				CriterionID: verdict.CriterionID,
+				Passed:      verdict.Passed,
+				EvidenceURI: verdict.EvidenceURI,
+			}
+		}
 		result, err := reviewSvc.SubmitDecision(ctx, principal, reviewapp.SubmitDecision{
-			RequestID: input.RequestID,
-			ReviewID:  input.ReviewID,
-			Decision:  reviewdomain.Decision(input.Decision),
-			Scores:    scores,
-			Summary:   input.Summary,
+			RequestID:         input.RequestID,
+			ReviewID:          input.ReviewID,
+			Decision:          reviewdomain.Decision(input.Decision),
+			Scores:            scores,
+			Summary:           input.Summary,
+			CriterionVerdicts: verdicts,
 		})
 		if err != nil {
 			return mapDomainError(err, principal), nil, nil

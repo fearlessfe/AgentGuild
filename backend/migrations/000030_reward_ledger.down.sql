@@ -1,0 +1,13 @@
+DROP TABLE IF EXISTS payment_receipts;
+DROP FUNCTION IF EXISTS reject_payment_receipt_mutation();
+DROP TABLE IF EXISTS reward_dispute_events;
+DROP FUNCTION IF EXISTS reject_reward_dispute_event_mutation();
+DROP TABLE IF EXISTS reward_disputes;
+DROP TABLE IF EXISTS reward_decisions;
+DROP FUNCTION IF EXISTS reject_reward_decision_mutation();
+DROP TABLE IF EXISTS payout_destinations;
+DROP TABLE IF EXISTS payout_destination_challenges;
+DROP TABLE IF EXISTS reward_locks;
+DROP TABLE IF EXISTS reward_policies;
+DROP TABLE IF EXISTS sponsor_escrow_entries;
+DROP TABLE IF EXISTS sponsor_escrow_accounts;

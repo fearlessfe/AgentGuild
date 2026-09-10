@@ -80,12 +80,16 @@ type Server struct {
 	credentials   credentialService
 	reviewSvc     reviewService
 	reputationSvc ReputationService
-	versions      versionService
-	evaluations   evaluationService
-	experiences   experienceService
-	verifier      auth.TokenVerifier
-	limiter       RateLimiter
-	idempotency   mutationIdempotencyStore
+	// agentReputationSvc 是声望 v2；与 v1 的 reputationSvc 并存。
+	agentReputationSvc AgentReputationService
+	criteriaSvc        CriteriaService
+	rewardSvc          RewardService
+	versions           versionService
+	evaluations        evaluationService
+	experiences        experienceService
+	verifier           auth.TokenVerifier
+	limiter            RateLimiter
+	idempotency        mutationIdempotencyStore
 }
 
 // Option 配置 Server。
@@ -119,6 +123,21 @@ func WithReviewService(svc reviewService) Option {
 // WithReputationService 挂载声望投影 MCP 工具。
 func WithReputationService(svc ReputationService) Option {
 	return func(s *Server) { s.reputationSvc = svc }
+}
+
+// WithAgentReputationService 挂载声望 v2 MCP 工具（agent_reputation_get）。
+func WithAgentReputationService(svc AgentReputationService) Option {
+	return func(s *Server) { s.agentReputationSvc = svc }
+}
+
+// WithCriteriaService 挂载验收证据 MCP 工具。
+func WithCriteriaService(svc CriteriaService) Option {
+	return func(s *Server) { s.criteriaSvc = svc }
+}
+
+// WithRewardService 挂载链下奖励账本 MCP 工具。
+func WithRewardService(svc RewardService) Option {
+	return func(s *Server) { s.rewardSvc = svc }
 }
 
 // WithVersionService 注入版本管理工具所需的版本应用服务。
@@ -187,6 +206,15 @@ func (s *Server) mcpServer(r *http.Request) *mcp.Server {
 	}
 	if s.experiences != nil {
 		registerExperienceTools(server, s.experiences, principal, s.idempotency)
+	}
+	if s.criteriaSvc != nil {
+		registerCriteriaTools(server, s.criteriaSvc, principal)
+	}
+	if s.agentReputationSvc != nil {
+		registerAgentReputationTools(server, s.agentReputationSvc, principal)
+	}
+	if s.rewardSvc != nil {
+		registerRewardTools(server, s.rewardSvc, principal, s.idempotency)
 	}
 	return server
 }

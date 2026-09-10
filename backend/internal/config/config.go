@@ -7,7 +7,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	reputationdomain "agentguild.dev/agentguild/backend/internal/reputation/domain"
+	rewarddomain "agentguild.dev/agentguild/backend/internal/reward/domain"
 )
+
+// defaultReputationMinSample 是 v2 声望给出确定性分数所需的最小样本量。
+// 低于它的投影一律标记为 unverified 且不带总分。
+const defaultReputationMinSample = 5
 
 type Config struct {
 	DatabaseURL, HTTPAddr, CursorSecret                    string
@@ -23,6 +30,9 @@ type Config struct {
 	SessionCookieSecure                                    bool
 	ReaperInterval, OutboxInterval, ShutdownTimeout        time.Duration
 	ReputationWorkerInterval                               time.Duration
+	ReputationV2AlgorithmVersion                           string
+	ReputationRecentHalfLife                               time.Duration
+	ReputationMinSample                                    int
 	SyncWorkerInterval, SyncDefaultDeadline                time.Duration
 	ReviewSeedTenantID                                     string
 	ReviewSeedReviewerUserID                               string
@@ -38,6 +48,9 @@ type Config struct {
 	PublicTaskAnalysisBaseURL                              string
 	PublicTaskAnalysisTimeout                              time.Duration
 	PublicTaskAnalysisMaxFiles, PublicTaskAnalysisMaxBytes int
+	SettlementProvider                                     string
+	RewardCurrencyAllowlist                                []string
+	RewardDefaultChallengePeriod, RewardWorkerInterval     time.Duration
 	OpenAgentOrganizationID                                string
 	LangfuseBaseURL, LangfusePublicKey, LangfuseSecretKey  string
 	LangfuseMode, LangfuseMetricsPath, LangfuseCompleteTag string
@@ -60,6 +73,10 @@ type Config struct {
 }
 
 type LookupEnv func(string) string
+
+// SettlementProviderFake 是第一版唯一可用的结算提供方：内存实现，不接
+// 任何真实支付通道（doc §7 明确第一阶段不需要合约）。
+const SettlementProviderFake = "fake"
 
 // EvaluationExecutorFixed selects the fixed-pass stub benchmark executor. It is
 // intended for local development and demos only.
@@ -85,6 +102,8 @@ func Load(get LookupEnv) (Config, error) {
 		ReviewSeedTenantID:           get("REVIEW_SEED_TENANT_ID"),
 		ReviewSeedReviewerUserID:     value(get, "REVIEW_SEED_REVIEWER_USER_ID", "default-reviewer"),
 		OpenAgentOrganizationID:      value(get, "OPEN_AGENT_ORGANIZATION_ID", "public"),
+		SettlementProvider:           strings.ToLower(strings.TrimSpace(value(get, "SETTLEMENT_PROVIDER", SettlementProviderFake))),
+		RewardCurrencyAllowlist:      splitCSV(value(get, "REWARD_CURRENCY_ALLOWLIST", "USDC,USD")),
 		ValidationSandboxImage:       get("VALIDATION_SANDBOX_IMAGE"),
 		EvaluationExecutor:           strings.ToLower(strings.TrimSpace(get("EVALUATION_EXECUTOR"))),
 		PublicTaskAnalysisProvider:   strings.ToLower(strings.TrimSpace(value(get, "PUBLIC_TASK_ANALYZER", "deterministic"))),
@@ -147,6 +166,35 @@ func Load(get LookupEnv) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ReputationWorkerInterval, err = duration(get, "REPUTATION_WORKER_INTERVAL", 30*time.Second); err != nil {
+		return Config{}, err
+	}
+	cfg.ReputationV2AlgorithmVersion = value(get, "REPUTATION_V2_ALGORITHM_VERSION", reputationdomain.DefaultAlgorithmVersionV2)
+	if cfg.ReputationRecentHalfLife, err = duration(get, "REPUTATION_RECENT_HALF_LIFE", reputationdomain.DefaultHalfLife); err != nil {
+		return Config{}, err
+	}
+	minSample, err := integer(get, "REPUTATION_MIN_SAMPLE")
+	if err != nil {
+		return Config{}, err
+	}
+	if minSample < 0 {
+		return Config{}, fmt.Errorf("REPUTATION_MIN_SAMPLE must not be negative")
+	}
+	if minSample == 0 {
+		minSample = defaultReputationMinSample
+	}
+	cfg.ReputationMinSample = int(minSample)
+	// 结算提供方必须显式落在 allowlist 内：未知值会让奖励释放静默失效，
+	// 因此启动时直接报错而不是回退默认值。
+	if cfg.SettlementProvider != SettlementProviderFake {
+		return Config{}, fmt.Errorf("SETTLEMENT_PROVIDER must be %q", SettlementProviderFake)
+	}
+	if _, err := rewarddomain.ParseCurrencyAllowlist(cfg.RewardCurrencyAllowlist); err != nil {
+		return Config{}, fmt.Errorf("REWARD_CURRENCY_ALLOWLIST must only contain USDC or USD")
+	}
+	if cfg.RewardDefaultChallengePeriod, err = duration(get, "REWARD_DEFAULT_CHALLENGE_PERIOD", 24*time.Hour); err != nil {
+		return Config{}, err
+	}
+	if cfg.RewardWorkerInterval, err = duration(get, "REWARD_WORKER_INTERVAL", 30*time.Second); err != nil {
 		return Config{}, err
 	}
 	if cfg.SyncWorkerInterval, err = duration(get, "SYNC_WORKER_INTERVAL", 60*time.Second); err != nil {

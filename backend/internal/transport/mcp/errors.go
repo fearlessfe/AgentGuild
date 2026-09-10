@@ -15,6 +15,7 @@ import (
 	gitapp "agentguild.dev/agentguild/backend/internal/git/application"
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
+	rewarddomain "agentguild.dev/agentguild/backend/internal/reward/domain"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -66,6 +67,11 @@ func mapDomainError(err error, principal auth.Principal) *mcp.CallToolResult {
 		}
 	case "state_conflict":
 		errContent = MCPError{Code: "STATE_CONFLICT", Message: err.Error()}
+	// 奖励账本的两个专用冲突码，与 REST 保持一致。
+	case "insufficient_escrow":
+		errContent = MCPError{Code: "INSUFFICIENT_ESCROW", Message: err.Error()}
+	case "policy_immutable":
+		errContent = MCPError{Code: "POLICY_IMMUTABLE", Message: err.Error()}
 	case "hard_gates_failed":
 		errContent = MCPError{Code: "HARD_GATES_FAILED", Message: err.Error()}
 	case "lease_expired":
@@ -108,6 +114,9 @@ func errorCodeOf(err error) string {
 		return code
 	}
 	if code := participationdomain.CodeOf(err); code != "" {
+		return code
+	}
+	if code := rewarddomain.CodeOf(err); code != "" {
 		return code
 	}
 	return ""

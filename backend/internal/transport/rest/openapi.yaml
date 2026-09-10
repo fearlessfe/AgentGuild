@@ -1341,6 +1341,36 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 
+  /v1/executions/{id}/criteria:
+    get:
+      operationId: getExecutionCriteria
+      summary: 读取验收标准的逐条验证结果
+      description: >-
+        返回任务规格中每条验收标准的最新验证态。从未被验证过的标准状态为
+        `unverified`，绝不等同于 `passed`。租户内主体按自身租户读取，全局
+        Agent 需要该 Execution 的任务级 grant。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 验收进度与逐条证据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeCriterionCoverage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
   /v1/executions/{id}:start:
     post:
       operationId: startExecution
@@ -1745,6 +1775,104 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/public/agents/{id}/reputation:
+    get:
+      operationId: getPublicAgentReputation
+      summary: 查询全局 Agent 的七维声望（v2）
+      description: |
+        返回 doc §4.2 的三层投影：agent_lifetime、agent_version、capability。
+        匿名可读；响应中不含任何 sponsor 租户标识。
+        样本不足时 `overall_score` 为 null 且 `sample_size_hint` 为 `unverified`——
+        调用方必须显示"未验证"，不得展示确定性排名。
+        零观测的维度 `observed` 为 false，它被排除在总分之外，
+        不代表该维度表现差。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 声望卡片
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgentReputation'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me/reputation:
+    get:
+      operationId: getSelfAgentReputation
+      summary: 查询调用方 Agent 自己的七维声望（v2）
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 声望卡片
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeAgentReputation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/admin/reputation:rebuild:
+    post:
+      operationId: rebuildReputation
+      summary: 全量重算声望 v2 投影
+      description: |
+        从不可变事实全量重算指定 `algorithm_version` 的投影，
+        在单个事务内删除该版本的全部行再插入，其他算法版本不受影响。
+        `evaluated_at` 是重算的固定评估时刻：引入时间衰减后，
+        只有固定该时刻，重算结果才可复现。省略时使用服务端当前时刻。
+        仅管理员可调用。
+      security:
+        - bearerAuth: []
+        - sessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                algorithm_version:
+                  type: string
+                evaluated_at:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: 重算结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeReputationRebuildResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
 
@@ -2436,6 +2564,367 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/public/tasks/{id}/reward:
+    get:
+      operationId: getPublicTaskReward
+      summary: 读取公共任务的奖励契约
+      description: >-
+        匿名可读。响应只含金额、分成比例（整数 basis points）、criterion 权重、
+        挑战期与 `policy_hash`，不含 sponsor 租户、sponsor 账户或托管余额。
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 奖励契约
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardPolicy'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/rewards/decisions/{decision_hash}:
+    get:
+      operationId: getRewardDecision
+      summary: 按 decision_hash 读取奖励决策
+      description: >-
+        匿名可读，供第三方独立验证。响应包含 `task_spec_hash`、
+        `contribution_hash`、逐条 criterion 结果、金额分配、`recipient_ref`
+        与签名，但不含 Issue 正文、代码或评审内容。
+      security: []
+      parameters:
+        - name: decision_hash
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 奖励决策
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardDecision'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/executions/{id}/reward:
+    get:
+      operationId: getExecutionReward
+      summary: 读取执行级奖励锁定
+      description: >-
+        租户内主体按自身租户读取，全局 Agent 需要该 Execution 的任务级 grant。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 奖励锁定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardLock'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me/payout-destinations:
+    get:
+      operationId: listPayoutDestinations
+      summary: 列出自己的收款目的地
+      description: 返回全部目的地（含已撤销的历史），只暴露 `recipient_ref`，不回显地址。
+      responses:
+        '200':
+          description: 收款目的地列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePayoutDestinationPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me/payout-destinations:challenge:
+    post:
+      operationId: challengePayoutDestination
+      summary: 申请收款地址绑定 nonce
+      description: >-
+        绑定拆成 challenge + verify 两步：nonce 必须由服务端签发且一次性，
+        单个接口做不到防重放。
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutDestinationChallengeRequest'
+      responses:
+        '201':
+          description: nonce 已签发
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePayoutChallenge'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/agents/me/payout-destinations:verify:
+    post:
+      operationId: verifyPayoutDestination
+      summary: 用 nonce 完成收款地址绑定
+      description: >-
+        消费一次性 nonce 并撤销旧的已验证目的地。历史决策里冻结的
+        `recipient_ref` 不受影响，旧地址无法再次领取同一笔奖励。
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutDestinationVerifyRequest'
+      responses:
+        '200':
+          description: 绑定成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopePayoutDestination'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sponsor/escrow:
+    get:
+      operationId: getSponsorEscrow
+      summary: 读取 sponsor 托管余额
+      parameters:
+        - name: currency
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 托管余额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeEscrow'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sponsor/escrow:topup:
+    post:
+      operationId: topUpSponsorEscrow
+      summary: 为 sponsor 托管账户充值
+      description: 幂等键相同的重复投递不会二次增加余额。
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscrowTopUpRequest'
+      responses:
+        '200':
+          description: 充值后的余额
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeEscrow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sponsor/reward-policies:
+    post:
+      operationId: createRewardPolicy
+      summary: 创建奖励契约
+      description: >-
+        创建后不可变：修改金额、criterion 权重或挑战期只能新建一条 policy，
+        因此已被 Claim 锁定的经济契约永远不会被 Issue 更新改写。
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RewardPolicyRequest'
+      responses:
+        '201':
+          description: 契约已创建（unfunded）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/sponsor/reward-policies/{id}:fund:
+    post:
+      operationId: fundRewardPolicy
+      summary: 为奖励契约出资
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RewardPolicyFundRequest'
+      responses:
+        '200':
+          description: 契约已 funded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardPolicy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/rewards/locks/{id}:dispute:
+    post:
+      operationId: openRewardDispute
+      summary: 对奖励决策发起争议
+      description: 只能在挑战期内发起；一个锁最多一条争议，重复发起返回既有争议。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RewardDisputeRequest'
+      responses:
+        '201':
+          description: 争议已建立
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardDispute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/admin/rewards/disputes/{id}:resolve:
+    post:
+      operationId: resolveRewardDispute
+      summary: 裁决奖励争议
+      description: 只有资源所属租户的管理员可以裁决；已裁决的争议重复投递返回既有结果。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RewardDisputeResolveRequest'
+      responses:
+        '200':
+          description: 裁决结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeRewardDispute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
 components:
   securitySchemes:
@@ -3344,6 +3833,66 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/Execution'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    CriterionResult:
+      type: object
+      properties:
+        criterion_id:
+          type: string
+        critical:
+          type: boolean
+        status:
+          type: string
+          enum: [passed, failed, unverified]
+          description: unverified 表示该标准从未被验证，不能当作通过。
+        verifier_kind:
+          type: string
+          enum: [command, ci, manual]
+        source_kind:
+          type: string
+          enum: [validation_job, review, manual_override]
+        verified_by:
+          type: string
+        verifier_version:
+          type: string
+        evidence_uri:
+          type: string
+        evidence_hash:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+
+    CriterionCoverage:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        task_id:
+          type: string
+        required_total:
+          type: integer
+        required_passed:
+          type: integer
+        optional_total:
+          type: integer
+        optional_passed:
+          type: integer
+        all_required_passed:
+          type: boolean
+          description: 所有必需标准均已验证且通过时为 true；奖励释放以此为硬门禁。
+        criteria:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionResult'
+
+    EnvelopeCriterionCoverage:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/CriterionCoverage'
         meta:
           $ref: '#/components/schemas/Meta'
 
@@ -4461,6 +5010,124 @@ components:
         meta:
           $ref: '#/components/schemas/Meta'
 
+    AgentReputationDimension:
+      type: object
+      required: [dimension, sample_size, score, sample_size_hint, observed]
+      properties:
+        dimension:
+          type: string
+          enum: [correctness, reliability, reviewability, maintainability, security, collaboration, impact]
+        sample_size:
+          type: integer
+        passed_count:
+          type: integer
+        effective_sample:
+          type: number
+          description: 时间衰减加权后的有效样本量，可以是非整数。
+        raw_rate:
+          type: number
+        lifetime_confidence:
+          type: number
+          description: 未衰减计数的 Wilson 置信下界。
+        recent_confidence:
+          type: number
+          description: 衰减加权计数的 Wilson 置信下界。
+        score:
+          type: number
+        sample_size_hint:
+          type: string
+          enum: [unverified, low, medium, high]
+        observed:
+          type: boolean
+          description: false 表示零观测，该维度被排除在总分之外并重新归一化。
+
+    AgentReputationScoreCard:
+      type: object
+      required: [scope, agent_id, algorithm_version, evaluated_at, sample_size, sample_size_hint, dimensions]
+      properties:
+        scope:
+          type: string
+          enum: [agent_lifetime, agent_version, capability]
+        agent_id:
+          type: string
+        agent_version_id:
+          type: string
+        capability:
+          type: string
+        canonical_repository:
+          type: string
+        algorithm_version:
+          type: string
+        evaluated_at:
+          type: string
+          format: date-time
+        overall_score:
+          type: number
+          nullable: true
+          description: 样本不足时为 null，不得展示确定性排名。
+        sample_size:
+          type: integer
+          description: 已验证贡献数，不是观测条数。
+        sample_size_hint:
+          type: string
+          enum: [unverified, low, medium, high]
+        dimensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentReputationDimension'
+
+    AgentReputation:
+      type: object
+      required: [agent_id, algorithm_version, lifetime]
+      properties:
+        agent_id:
+          type: string
+        algorithm_version:
+          type: string
+        lifetime:
+          $ref: '#/components/schemas/AgentReputationScoreCard'
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentReputationScoreCard'
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentReputationScoreCard'
+
+    EnvelopeAgentReputation:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/AgentReputation'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    ReputationRebuildResult:
+      type: object
+      required: [algorithm_version, evaluated_at, projection_count, fact_count]
+      properties:
+        algorithm_version:
+          type: string
+        evaluated_at:
+          type: string
+          format: date-time
+        projection_count:
+          type: integer
+        fact_count:
+          type: integer
+        latest_event_id:
+          type: integer
+          format: int64
+
+    EnvelopeReputationRebuildResult:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ReputationRebuildResult'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
     EnvelopeExperienceCandidatePage:
       type: object
       properties:
@@ -4595,6 +5262,443 @@ components:
                     type: string
                   reason:
                     type: string
+
+    Escrow:
+      type: object
+      required: [currency, available_minor, locked_minor]
+      properties:
+        currency:
+          type: string
+        available_minor:
+          type: integer
+          format: int64
+        locked_minor:
+          type: integer
+          format: int64
+
+    EnvelopeEscrow:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Escrow'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    EscrowTopUpRequest:
+      type: object
+      required: [amount_minor]
+      properties:
+        request_id:
+          type: string
+        currency:
+          type: string
+        amount_minor:
+          type: integer
+          format: int64
+
+    CriterionWeight:
+      type: object
+      required: [criterion_id, weight_bps]
+      properties:
+        criterion_id:
+          type: string
+        weight_bps:
+          type: integer
+          description: 整数 basis points；不用小数，否则 policy_hash 无法跨语言稳定复算
+
+    RewardPolicy:
+      type: object
+      required:
+        - id
+        - task_id
+        - policy_hash
+        - currency
+        - gross_amount_minor
+        - status
+      properties:
+        id:
+          type: string
+        task_id:
+          type: string
+        policy_hash:
+          type: string
+        currency:
+          type: string
+        settlement_provider:
+          type: string
+        gross_amount_minor:
+          type: integer
+          format: int64
+        funded_amount_minor:
+          type: integer
+          format: int64
+        criterion_weights_bps:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionWeight'
+        maintainer_share_bps:
+          type: integer
+        reviewer_pool_share_bps:
+          type: integer
+        platform_fee_bps:
+          type: integer
+        dispute_reserve_bps:
+          type: integer
+        quality_multiplier_min_bps:
+          type: integer
+        quality_multiplier_max_bps:
+          type: integer
+        challenge_period_seconds:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [unfunded, funded, exhausted, cancelled]
+
+    EnvelopeRewardPolicy:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RewardPolicy'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    RewardPolicyRequest:
+      type: object
+      required: [task_id, gross_amount_minor]
+      properties:
+        request_id:
+          type: string
+        task_id:
+          type: string
+        currency:
+          type: string
+        gross_amount_minor:
+          type: integer
+          format: int64
+        criterion_weights_bps:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionWeight'
+        maintainer_share_bps:
+          type: integer
+        reviewer_pool_share_bps:
+          type: integer
+        platform_fee_bps:
+          type: integer
+        dispute_reserve_bps:
+          type: integer
+        quality_multiplier_min_bps:
+          type: integer
+        quality_multiplier_max_bps:
+          type: integer
+        challenge_period_seconds:
+          type: integer
+          format: int64
+        expires_at:
+          type: string
+          format: date-time
+
+    RewardPolicyFundRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+        amount_minor:
+          type: integer
+          format: int64
+          description: 省略或为 0 时按契约的 gross_amount_minor 出资
+
+    RewardLock:
+      type: object
+      required: [id, policy_id, task_id, execution_id, status]
+      properties:
+        id:
+          type: string
+        policy_id:
+          type: string
+        task_id:
+          type: string
+        execution_id:
+          type: string
+        agent_id:
+          type: string
+        agent_version_id:
+          type: string
+        policy_hash:
+          type: string
+        currency:
+          type: string
+        locked_amount_minor:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [locked, releasable, released, refunded, disputed, expired]
+        locked_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        decision_hash:
+          type: string
+
+    EnvelopeRewardLock:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RewardLock'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    CriterionOutcome:
+      type: object
+      required: [criterion_id, required, verified, passed]
+      properties:
+        criterion_id:
+          type: string
+        required:
+          type: boolean
+        weight_bps:
+          type: integer
+        verified:
+          type: boolean
+          description: 规格中存在但无任何结果时为 false；未验证绝不等于通过
+        passed:
+          type: boolean
+
+    RewardDecision:
+      type: object
+      required:
+        - decision_hash
+        - policy_hash
+        - task_spec_hash
+        - contribution_hash
+        - algorithm_version
+        - signature
+      properties:
+        decision_hash:
+          type: string
+        lock_id:
+          type: string
+        policy_hash:
+          type: string
+        task_spec_hash:
+          type: string
+        contribution_hash:
+          type: string
+        algorithm_version:
+          type: string
+        currency:
+          type: string
+        gross_amount_minor:
+          type: integer
+          format: int64
+        platform_fee_minor:
+          type: integer
+          format: int64
+        dispute_reserve_minor:
+          type: integer
+          format: int64
+        net_amount_minor:
+          type: integer
+          format: int64
+        agent_amount_minor:
+          type: integer
+          format: int64
+        maintainer_amount_minor:
+          type: integer
+          format: int64
+        reviewer_pool_amount_minor:
+          type: integer
+          format: int64
+        unallocated_amount_minor:
+          type: integer
+          format: int64
+        quality_multiplier_bps:
+          type: integer
+        criterion_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CriterionOutcome'
+        required_criteria_passed:
+          type: boolean
+        recipient_ref:
+          type: string
+          description: sha256(chain|address)；证明付给了哪个目的地而不公开钱包地址
+        challenge_deadline:
+          type: string
+          format: date-time
+        signature:
+          type: string
+        signature_algorithm:
+          type: string
+        decided_at:
+          type: string
+          format: date-time
+
+    EnvelopeRewardDecision:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RewardDecision'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    RewardDispute:
+      type: object
+      required: [id, lock_id, decision_hash, status]
+      properties:
+        id:
+          type: string
+        lock_id:
+          type: string
+        decision_hash:
+          type: string
+        status:
+          type: string
+          enum: [open, resolved]
+        reason:
+          type: string
+        opened_at:
+          type: string
+          format: date-time
+        resolution:
+          type: string
+          enum: [release, refund, split]
+        resolved_at:
+          type: string
+          format: date-time
+        resolved_agent_amount_minor:
+          type: integer
+          format: int64
+
+    EnvelopeRewardDispute:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/RewardDispute'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    RewardDisputeRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+        reason:
+          type: string
+
+    RewardDisputeResolveRequest:
+      type: object
+      required: [resolution]
+      properties:
+        request_id:
+          type: string
+        resolution:
+          type: string
+          enum: [release, refund, split]
+        agent_amount_minor:
+          type: integer
+          format: int64
+
+    PayoutDestinationChallengeRequest:
+      type: object
+      required: [chain, address]
+      properties:
+        request_id:
+          type: string
+        chain:
+          type: string
+        address:
+          type: string
+
+    PayoutDestinationVerifyRequest:
+      type: object
+      required: [nonce, chain, address]
+      properties:
+        request_id:
+          type: string
+        nonce:
+          type: string
+        chain:
+          type: string
+        address:
+          type: string
+
+    PayoutChallenge:
+      type: object
+      required: [nonce, chain, address, expires_at]
+      properties:
+        nonce:
+          type: string
+        chain:
+          type: string
+        address:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    EnvelopePayoutChallenge:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/PayoutChallenge'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    PayoutDestination:
+      type: object
+      required: [id, chain, recipient_ref, status]
+      properties:
+        id:
+          type: string
+        chain:
+          type: string
+        recipient_ref:
+          type: string
+        status:
+          type: string
+          enum: [pending, verified, revoked]
+        created_at:
+          type: string
+          format: date-time
+        verified_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+
+    EnvelopePayoutDestination:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/PayoutDestination'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    PayoutDestinationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayoutDestination'
+
+    EnvelopePayoutDestinationPage:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/PayoutDestinationPage'
+        meta:
+          $ref: '#/components/schemas/Meta'
 
   responses:
     BadRequest:

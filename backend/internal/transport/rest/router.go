@@ -129,35 +129,41 @@ type healthChecker interface {
 
 // Server 暴露任务生命周期、Submission、代码评审、版本管理与经验治理的 REST API。
 type Server struct {
-	svc                  applicationService
-	submissions          submissionService
-	credentials          credentialService
-	identity             identityService
-	openRegistration     openRegistrationService
-	publicAgents         publicAgentService
-	reviewSvc            ReviewService
-	rubricSvc            RubricService
-	reputationSvc        ReputationService
-	versions             versionService
-	evaluations          evaluationService
-	experiences          experienceService
-	verifier             auth.TokenVerifier
-	limiter              RateLimiter
-	sessionSecret        string
-	sessionSecure        bool
-	oidc                 oidcProvider
-	localAdmin           *localAdmin
-	gitHubAppManager     gitapp.GitHubAppManager
-	manifest             *gitapp.ManifestService
-	syncRules            *syncapp.RuleService
-	syncEngine           SyncEngine
-	repositoryOnboarding repositoryOnboardingService
-	publicTasks          publicTaskService
-	idempotencyStore     mutationIdempotencyStore
-	idempotencyHeartbeat time.Duration
-	idempotencyIOTimeout time.Duration
-	healthChecker        healthChecker
-	gitProxy             http.Handler
+	svc                 applicationService
+	submissions         submissionService
+	credentials         credentialService
+	identity            identityService
+	openRegistration    openRegistrationService
+	publicAgents        publicAgentService
+	reviewSvc           ReviewService
+	rubricSvc           RubricService
+	reputationSvc       ReputationService
+	agentReputationSvc  AgentReputationService
+	reputationRebuilder ReputationRebuilder
+	// reputationAlgorithmVersion 是 admin 重算入口的默认算法版本。
+	reputationAlgorithmVersion string
+	criteriaSvc                CriteriaService
+	rewardSvc                  RewardService
+	versions                   versionService
+	evaluations                evaluationService
+	experiences                experienceService
+	verifier                   auth.TokenVerifier
+	limiter                    RateLimiter
+	sessionSecret              string
+	sessionSecure              bool
+	oidc                       oidcProvider
+	localAdmin                 *localAdmin
+	gitHubAppManager           gitapp.GitHubAppManager
+	manifest                   *gitapp.ManifestService
+	syncRules                  *syncapp.RuleService
+	syncEngine                 SyncEngine
+	repositoryOnboarding       repositoryOnboardingService
+	publicTasks                publicTaskService
+	idempotencyStore           mutationIdempotencyStore
+	idempotencyHeartbeat       time.Duration
+	idempotencyIOTimeout       time.Duration
+	healthChecker              healthChecker
+	gitProxy                   http.Handler
 }
 
 // WithLocalAdmin 挂载本地管理员 fallback 登录接口。
@@ -377,6 +383,7 @@ func (s *Server) Router() http.Handler {
 
 		// Shared read-only routes (session or bearer)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/executions/{id}", s.getExecution)
+		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/executions/{id}/criteria", s.getExecutionCriteria)
 
 		if s.submissions != nil {
 			// Agent-only write routes (bearer token only)
@@ -404,6 +411,42 @@ func (s *Server) Router() http.Handler {
 		r.With(s.requireSession, s.rateLimit).Get("/reviews", s.listReviews)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/rubrics/active", s.getActiveRubric)
 		r.With(s.authenticateHumanOrAgent, s.rateLimit).Get("/reputation", s.getReputation)
+
+		// 声望 v2 与 v1 的 /v1/reputation 并行存在，互不影响。
+		if s.agentReputationSvc != nil {
+			r.With(s.optionalAuthenticate, s.rateLimit).Get("/public/agents/{id}/reputation", s.getPublicAgentReputation)
+			r.With(s.authenticate, s.rateLimit).Get("/agents/me/reputation", s.getSelfReputation)
+		}
+		if s.reputationRebuilder != nil {
+			r.With(s.authenticateHumanOrAgent, s.rateLimit, s.mutationIdempotency("reputation.rebuild")).
+				Post("/admin/reputation:rebuild", s.rebuildReputation)
+		}
+
+		// 链下奖励账本。匿名端点只暴露金额、权重与摘要，绝不带 sponsor 租户。
+		if s.rewardSvc != nil {
+			r.With(s.optionalAuthenticate, s.rateLimit).Get("/public/tasks/{id}/reward", s.getPublicTaskReward)
+			r.With(s.rateLimit).Get("/rewards/decisions/{decision_hash}", s.getRewardDecision)
+			r.With(s.authenticate, s.rateLimit).Get("/executions/{id}/reward", s.getExecutionReward)
+
+			r.With(s.authenticate, s.rateLimit).Get("/agents/me/payout-destinations", s.listPayoutDestinations)
+			r.With(s.authenticate, s.rateLimit, s.mutationIdempotency("reward.destination.challenge")).
+				Post("/agents/me/payout-destinations:challenge", s.challengePayoutDestination)
+			r.With(s.authenticate, s.rateLimit, s.mutationIdempotency("reward.destination.verify")).
+				Post("/agents/me/payout-destinations:verify", s.verifyPayoutDestination)
+
+			r.With(s.requireSession, s.rateLimit).Get("/sponsor/escrow", s.getSponsorEscrow)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("reward.escrow.topup")).
+				Post("/sponsor/escrow:topup", s.topUpSponsorEscrow)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("reward.policy.create")).
+				Post("/sponsor/reward-policies", s.createRewardPolicy)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("reward.policy.fund")).
+				Post("/sponsor/reward-policies/{id}:fund", s.fundRewardPolicy)
+
+			r.With(s.authenticateHumanOrAgent, s.rateLimit, s.mutationIdempotency("reward.dispute.open")).
+				Post("/rewards/locks/{id}:dispute", s.openRewardDispute)
+			r.With(s.requireSession, s.rateLimit, s.mutationIdempotency("reward.dispute.resolve")).
+				Post("/admin/rewards/disputes/{id}:resolve", s.resolveRewardDispute)
+		}
 
 		// Agent-only write routes (bearer token only)
 		r.With(s.authenticate, s.rateLimit).Post("/executions/{id}:submit_for_review", s.submitForReview)

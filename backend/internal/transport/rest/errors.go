@@ -18,6 +18,7 @@ import (
 	identitydomain "agentguild.dev/agentguild/backend/internal/identity/domain"
 	participationdomain "agentguild.dev/agentguild/backend/internal/participation/domain"
 	publictaskdomain "agentguild.dev/agentguild/backend/internal/publictask/domain"
+	rewarddomain "agentguild.dev/agentguild/backend/internal/reward/domain"
 )
 
 // ViolationView 是路径违规错误的结构化违规项；仅在领域错误携带违规明细时出现。
@@ -136,6 +137,12 @@ func mapDomainError(w http.ResponseWriter, err error, principal auth.Principal) 
 		writeError(w, http.StatusServiceUnavailable, "EVALUATION_UNAVAILABLE", err.Error())
 	case "state_conflict":
 		writeError(w, http.StatusConflict, "STATE_CONFLICT", err.Error())
+	// 奖励账本的两个专用冲突码：资金不足与契约已冻结。它们与普通状态冲突
+	// 分开，客户端才能区分"重试也没用"与"先充值再来"。
+	case "insufficient_escrow":
+		writeError(w, http.StatusConflict, "INSUFFICIENT_ESCROW", err.Error())
+	case "policy_immutable":
+		writeError(w, http.StatusConflict, "POLICY_IMMUTABLE", err.Error())
 	case "hard_gates_failed":
 		writeError(w, http.StatusConflict, "HARD_GATES_FAILED", err.Error())
 	case "lease_expired":
@@ -186,6 +193,9 @@ func errorCodeOf(err error) string {
 	if code := participationdomain.CodeOf(err); code != "" {
 		return code
 	}
+	if code := rewarddomain.CodeOf(err); code != "" {
+		return code
+	}
 	return ""
 }
 
@@ -210,6 +220,9 @@ func errorFieldOf(err error) string {
 		return field
 	}
 	if field := participationdomain.FieldOf(err); field != "" {
+		return field
+	}
+	if field := rewarddomain.FieldOf(err); field != "" {
 		return field
 	}
 	return ""

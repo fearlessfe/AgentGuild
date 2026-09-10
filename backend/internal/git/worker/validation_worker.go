@@ -31,10 +31,24 @@ type ValidationWorker struct {
 	maxAttempts int
 	runner      StepRunner
 	notifier    gitapp.ExecutionNotifier
+	criteria    gitapp.CriterionSink
+}
+
+// Option configures optional worker collaborators.
+type Option func(*ValidationWorker)
+
+// WithCriterionSink records per-criterion verification facts whenever a
+// validation job reaches a terminal state.
+func WithCriterionSink(sink gitapp.CriterionSink) Option {
+	return func(w *ValidationWorker) {
+		if sink != nil {
+			w.criteria = sink
+		}
+	}
 }
 
 // NewValidationWorker creates a worker.
-func NewValidationWorker(store gitapp.Store, workerID string, lease time.Duration, maxAttempts int, runner StepRunner, notifier gitapp.ExecutionNotifier) *ValidationWorker {
+func NewValidationWorker(store gitapp.Store, workerID string, lease time.Duration, maxAttempts int, runner StepRunner, notifier gitapp.ExecutionNotifier, options ...Option) *ValidationWorker {
 	if store == nil {
 		panic("store is required")
 	}
@@ -50,14 +64,19 @@ func NewValidationWorker(store gitapp.Store, workerID string, lease time.Duratio
 	if notifier == nil {
 		notifier = gitapp.NopExecutionNotifier{}
 	}
-	return &ValidationWorker{
+	worker := &ValidationWorker{
 		store:       store,
 		workerID:    workerID,
 		lease:       lease,
 		maxAttempts: maxAttempts,
 		runner:      runner,
 		notifier:    notifier,
+		criteria:    gitapp.NopCriterionSink{},
 	}
+	for _, option := range options {
+		option(worker)
+	}
+	return worker
 }
 
 // RunOnce attempts to claim and process one pending validation job per tenant.
@@ -288,7 +307,7 @@ func (w *ValidationWorker) syncTerminalState(ctx context.Context, job *gitdomain
 	}, time.Now()); err != nil {
 		return err
 	}
-	return w.store.WithTx(ctx, func(tx gitapp.Tx) error {
+	if err := w.store.WithTx(ctx, func(tx gitapp.Tx) error {
 		now, err := tx.Now(ctx)
 		if err != nil {
 			return err
@@ -323,6 +342,46 @@ func (w *ValidationWorker) syncTerminalState(ctx context.Context, job *gitdomain
 		fresh.ClaimedUntil = nil
 		fresh.UpdatedAt = now
 		return tx.ValidationJobs().Update(ctx, fresh)
+	}); err != nil {
+		return err
+	}
+	return w.recordCriterionFacts(ctx, job)
+}
+
+// recordCriterionFacts 在验证终态落库后追加逐条验收标准的事实。只有真正
+// 跑完的步骤会被上报——pending/running/skipped 的步骤不产生任何结论。
+func (w *ValidationWorker) recordCriterionFacts(ctx context.Context, job *gitdomain.ValidationJob) error {
+	if w.criteria == nil {
+		return nil
+	}
+	results := make(map[string]bool, len(job.Steps))
+	observedAt := job.UpdatedAt
+	for _, step := range job.Steps {
+		switch step.Status {
+		case gitdomain.ValidationStepStatusSucceeded:
+			results[string(step.Step)] = true
+		case gitdomain.ValidationStepStatusFailed:
+			results[string(step.Step)] = false
+		default:
+			continue
+		}
+		if step.FinishedAt != nil && step.FinishedAt.After(observedAt) {
+			observedAt = *step.FinishedAt
+		}
+	}
+	if len(results) == 0 {
+		return nil
+	}
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	return w.criteria.RecordValidationOutcome(ctx, gitapp.ValidationCriterionOutcome{
+		TenantID:      job.TenantID,
+		ExecutionID:   job.ExecutionID,
+		JobID:         job.ID,
+		ConfigVersion: job.ConfigVersion,
+		StepResults:   results,
+		ObservedAt:    observedAt,
 	})
 }
 

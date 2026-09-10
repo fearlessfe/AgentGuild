@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"agentguild.dev/agentguild/backend/internal/application"
@@ -26,6 +27,7 @@ type Service struct {
 	validation    ValidationProvider
 	integrity     SubmissionIntegrityChecker
 	participation application.ParticipationAuthorizer
+	criteria      CriterionSink
 	newID         func() string
 }
 
@@ -38,6 +40,9 @@ type Options struct {
 	// Participation authorizes only a specifically addressed sponsor-owned
 	// resource; it must never be used to implement tenant list operations.
 	Participation application.ParticipationAuthorizer
+	// Criteria records the reviewer's per-criterion verdicts. Nil disables
+	// manual criterion evidence.
+	Criteria CriterionSink
 }
 
 // NewService creates a review application service.
@@ -57,6 +62,9 @@ func NewService(store application.Store, submissions gitapp.SubmissionRepository
 	if options.NewID == nil {
 		options.NewID = randomID
 	}
+	if options.Criteria == nil {
+		options.Criteria = NopCriterionSink{}
+	}
 	return &Service{
 		store:         store,
 		submissions:   submissions,
@@ -66,6 +74,7 @@ func NewService(store application.Store, submissions gitapp.SubmissionRepository
 		validation:    validation,
 		integrity:     options.Integrity,
 		participation: options.Participation,
+		criteria:      options.Criteria,
 		newID:         options.NewID,
 	}, nil
 }
@@ -84,6 +93,9 @@ type SubmitDecision struct {
 	Decision  reviewdomain.Decision
 	Scores    []reviewdomain.RubricScore
 	Summary   string
+	// CriterionVerdicts 是评审人对逐条验收标准的结论，用于人工验证的标准。
+	// 缺席的标准保持“未验证”，不会被推断为通过。
+	CriterionVerdicts []CriterionVerdict
 }
 
 // AddComment adds a line-level comment to a review.
@@ -307,6 +319,7 @@ func (s *Service) CreateReview(ctx context.Context, principal auth.Principal, cm
 // SubmitDecision validates authorization and hard gates, then submits the review decision.
 func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, cmd SubmitDecision) (application.Envelope[ReviewView], error) {
 	var result application.Envelope[ReviewView]
+	var criterionOutcome ReviewCriterionOutcome
 	if err := requireTenant(principal); err != nil {
 		return result, err
 	}
@@ -382,13 +395,38 @@ func (s *Service) SubmitDecision(ctx context.Context, principal auth.Principal, 
 			return err
 		}
 
+		submission, err := s.submissions.GetByID(ctx, review.TenantID, review.SubmissionID)
+		if err != nil {
+			return err
+		}
+		criterionOutcome = ReviewCriterionOutcome{
+			TenantID:    review.TenantID,
+			ExecutionID: submission.ExecutionID,
+			ReviewID:    review.ID,
+			ReviewerID:  review.ReviewerID,
+			Verdicts:    cmd.CriterionVerdicts,
+			ObservedAt:  now,
+		}
+
 		result = application.Envelope[ReviewView]{
 			Data: reviewView(review, nil),
 			Meta: application.Meta{ServerTime: now},
 		}
 		return completeReview(ctx, tx, key, record.OwnerToken, result)
 	})
-	return result, err
+	if err != nil {
+		return result, err
+	}
+
+	// 验收结论在评审事务提交后追加。账本 append-only 且幂等，写入失败只是
+	// 延迟而非丢失事实；评审结论本身已经生效，不能因此让调用方以为评审失败。
+	if len(criterionOutcome.Verdicts) > 0 && criterionOutcome.ExecutionID != "" {
+		if recordErr := s.criteria.RecordReviewOutcome(ctx, criterionOutcome); recordErr != nil {
+			slog.Error("record review criterion verdicts",
+				"error", recordErr, "review", criterionOutcome.ReviewID)
+		}
+	}
+	return result, nil
 }
 
 // AddComment adds a line-level comment to a review.

@@ -19,7 +19,14 @@ func TestGlobalAgentIdentityMigrationBackfillsDeterministicallyAndRollsBack(t *t
 	// The shared harness applies every migration. Remove the dependent
 	// Contribution schema so this test can exercise migration 000020's own
 	// up/down boundary in isolation.
-	_, err := db.Exec(ctx, readIdentityMigration(t, "000027_open_agent_registration.down.sql"))
+	// 声望 v2 的投影同样外键到 agent_identities，必须先于 000020 回滚。
+	// 奖励账本的 reward_locks / payout_destinations 也外键到全局身份，
+	// 因此排在最前。
+	_, err := db.Exec(ctx, readIdentityMigration(t, "000030_reward_ledger.down.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, readIdentityMigration(t, "000029_reputation_v2.down.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, readIdentityMigration(t, "000027_open_agent_registration.down.sql"))
 	require.NoError(t, err)
 	_, err = db.Exec(ctx, readIdentityMigration(t, "000026_participation_resource_lookup.down.sql"))
 	require.NoError(t, err)

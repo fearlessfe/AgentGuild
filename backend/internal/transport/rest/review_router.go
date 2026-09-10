@@ -110,10 +110,15 @@ func (s *Server) submitDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := mustPrincipal(r)
 	var body struct {
-		RequestID string                     `json:"request_id"`
-		Decision  string                     `json:"decision"`
-		Scores    []reviewdomain.RubricScore `json:"scores"`
-		Summary   string                     `json:"summary"`
+		RequestID         string                     `json:"request_id"`
+		Decision          string                     `json:"decision"`
+		Scores            []reviewdomain.RubricScore `json:"scores"`
+		Summary           string                     `json:"summary"`
+		CriterionVerdicts []struct {
+			CriterionID string `json:"criterion_id"`
+			Passed      bool   `json:"passed"`
+			EvidenceURI string `json:"evidence_uri"`
+		} `json:"criterion_verdicts"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -123,12 +128,22 @@ func (s *Server) submitDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	verdicts := make([]reviewapp.CriterionVerdict, len(body.CriterionVerdicts))
+	for i, verdict := range body.CriterionVerdicts {
+		verdicts[i] = reviewapp.CriterionVerdict{
+			CriterionID: verdict.CriterionID,
+			Passed:      verdict.Passed,
+			EvidenceURI: verdict.EvidenceURI,
+		}
+	}
+
 	result, err := s.reviewSvc.SubmitDecision(r.Context(), principal, reviewapp.SubmitDecision{
-		RequestID: idempotencyKey,
-		ReviewID:  chi.URLParam(r, "id"),
-		Decision:  reviewdomain.Decision(body.Decision),
-		Scores:    body.Scores,
-		Summary:   body.Summary,
+		RequestID:         idempotencyKey,
+		ReviewID:          chi.URLParam(r, "id"),
+		Decision:          reviewdomain.Decision(body.Decision),
+		Scores:            body.Scores,
+		Summary:           body.Summary,
+		CriterionVerdicts: verdicts,
 	})
 	if err != nil {
 		mapDomainError(w, err, principal)

@@ -28,6 +28,9 @@ import (
 	"agentguild.dev/agentguild/backend/internal/application"
 	"agentguild.dev/agentguild/backend/internal/auth"
 	"agentguild.dev/agentguild/backend/internal/config"
+	contributionapp "agentguild.dev/agentguild/backend/internal/contribution/application"
+	contributionpostgres "agentguild.dev/agentguild/backend/internal/contribution/postgres"
+	"agentguild.dev/agentguild/backend/internal/criteria"
 	"agentguild.dev/agentguild/backend/internal/domain"
 	evaluationapp "agentguild.dev/agentguild/backend/internal/evaluation/application"
 	evaluationpostgres "agentguild.dev/agentguild/backend/internal/evaluation/postgres"
@@ -52,9 +55,18 @@ import (
 	publictaskpostgres "agentguild.dev/agentguild/backend/internal/publictask/postgres"
 	publictasksource "agentguild.dev/agentguild/backend/internal/publictask/source"
 	publictaskworker "agentguild.dev/agentguild/backend/internal/publictask/worker"
+	reputationapp "agentguild.dev/agentguild/backend/internal/reputation/application"
+	reputationdomain "agentguild.dev/agentguild/backend/internal/reputation/domain"
+	reputationpostgres "agentguild.dev/agentguild/backend/internal/reputation/postgres"
 	reputationworker "agentguild.dev/agentguild/backend/internal/reputation/worker"
 	reviewapp "agentguild.dev/agentguild/backend/internal/review/application"
 	reviewpostgres "agentguild.dev/agentguild/backend/internal/review/postgres"
+	rewardapp "agentguild.dev/agentguild/backend/internal/reward/application"
+	rewarddomain "agentguild.dev/agentguild/backend/internal/reward/domain"
+	rewardpostgres "agentguild.dev/agentguild/backend/internal/reward/postgres"
+	rewardworker "agentguild.dev/agentguild/backend/internal/reward/worker"
+	"agentguild.dev/agentguild/backend/internal/rewardaccess"
+	settlementfake "agentguild.dev/agentguild/backend/internal/settlement/fake"
 	syncapp "agentguild.dev/agentguild/backend/internal/sync/application"
 	syncpostgres "agentguild.dev/agentguild/backend/internal/sync/postgres"
 	"agentguild.dev/agentguild/backend/internal/telemetry"
@@ -134,11 +146,29 @@ func run() error {
 
 	restOptions := make([]resttransport.Option, 0, 14)
 	restOptions = append(restOptions, resttransport.WithIdempotencyStore(store))
-	publicTaskService, err := publictaskapp.NewService(publictaskpostgres.NewRepository(pool), publictaskapp.Options{
-		CursorSecret: []byte(cfg.CursorSecret),
-	})
+	// 奖励锁定作为 Claim 事务的参与者注入：它在已持锁的同一事务里校验
+	// escrow 余额并写入 RewardLock，余额不足时整个 Claim 失败、任务保持 open。
+	rewardService, rewardWorker, err := buildRewardRuntime(cfg, pool)
+	if err != nil {
+		return fmt.Errorf("build reward runtime: %w", err)
+	}
+	publicTaskService, err := publictaskapp.NewService(
+		publictaskpostgres.NewRepository(pool,
+			publictaskpostgres.WithClaimParticipants(rewardpostgres.NewClaimParticipant(
+				rewardpostgres.ClaimParticipantOptions{},
+			)),
+		),
+		publictaskapp.Options{CursorSecret: []byte(cfg.CursorSecret)},
+	)
 	if err != nil {
 		return fmt.Errorf("build public task service: %w", err)
+	}
+	// 奖励的 REST/MCP 暴露面共用同一个粘接层：全局标识到租户的翻译与
+	// 跨租户 grant 授权只写一遍，两个 transport 的语义因此天然一致。
+	rewardAccessSvc, err := rewardaccess.NewService(rewardService,
+		rewardpostgres.NewResolver(pool), participationAuthorizer)
+	if err != nil {
+		return fmt.Errorf("build reward access service: %w", err)
 	}
 	restOptions = append(restOptions, resttransport.WithPublicTaskService(publicTaskService))
 	if identityService != nil {
@@ -196,19 +226,57 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build review integrity checker: %w", err)
 	}
+	reviewCriterionSink, err := buildReviewCriterionSink(pool)
+	if err != nil {
+		return err
+	}
 	reviewSvc, err := reviewapp.NewService(postgres.NewStore(pool), submissionRepository, diffProvider, validationProvider, reviewapp.Options{
 		Integrity: integrityChecker, Participation: participationAuthorizer,
+		Criteria: reviewCriterionSink,
 	})
 	if err != nil {
 		return err
 	}
 	reputationSvc := application.NewReputationQueryService(postgres.NewStore(pool))
+	criteriaSvc, err := contributionapp.NewCriterionQueryService(
+		contributionpostgres.NewCriterionRepository(pool),
+		criteria.NewProjectionCriteriaSource(pool),
+		participationAuthorizer,
+	)
+	if err != nil {
+		return fmt.Errorf("build criteria query service: %w", err)
+	}
+
+	// 声望 v2：算法参数是版本化数据，进程启动时确保当前版本的参数行存在，
+	// 已存在则原样保留——历史投影必须能用当时的参数复算。
+	reputationParams := reputationpostgres.NewParamsRepository(pool)
+	v2Params := reputationdomain.DefaultParams()
+	v2Params.AlgorithmVersion = cfg.ReputationV2AlgorithmVersion
+	v2Params.HalfLife = cfg.ReputationRecentHalfLife
+	v2Params.MinSampleForScore = cfg.ReputationMinSample
+	if err := reputationParams.EnsureVersion(ctx, v2Params); err != nil {
+		return fmt.Errorf("ensure reputation algorithm params: %w", err)
+	}
+	reputationCards := reputationpostgres.NewScoreCardRepository(pool)
+	reputationFacts := reputationpostgres.NewFactSource(pool)
+	reputationRebuilder, err := reputationapp.NewRebuilder(reputationFacts, reputationParams, reputationCards)
+	if err != nil {
+		return fmt.Errorf("build reputation rebuilder: %w", err)
+	}
+	agentReputationSvc, err := reputationapp.NewScoreCardService(reputationCards, cfg.ReputationV2AlgorithmVersion)
+	if err != nil {
+		return fmt.Errorf("build reputation score card service: %w", err)
+	}
 
 	restOptions = append(restOptions,
 		resttransport.WithHealthChecker(pool),
 		resttransport.WithReviewService(reviewSvc),
 		resttransport.WithRubricService(reviewSvc),
 		resttransport.WithReputationService(reputationSvc),
+		resttransport.WithCriteriaService(criteriaSvc),
+		resttransport.WithAgentReputationService(agentReputationSvc),
+		resttransport.WithReputationRebuilder(reputationRebuilder, cfg.ReputationV2AlgorithmVersion),
+		resttransport.WithRewardService(rewardAccessSvc),
 	)
 	if gitRuntime != nil {
 		restOptions = append(restOptions,
@@ -233,6 +301,9 @@ func run() error {
 	mcpOptions = append(mcpOptions,
 		mcptransport.WithReviewService(reviewSvc),
 		mcptransport.WithReputationService(reputationSvc),
+		mcptransport.WithCriteriaService(criteriaSvc),
+		mcptransport.WithAgentReputationService(agentReputationSvc),
+		mcptransport.WithRewardService(rewardAccessSvc),
 	)
 	if gitRuntime != nil {
 		mcpOptions = append(mcpOptions,
@@ -258,6 +329,16 @@ func run() error {
 	runWorker(workerCtx, &wg, cfg.OutboxInterval, "outbox", outbox.RunOnce)
 	reputation := reputationworker.NewWorker(postgres.NewStore(pool), cfg.ReputationWorkerInterval, 100, slog.Default())
 	runWorker(workerCtx, &wg, cfg.ReputationWorkerInterval, "reputation", reputation.RunOnce)
+	reputationV2, err := reputationworker.NewRebuildWorker(
+		reputationRebuilder, reputationFacts, reputationCards,
+		cfg.ReputationV2AlgorithmVersion, slog.Default(),
+	)
+	if err != nil {
+		cancelWorkers()
+		return fmt.Errorf("build reputation v2 rebuild worker: %w", err)
+	}
+	runWorker(workerCtx, &wg, cfg.ReputationWorkerInterval, "reputation-v2", reputationV2.RunOnce)
+	runWorker(workerCtx, &wg, cfg.RewardWorkerInterval, "reward", rewardWorker.RunOnce)
 	if evaluationWorker != nil {
 		runWorker(workerCtx, &wg, cfg.EvaluationWorkerInterval, "evaluation", evaluationWorker.RunOnce)
 	}
@@ -598,6 +679,39 @@ func adapterHandler(webEnabled, mcpEnabled bool, web, mcp http.Handler) http.Han
 	return mux
 }
 
+// buildRewardRuntime 组装奖励账本：fake 结算提供方、应用服务与后台 worker。
+//
+// 决策签名密钥复用 CURSOR_SECRET（已强制 ≥32 字节）：第一版签名只用于
+// 内部可验证性，换成 JWS/COSE 时只需替换 Signer 实现。
+func buildRewardRuntime(cfg config.Config, pool *pgxpool.Pool) (*rewardapp.Service, *rewardworker.Worker, error) {
+	allowlist, err := rewarddomain.ParseCurrencyAllowlist(cfg.RewardCurrencyAllowlist)
+	if err != nil {
+		return nil, nil, err
+	}
+	signer, err := rewarddomain.NewHMACSigner([]byte(cfg.CursorSecret))
+	if err != nil {
+		return nil, nil, err
+	}
+	store := rewardpostgres.NewStore(pool)
+	service, err := rewardapp.NewService(rewardapp.Options{
+		Store:                  store,
+		Provider:               settlementfake.New(settlementfake.Options{}),
+		Evidence:               rewardpostgres.NewEvidenceSource(pool),
+		Signer:                 signer,
+		AlgorithmVersion:       rewarddomain.DefaultAlgorithmVersion,
+		CurrencyAllowlist:      allowlist,
+		DefaultChallengePeriod: cfg.RewardDefaultChallengePeriod,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	worker, err := rewardworker.NewWorker(service, store, rewardworker.Options{Logger: slog.Default()})
+	if err != nil {
+		return nil, nil, err
+	}
+	return service, worker, nil
+}
+
 func runWorker(ctx context.Context, wg *sync.WaitGroup, interval time.Duration, name string, fn func(context.Context) error) {
 	wg.Add(1)
 	go func() {
@@ -724,6 +838,43 @@ type gitRuntime struct {
 	gitProxy           http.Handler
 }
 
+func newCriterionRecorder(pool *pgxpool.Pool) (*contributionapp.CriterionRecorder, error) {
+	recorder, err := contributionapp.NewCriterionRecorder(
+		contributionpostgres.NewCriterionRepository(pool),
+		contributionapp.CriterionRecorderOptions{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build criterion recorder: %w", err)
+	}
+	return recorder, nil
+}
+
+// buildCriterionSink 把验证作业的终态接到 criterion 账本上。公共任务规格里
+// 绑定了已知验证步骤的验收标准会在验证结束后落下逐条事实。
+func buildCriterionSink(pool *pgxpool.Pool) (gitapp.CriterionSink, error) {
+	recorder, err := newCriterionRecorder(pool)
+	if err != nil {
+		return nil, err
+	}
+	validationRecorder, err := contributionapp.NewValidationCriterionRecorder(
+		recorder,
+		criteria.NewProjectionCriteriaSource(pool),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build validation criterion recorder: %w", err)
+	}
+	return criteria.NewValidationSink(validationRecorder), nil
+}
+
+// buildReviewCriterionSink 把评审人的逐条验收结论接到同一个 criterion 账本。
+func buildReviewCriterionSink(pool *pgxpool.Pool) (reviewapp.CriterionSink, error) {
+	recorder, err := newCriterionRecorder(pool)
+	if err != nil {
+		return nil, err
+	}
+	return criteria.NewReviewSink(recorder, criteria.NewProjectionCriteriaSource(pool)), nil
+}
+
 func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application.Service, participationAuthorizer gitapp.ParticipationAuthorizer) (*gitRuntime, gitapp.GitHubAppManager, *gitapp.RepositoryOnboardingService, error) {
 	gitStore := gitpostgres.NewStore(pool)
 	gitAppRepo := gitpostgres.NewGitHubAppRepository(pool)
@@ -820,6 +971,10 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		return nil, nil, nil, fmt.Errorf("build validation workspace factory: %w", err)
 	}
 	runner := validation.NewRunner(validation.DefaultRegistry(), workspaceFactory, validation.NewContainerExecutor(cfg.ValidationSandboxImage))
+	criterionSink, err := buildCriterionSink(pool)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	validationWorker := gitworker.NewValidationWorker(
 		gitStore,
 		"validation-worker",
@@ -827,6 +982,7 @@ func buildGitRuntime(cfg config.Config, pool *pgxpool.Pool, service *application
 		cfg.ValidationMaxAttempts,
 		runner,
 		notifier,
+		gitworker.WithCriterionSink(criterionSink),
 	)
 
 	return &gitRuntime{

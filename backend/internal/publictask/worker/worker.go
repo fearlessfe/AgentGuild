@@ -214,7 +214,9 @@ func buildProjectionWithAnalysis(candidate issueTask, baseCommit string, now tim
 		ID: "issue-resolution", Statement: "原始 GitHub Issue 描述的问题得到修复并提供验证证据",
 		Critical: true, VerifierKind: "manual", ExpectedResult: "维护者确认修复有效",
 	}}
+	difficultyClass := publictaskdomain.DifficultyStandard
 	if analyzed != nil {
+		difficultyClass = analyzed.DifficultyClassOrDefault()
 		if analyzed.Title != "" {
 			title = analyzed.Title
 		}
@@ -260,8 +262,9 @@ func buildProjectionWithAnalysis(candidate issueTask, baseCommit string, now tim
 			Impact: impact, ProposedSolution: proposedSolution,
 			ImplementationSteps: steps, Constraints: constraints,
 			NonGoals: nonGoals, Risks: risks, AcceptanceCriteria: acceptanceCriteria,
-			QualityLevel: publictaskdomain.QualityStandard,
-			PublishedAt:  now,
+			QualityLevel:    publictaskdomain.QualityStandard,
+			DifficultyClass: difficultyClass,
+			PublishedAt:     now,
 		},
 		Checks: publictaskdomain.PublicationChecks{
 			QualityGatePassed: true, VisibilityAllowed: true,

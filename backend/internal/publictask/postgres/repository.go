@@ -13,9 +13,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Repository struct{ pool *pgxpool.Pool }
+type Repository struct {
+	pool *pgxpool.Pool
+	// claimParticipants 在 Claim 的同一事务里被顺序调用，见 claim_participant.go。
+	claimParticipants []ClaimParticipant
+}
 
-func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
+func NewRepository(pool *pgxpool.Pool, options ...Option) *Repository {
+	repository := &Repository{pool: pool}
+	for _, option := range options {
+		option(repository)
+	}
+	return repository
+}
 
 func (r *Repository) Insert(ctx context.Context, p *domain.Projection) error {
 	if p == nil || p.Status != domain.StatusPublished {
@@ -31,14 +41,15 @@ func (r *Repository) Insert(ctx context.Context, p *domain.Projection) error {
 			canonical_repository, source_issue_url, issue_revision, base_commit,
 			title, summary, problem_diagnosis, impact, proposed_solution,
 			implementation_steps, constraints, non_goals, risks,
-			acceptance_criteria, evidence_refs, quality_level, status, published_at
+			acceptance_criteria, evidence_refs, quality_level, difficulty_class,
+			spec_hash, status, published_at
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
 		)`, p.ID, p.ResourceTenantID, p.TaskID, p.TaskSpecificationVersionID,
 		p.CanonicalRepository, p.SourceIssueURL, p.IssueRevision, p.BaseCommit,
 		p.Title, p.Summary, p.ProblemDiagnosis, p.Impact, p.ProposedSolution,
 		steps, constraints, nonGoals, risks, criteria, evidence,
-		p.QualityLevel, p.Status, p.PublishedAt)
+		p.QualityLevel, p.DifficultyClass, p.SpecHash, p.Status, p.PublishedAt)
 	return writeError(err)
 }
 
@@ -58,15 +69,16 @@ func (r *Repository) InsertIfAbsent(ctx context.Context, p *domain.Projection) (
 			canonical_repository, source_issue_url, issue_revision, base_commit,
 			title, summary, problem_diagnosis, impact, proposed_solution,
 			implementation_steps, constraints, non_goals, risks,
-			acceptance_criteria, evidence_refs, quality_level, status, published_at
+			acceptance_criteria, evidence_refs, quality_level, difficulty_class,
+			spec_hash, status, published_at
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
 		) ON CONFLICT (resource_tenant_id, task_id) DO NOTHING`,
 		p.ID, p.ResourceTenantID, p.TaskID, p.TaskSpecificationVersionID,
 		p.CanonicalRepository, p.SourceIssueURL, p.IssueRevision, p.BaseCommit,
 		p.Title, p.Summary, p.ProblemDiagnosis, p.Impact, p.ProposedSolution,
 		steps, constraints, nonGoals, risks, criteria, evidence,
-		p.QualityLevel, p.Status, p.PublishedAt)
+		p.QualityLevel, p.DifficultyClass, p.SpecHash, p.Status, p.PublishedAt)
 	if err != nil {
 		return false, writeError(err)
 	}
@@ -188,7 +200,8 @@ const selectProjection = `
 	       canonical_repository, source_issue_url, issue_revision, base_commit,
 	       title, summary, problem_diagnosis, impact, proposed_solution,
 	       implementation_steps, constraints, non_goals, risks,
-	       acceptance_criteria, evidence_refs, quality_level, status, published_at,
+	       acceptance_criteria, evidence_refs, quality_level, difficulty_class,
+	       spec_hash, status, published_at,
 	       revoked_at, COALESCE(revocation_actor, ''), COALESCE(revocation_reason, '')
 	FROM public_task_projections`
 
@@ -202,7 +215,8 @@ func scanProjection(row scanner) (*domain.Projection, error) {
 		&p.CanonicalRepository, &p.SourceIssueURL, &p.IssueRevision, &p.BaseCommit,
 		&p.Title, &p.Summary, &p.ProblemDiagnosis, &p.Impact, &p.ProposedSolution,
 		&steps, &constraints, &nonGoals, &risks, &criteria, &evidence,
-		&p.QualityLevel, &p.Status, &p.PublishedAt, &p.RevokedAt,
+		&p.QualityLevel, &p.DifficultyClass, &p.SpecHash,
+		&p.Status, &p.PublishedAt, &p.RevokedAt,
 		&p.RevocationActor, &p.RevocationReason,
 	)
 	if err != nil {

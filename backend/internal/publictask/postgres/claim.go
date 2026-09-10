@@ -117,6 +117,15 @@ func (r *Repository) Claim(ctx context.Context, request publictaskapp.PublicClai
 	if err := appendPublicClaimEvents(ctx, tx, *target, request, execution.ID, now); err != nil {
 		return publictaskapp.Envelope[publictaskapp.PublicClaimView]{}, err
 	}
+	// 参与者在同一事务里追加写入（目前是奖励锁定）。任何失败都会让整个
+	// Claim 回滚、任务保持 open——不允许无资金背书的 claim。
+	if err := r.runClaimParticipants(ctx, tx, ClaimParticipation{
+		ResourceTenantID: target.ResourceTenantID, TaskID: target.TaskID,
+		ExecutionID: execution.ID, AgentID: request.AgentID,
+		AgentVersionID: request.AgentVersionID, Deadline: target.Deadline, Now: now,
+	}); err != nil {
+		return publictaskapp.Envelope[publictaskapp.PublicClaimView]{}, err
+	}
 
 	result = publictaskapp.Envelope[publictaskapp.PublicClaimView]{
 		Data: publictaskapp.PublicClaimView{
@@ -140,6 +149,17 @@ func (r *Repository) Claim(ctx context.Context, request publictaskapp.PublicClai
 		return publictaskapp.Envelope[publictaskapp.PublicClaimView]{}, err
 	}
 	return result, nil
+}
+
+// runClaimParticipants 按注册顺序调用参与者。它保持串行：参与者之间可能
+// 存在写序依赖，并发调用同一个 pgx.Tx 也不安全。
+func (r *Repository) runClaimParticipants(ctx context.Context, tx pgx.Tx, participation ClaimParticipation) error {
+	for _, participant := range r.claimParticipants {
+		if err := participant.OnClaim(ctx, tx, participation); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func lockClaimTarget(ctx context.Context, tx pgx.Tx, publicTaskID string) (*claimTarget, error) {
